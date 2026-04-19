@@ -3,7 +3,15 @@ const path = require("path");
 const dotenv = require("dotenv");
 
 const app = require("./src/app");
-const { connectToDatabase, mongoose } = require("./src/config/db");
+const db = require("./src/config/db");
+
+const connectToDatabase =
+  db.connectToDatabase ||
+  db.testConnection ||
+  db.connect ||
+  null;
+
+const mongoose = db.mongoose || null;
 
 function loadEnvironment() {
   const envPath = path.join(__dirname, ".env");
@@ -38,6 +46,9 @@ function validateRequiredEnv() {
 async function start() {
   loadEnvironment();
   validateRequiredEnv();
+  if (typeof connectToDatabase !== "function") {
+    throw new Error("Database connector is missing. Expected connectToDatabase() or testConnection() export from src/config/db.js");
+  }
   await connectToDatabase();
   const port = Number(process.env.PORT || 4000);
 
@@ -49,7 +60,9 @@ async function start() {
   const shutdown = async signal => {
     console.log(`${signal} received. Shutting down gracefully...`);
     server.close(async () => {
-      await mongoose.connection.close();
+      if (mongoose?.connection?.close) {
+        await mongoose.connection.close();
+      }
       process.exit(0);
     });
   };
