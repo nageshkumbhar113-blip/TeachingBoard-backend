@@ -6,3 +6,5 @@ yarn-error.log*
 pnpm-debug.log*
 dist/
 coverage/
+data/
+db/*.json
