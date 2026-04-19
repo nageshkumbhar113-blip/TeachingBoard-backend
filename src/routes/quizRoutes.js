@@ -1,10 +1,15 @@
 const express = require("express");
-
-const { getQuiz, submitQuiz } = require("../controllers/quizController");
+const {
+  createQuiz,
+  getQuizById,
+  getQuizzes
+} = require("../controllers/quizController");
+const { attachUserIfPresent, requireAdmin } = require("../middleware/auth");
 
 const router = express.Router();
 
-router.get("/quiz", getQuiz);
-router.post("/submit", submitQuiz);
+router.get("/", attachUserIfPresent, getQuizzes);
+router.get("/:id", attachUserIfPresent, getQuizById);
+router.post("/", requireAdmin, createQuiz);
 
 module.exports = router;

@@ -3,7 +3,13 @@ const crypto = require("crypto");
 const TOKEN_TTL_SECONDS = 60 * 60 * 12;
 
 function getSecret() {
-  return process.env.AUTH_SECRET || "teachingboard-dev-secret";
+  const secret = process.env.JWT_SECRET || process.env.AUTH_SECRET;
+
+  if (!secret) {
+    throw new Error("JWT_SECRET is required");
+  }
+
+  return secret;
 }
 
 function toBase64Url(value) {

@@ -1,129 +1,88 @@
-const { pool, query } = require("../config/db");
+const Quiz = require("../models/Quiz");
 const asyncHandler = require("../utils/asyncHandler");
-const { decodeTokenFromHeader } = require("../utils/token");
+const AppError = require("../utils/AppError");
+const { QUIZ_STATUSES, buildQuizDocument, serializeQuiz } = require("../utils/quizPayload");
 
-function normalizeSubmittedAnswer(answer) {
-  const value = String(answer || "").trim().toLowerCase();
-  const mapping = {
-    "1": "option1",
-    "2": "option2",
-    "3": "option3",
-    "4": "option4",
-    option1: "option1",
-    option2: "option2",
-    option3: "option3",
-    option4: "option4"
-  };
-
-  return mapping[value] || "";
+function isAdminRequest(req) {
+  return req.user?.role === "admin";
 }
 
-exports.getQuiz = asyncHandler(async (req, res) => {
-  const limit = Number(req.query.limit || 10);
-  const safeLimit = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : 10;
+function parseStatusFilter(rawStatus) {
+  if (rawStatus === undefined) {
+    return null;
+  }
 
-  const rows = await query(
-    `SELECT id, question, option1, option2, option3, option4
-     FROM questions
-     ORDER BY RAND()
-     LIMIT ?`,
-    [safeLimit]
-  );
+  const status = String(rawStatus).trim().toLowerCase();
 
-  res.json({
+  if (!QUIZ_STATUSES.has(status)) {
+    throw new AppError('status must be either "draft" or "published"', 400);
+  }
+
+  return status;
+}
+
+exports.createQuiz = asyncHandler(async (req, res) => {
+  const existingQuiz = req.body.quiz_id
+    ? await Quiz.findOne({ quiz_id: String(req.body.quiz_id).trim() })
+    : null;
+
+  const quizPayload = buildQuizDocument(req.body, existingQuiz);
+  let quiz;
+
+  if (existingQuiz) {
+    Object.assign(existingQuiz, quizPayload);
+    quiz = await existingQuiz.save();
+  } else {
+    quiz = await Quiz.create(quizPayload);
+  }
+
+  res.status(existingQuiz ? 200 : 201).json({
     success: true,
-    count: rows.length,
-    data: rows
+    data: serializeQuiz(quiz, { includeAnswers: true })
   });
 });
 
-exports.submitQuiz = asyncHandler(async (req, res) => {
-  const rawAnswers = Array.isArray(req.body.answers) ? req.body.answers : [];
-  const tokenPayload = decodeTokenFromHeader(req.headers.authorization);
-  const fallbackName = tokenPayload && tokenPayload.role === "student" ? tokenPayload.name : "";
-  const studentName = String(req.body.studentName || fallbackName || "").trim();
+exports.getQuizzes = asyncHandler(async (req, res) => {
+  const statusFilter = parseStatusFilter(req.query.status);
+  const isAdmin = isAdminRequest(req);
+  const filter = {};
 
-  if (!studentName) {
-    return res.status(400).json({
-      success: false,
-      message: "studentName is required"
-    });
+  if (statusFilter) {
+    filter.status = statusFilter;
+  } else if (!isAdmin) {
+    filter.status = "published";
   }
 
-  if (!rawAnswers.length) {
-    return res.status(400).json({
-      success: false,
-      message: "answers must be a non-empty array"
-    });
-  }
+  const quizzes = await Quiz.find(filter).sort({ updated_at: -1 });
 
-  const questionIds = rawAnswers
-    .map((item) => Number(item.questionId))
-    .filter((id) => Number.isInteger(id) && id > 0);
-
-  if (!questionIds.length) {
-    return res.status(400).json({
-      success: false,
-      message: "Each answer must contain a valid questionId"
-    });
-  }
-
-  const placeholders = questionIds.map(() => "?").join(", ");
-  const questions = await query(
-    `SELECT id, question, answer
-     FROM questions
-     WHERE id IN (${placeholders})`,
-    questionIds
-  );
-
-  const answerMap = new Map(questions.map((question) => [question.id, question]));
-
-  const evaluatedAnswers = rawAnswers
-    .map((item) => {
-      const questionId = Number(item.questionId);
-      const question = answerMap.get(questionId);
-
-      if (!question) {
-        return null;
-      }
-
-      const submittedAnswer = normalizeSubmittedAnswer(item.answer);
-      const isCorrect = submittedAnswer === question.answer;
-
-      return {
-        questionId,
-        submittedAnswer,
-        correctAnswer: question.answer,
-        isCorrect
-      };
-    })
-    .filter(Boolean);
-
-  const total = evaluatedAnswers.length;
-
-  if (!total) {
-    return res.status(400).json({
-      success: false,
-      message: "Submitted question ids were not found"
-    });
-  }
-
-  const score = evaluatedAnswers.filter((item) => item.isCorrect).length;
-
-  const [result] = await pool.execute(
-    "INSERT INTO results (student_name, score, total) VALUES (?, ?, ?)",
-    [studentName, score, total]
-  );
-
-  res.status(201).json({
+  res.json({
     success: true,
-    message: "Quiz submitted successfully",
-    data: {
-      resultId: result.insertId,
-      studentName,
-      score,
-      total,
-      answers: evaluatedAnswers
-    }
+    count: quizzes.length,
+    data: quizzes.map(quiz =>
+      serializeQuiz(quiz, {
+        // Student clients cache full quizzes for offline play and local scoring.
+        includeAnswers: true
+      })
+    )
+  });
+});
+
+exports.getQuizById = asyncHandler(async (req, res) => {
+  const isAdmin = isAdminRequest(req);
+  const quiz = await Quiz.findOne({ quiz_id: req.params.id });
+
+  if (!quiz) {
+    throw new AppError("Quiz not found", 404);
+  }
+
+  if (!isAdmin && quiz.status !== "published") {
+    throw new AppError("Quiz not found", 404);
+  }
+
+  res.json({
+    success: true,
+    data: serializeQuiz(quiz, {
+      includeAnswers: true
+    })
   });
 });

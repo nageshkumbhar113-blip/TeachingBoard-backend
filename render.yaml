@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: teachingboard-backend
+    runtime: node
+    plan: starter
+    rootDir: TeachingBoard-backend
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false

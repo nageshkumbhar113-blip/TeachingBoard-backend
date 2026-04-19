@@ -6,11 +6,11 @@ const {
   getQuestions,
   updateQuestion
 } = require("../controllers/questionController");
-const { requireAdmin } = require("../middleware/auth");
+const { requireAdmin, attachUserIfPresent } = require("../middleware/auth");
 
 const router = express.Router();
 
-router.get("/", requireAdmin, getQuestions);
+router.get("/", attachUserIfPresent, getQuestions);
 router.post("/", requireAdmin, createQuestion);
 router.put("/:id", requireAdmin, updateQuestion);
 router.delete("/:id", requireAdmin, deleteQuestion);

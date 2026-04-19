@@ -1,33 +1,33 @@
-const mysql = require("mysql2/promise");
+const mongoose = require("mongoose");
 
-const pool = mysql.createPool({
-  host: process.env.DB_HOST || "localhost",
-  port: Number(process.env.DB_PORT || 3306),
-  user: process.env.DB_USER || "root",
-  password: process.env.DB_PASSWORD || "",
-  database: process.env.DB_NAME || "teachingboard",
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-});
+let cachedConnection = null;
 
-async function query(sql, params = []) {
-  const [rows] = await pool.execute(sql, params);
-  return rows;
-}
+async function connectToDatabase() {
+  if (cachedConnection) {
+    return cachedConnection;
+  }
 
-async function testConnection() {
-  const connection = await pool.getConnection();
+  const mongoUri = process.env.MONGODB_URI;
+
+  if (!mongoUri) {
+    throw new Error("MONGODB_URI is required");
+  }
+
+  cachedConnection = mongoose.connect(mongoUri, {
+    serverSelectionTimeoutMS: 5000
+  });
 
   try {
-    await connection.ping();
-  } finally {
-    connection.release();
+    await cachedConnection;
+    console.log(`MongoDB connected: ${mongoose.connection.host}/${mongoose.connection.name}`);
+    return cachedConnection;
+  } catch (error) {
+    cachedConnection = null;
+    throw error;
   }
 }
 
 module.exports = {
-  pool,
-  query,
-  testConnection
+  connectToDatabase,
+  mongoose
 };

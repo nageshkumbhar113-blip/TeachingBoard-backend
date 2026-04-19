@@ -1,164 +1,57 @@
-const { query } = require("../config/db");
-const asyncHandler = require("../utils/asyncHandler");
+const store        = require('../store');
+const asyncHandler = require('../utils/asyncHandler');
 
 function normalizeAnswer(answer) {
-  const value = String(answer || "").trim().toLowerCase();
-  const mapping = {
-    "1": "option1",
-    "2": "option2",
-    "3": "option3",
-    "4": "option4",
-    option1: "option1",
-    option2: "option2",
-    option3: "option3",
-    option4: "option4"
-  };
-
-  return mapping[value] || "";
+  const v = String(answer || '').trim().toLowerCase();
+  const map = { '1': 'option1', '2': 'option2', '3': 'option3', '4': 'option4',
+    option1: 'option1', option2: 'option2', option3: 'option3', option4: 'option4' };
+  return map[v] || '';
 }
 
-function validateQuestionPayload(body) {
-  const payload = {
-    question: String(body.question || "").trim(),
-    option1: String(body.option1 || "").trim(),
-    option2: String(body.option2 || "").trim(),
-    option3: String(body.option3 || "").trim(),
-    option4: String(body.option4 || "").trim(),
-    answer: normalizeAnswer(body.answer)
+function validatePayload(body) {
+  const p = {
+    question: String(body.question || '').trim(),
+    option1 : String(body.option1  || '').trim(),
+    option2 : String(body.option2  || '').trim(),
+    option3 : String(body.option3  || '').trim(),
+    option4 : String(body.option4  || '').trim(),
+    answer  : normalizeAnswer(body.answer),
   };
-
-  if (!payload.question || !payload.option1 || !payload.option2 || !payload.option3 || !payload.option4) {
-    return { error: "question, option1, option2, option3, and option4 are required" };
+  if (!p.question || !p.option1 || !p.option2 || !p.option3 || !p.option4) {
+    return { error: 'question, option1–4 are required' };
   }
-
-  if (!payload.answer) {
-    return { error: "answer must be one of option1, option2, option3, option4 or 1-4" };
-  }
-
-  return { payload };
+  if (!p.answer) return { error: 'answer must be option1–4 or 1–4' };
+  return { payload: p };
 }
 
-exports.getQuestions = asyncHandler(async (req, res) => {
-  const rows = await query(
-    `SELECT id, question, option1, option2, option3, option4, answer
-     FROM questions
-     ORDER BY id DESC`
-  );
-
-  res.json({
-    success: true,
-    count: rows.length,
-    data: rows
-  });
+exports.getQuestions = asyncHandler(async (_req, res) => {
+  const rows = store.getAll('questions');
+  res.json({ success: true, count: rows.length, data: rows });
 });
 
 exports.createQuestion = asyncHandler(async (req, res) => {
-  const { error, payload } = validateQuestionPayload(req.body);
+  const { error, payload } = validatePayload(req.body);
+  if (error) return res.status(400).json({ success: false, message: error });
 
-  if (error) {
-    return res.status(400).json({
-      success: false,
-      message: error
-    });
-  }
-
-  const result = await query(
-    `INSERT INTO questions (question, option1, option2, option3, option4, answer)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [
-      payload.question,
-      payload.option1,
-      payload.option2,
-      payload.option3,
-      payload.option4,
-      payload.answer
-    ]
-  );
-
-  res.status(201).json({
-    success: true,
-    message: "Question created successfully",
-    data: {
-      id: result.insertId,
-      ...payload
-    }
-  });
+  const record = store.insert('questions', { id: `q-${Date.now()}`, ...payload });
+  res.status(201).json({ success: true, message: 'Question created', data: record });
 });
 
 exports.updateQuestion = asyncHandler(async (req, res) => {
-  const questionId = Number(req.params.id);
-
-  if (!Number.isInteger(questionId) || questionId <= 0) {
-    return res.status(400).json({
-      success: false,
-      message: "Valid question id is required"
-    });
+  const id = req.params.id;
+  if (!store.getById('questions', id)) {
+    return res.status(404).json({ success: false, message: 'Question not found' });
   }
 
-  const existing = await query("SELECT id FROM questions WHERE id = ? LIMIT 1", [questionId]);
+  const { error, payload } = validatePayload(req.body);
+  if (error) return res.status(400).json({ success: false, message: error });
 
-  if (!existing.length) {
-    return res.status(404).json({
-      success: false,
-      message: "Question not found"
-    });
-  }
-
-  const { error, payload } = validateQuestionPayload(req.body);
-
-  if (error) {
-    return res.status(400).json({
-      success: false,
-      message: error
-    });
-  }
-
-  await query(
-    `UPDATE questions
-     SET question = ?, option1 = ?, option2 = ?, option3 = ?, option4 = ?, answer = ?
-     WHERE id = ?`,
-    [
-      payload.question,
-      payload.option1,
-      payload.option2,
-      payload.option3,
-      payload.option4,
-      payload.answer,
-      questionId
-    ]
-  );
-
-  res.json({
-    success: true,
-    message: "Question updated successfully",
-    data: {
-      id: questionId,
-      ...payload
-    }
-  });
+  const updated = store.update('questions', id, payload);
+  res.json({ success: true, message: 'Question updated', data: updated });
 });
 
 exports.deleteQuestion = asyncHandler(async (req, res) => {
-  const questionId = Number(req.params.id);
-
-  if (!Number.isInteger(questionId) || questionId <= 0) {
-    return res.status(400).json({
-      success: false,
-      message: "Valid question id is required"
-    });
-  }
-
-  const result = await query("DELETE FROM questions WHERE id = ?", [questionId]);
-
-  if (result.affectedRows === 0) {
-    return res.status(404).json({
-      success: false,
-      message: "Question not found"
-    });
-  }
-
-  res.json({
-    success: true,
-    message: "Question deleted successfully"
-  });
+  const removed = store.remove('questions', req.params.id);
+  if (!removed) return res.status(404).json({ success: false, message: 'Question not found' });
+  res.json({ success: true, message: 'Question deleted' });
 });

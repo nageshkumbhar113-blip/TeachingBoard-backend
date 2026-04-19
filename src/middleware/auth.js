@@ -1,48 +1,29 @@
-const { verifyToken } = require("../utils/token");
+const { decodeTokenFromHeader } = require('../utils/token');
 
-function getBearerToken(headerValue) {
-  if (!headerValue || !headerValue.startsWith("Bearer ")) {
-    return "";
+function attachUserIfPresent(req, _res, next) {
+  const payload = decodeTokenFromHeader(req.headers.authorization);
+  if (payload) {
+    req.user = payload;
   }
-
-  return headerValue.slice(7).trim();
+  next();
 }
 
 function requireAuth(req, res, next) {
-  const token = getBearerToken(req.headers.authorization || "");
-
-  if (!token) {
-    return res.status(401).json({
-      success: false,
-      message: "Authorization token is required"
-    });
+  const payload = decodeTokenFromHeader(req.headers.authorization);
+  if (!payload) {
+    return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
-
-  try {
-    req.user = verifyToken(token);
-    next();
-  } catch (error) {
-    return res.status(401).json({
-      success: false,
-      message: error.message
-    });
-  }
+  req.user = payload;
+  next();
 }
 
 function requireAdmin(req, res, next) {
-  requireAuth(req, res, () => {
-    if (req.user.role !== "admin") {
-      return res.status(403).json({
-        success: false,
-        message: "Admin access is required"
-      });
-    }
-
-    next();
-  });
+  const payload = decodeTokenFromHeader(req.headers.authorization);
+  if (!payload || payload.role !== 'admin') {
+    return res.status(403).json({ success: false, message: 'Admin access required' });
+  }
+  req.user = payload;
+  next();
 }
 
-module.exports = {
-  requireAuth,
-  requireAdmin
-};
+module.exports = { attachUserIfPresent, requireAuth, requireAdmin };
