@@ -1,20 +1,78 @@
-// TeachingBoard backend entrypoint.
-require("dotenv").config();
+const fs = require("fs");
+const path = require("path");
+const dotenv = require("dotenv");
 
 const app = require("./src/app");
-const { testConnection } = require("./src/config/db");
+const { connectToDatabase, mongoose } = require("./src/config/db");
 
-const PORT = Number(process.env.PORT || 4000);
+function loadEnvironment() {
+  const envPath = path.join(__dirname, ".env");
 
-async function bootstrap() {
-  await testConnection();
+  if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath });
+    console.log(`Loaded environment from ${envPath}`);
+    return;
+  }
 
-  app.listen(PORT, () => {
-    console.log(`TeachingBoard backend running on http://localhost:${PORT}`);
+  console.log("No local .env file found. Using process environment variables.");
+}
+
+function validateRequiredEnv() {
+  const requiredKeys = ["MONGODB_URI", "JWT_SECRET"];
+  const missingKeys = requiredKeys.filter(key => !String(process.env[key] || "").trim());
+
+  console.log("Startup environment check:", {
+    NODE_ENV: process.env.NODE_ENV || "development",
+    PORT: process.env.PORT || "4000",
+    hasMONGODB_URI: !!String(process.env.MONGODB_URI || "").trim(),
+    hasJWT_SECRET: !!String(process.env.JWT_SECRET || "").trim(),
+    hasCORS_ORIGIN: !!String(process.env.CORS_ORIGIN || "").trim(),
+    onRender: !!String(process.env.RENDER || process.env.RENDER_EXTERNAL_URL || "").trim()
+  });
+
+  if (missingKeys.length) {
+    throw new Error(`Missing required environment variables: ${missingKeys.join(", ")}`);
+  }
+}
+
+async function start() {
+  loadEnvironment();
+  validateRequiredEnv();
+  await connectToDatabase();
+  const port = Number(process.env.PORT || 4000);
+
+  const server = app.listen(port, "0.0.0.0", () => {
+    const publicUrl = process.env.RENDER_EXTERNAL_URL || `http://0.0.0.0:${port}`;
+    console.log(`TeachingBoard Quiz API running on ${publicUrl}`);
+  });
+
+  const shutdown = async signal => {
+    console.log(`${signal} received. Shutting down gracefully...`);
+    server.close(async () => {
+      await mongoose.connection.close();
+      process.exit(0);
+    });
+  };
+
+  process.on("SIGINT", () => {
+    void shutdown("SIGINT");
+  });
+
+  process.on("SIGTERM", () => {
+    void shutdown("SIGTERM");
   });
 }
 
-bootstrap().catch((error) => {
-  console.error("Failed to start TeachingBoard backend:", error.message);
-  process.exit(1);
-});
+if (require.main === module) {
+  start().catch(error => {
+    console.error("Startup failed:", {
+      message: error?.message || "Unknown startup error",
+      name: error?.name || "Error",
+      code: error?.code || null,
+      stack: error?.stack || null
+    });
+    process.exit(1);
+  });
+}
+
+module.exports = { start };
