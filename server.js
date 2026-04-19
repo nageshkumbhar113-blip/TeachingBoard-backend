@@ -43,6 +43,38 @@ function validateRequiredEnv() {
   }
 }
 
+function serializeError(error) {
+  if (!error) {
+    return null;
+  }
+
+  const serialized = {
+    message: error.message || "Unknown startup error",
+    name: error.name || "Error",
+    code: error.code || null,
+    errno: error.errno || null,
+    syscall: error.syscall || null,
+    hostname: error.hostname || null,
+    address: error.address || null,
+    port: error.port || null,
+    stack: error.stack || null
+  };
+
+  if (error.cause) {
+    serialized.cause = serializeError(error.cause);
+  }
+
+  if (Array.isArray(error.errors) && error.errors.length) {
+    serialized.errors = error.errors.map(serializeError);
+  }
+
+  if (error.reason) {
+    serialized.reason = serializeError(error.reason);
+  }
+
+  return serialized;
+}
+
 async function start() {
   loadEnvironment();
   validateRequiredEnv();
@@ -78,12 +110,7 @@ async function start() {
 
 if (require.main === module) {
   start().catch(error => {
-    console.error("Startup failed:", {
-      message: error?.message || "Unknown startup error",
-      name: error?.name || "Error",
-      code: error?.code || null,
-      stack: error?.stack || null
-    });
+    console.error("Startup failed:", serializeError(error));
     process.exit(1);
   });
 }
