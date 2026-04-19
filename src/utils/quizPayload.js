@@ -91,10 +91,10 @@ function buildQuizDocument(payload, existingQuiz = null) {
   return {
     quiz_id:
       normalizeString(payload.quiz_id, "quiz_id", { required: false }) || `quiz_${randomUUID()}`,
-    title: normalizeString(payload.title, "title"),
-    subject: normalizeString(payload.subject, "subject"),
-    chapter: normalizeString(payload.chapter, "chapter"),
-    batch: normalizeString(payload.batch, "batch"),
+    title:   normalizeString(payload.title,   "title"),
+    subject: normalizeString(payload.subject, "subject", { required: false }),
+    chapter: normalizeString(payload.chapter, "chapter", { required: false }),
+    batch:   normalizeString(payload.batch,   "batch",   { required: false }),
     status,
     timer_mode: normalizeString(payload.timer_mode || "none", "timer_mode"),
     timer_value: timerValue,

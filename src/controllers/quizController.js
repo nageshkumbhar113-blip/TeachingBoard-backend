@@ -7,7 +7,7 @@ function isAdminRequest(req) {
   return req.user?.role === "admin";
 }
 
-function parseStatusFilter(rawStatus) {
+function parseStatusFilter(rawStatus, isAdmin) {
   if (rawStatus === undefined) {
     return null;
   }
@@ -16,6 +16,11 @@ function parseStatusFilter(rawStatus) {
 
   if (!QUIZ_STATUSES.has(status)) {
     throw new AppError('status must be either "draft" or "published"', 400);
+  }
+
+  // Non-admins must not be able to fetch draft quizzes
+  if (status === 'draft' && !isAdmin) {
+    throw new AppError('Quiz not found', 404);
   }
 
   return status;
@@ -43,8 +48,8 @@ exports.createQuiz = asyncHandler(async (req, res) => {
 });
 
 exports.getQuizzes = asyncHandler(async (req, res) => {
-  const statusFilter = parseStatusFilter(req.query.status);
   const isAdmin = isAdminRequest(req);
+  const statusFilter = parseStatusFilter(req.query.status, isAdmin);
   const filter = {};
 
   if (statusFilter) {

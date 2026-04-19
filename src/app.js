@@ -10,67 +10,59 @@ const attemptRoutes  = require("./routes/attemptRoutes");
 const lessonRoutes   = require("./routes/lessonRoutes");
 const questionRoutes = require("./routes/questionRoutes");
 const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
+const { createRateLimiter }             = require("./middleware/rateLimiter");
 
 const app = express();
 
-const configuredOrigins = String(process.env.CORS_ORIGIN || "")
-  .split(",")
-  .map(origin => origin.trim())
-  .filter(Boolean);
-
-function isLocalOrigin(origin) {
-  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
-}
-
-function isAllowedOrigin(origin) {
-  if (!origin) {
-    return true;
-  }
-
-  if (isLocalOrigin(origin)) {
-    return true;
-  }
-
-  if (!configuredOrigins.length) {
-    return true;
-  }
-
-  return configuredOrigins.includes(origin);
-}
+// ── CORS ────────────────────────────────────────────────────
+// Set CORS_ORIGIN in env: comma-separated list of allowed origins.
+// e.g. CORS_ORIGIN=https://teachingboard-frontend.vercel.app,https://teachingboard-backend.onrender.com
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(",").map(o => o.trim()).filter(Boolean)
+  : null;
 
 app.use(cors({
-  origin(origin, callback) {
-    if (isAllowedOrigin(origin)) {
-      callback(null, true);
-      return;
-    }
-
-    callback(Object.assign(new Error(`CORS blocked for origin: ${origin}`), {
-      statusCode: 403
-    }));
-  },
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Authorization", "Content-Type"]
+  origin: allowedOrigins
+    ? (origin, cb) => {
+        // Allow same-origin requests (origin undefined) and listed origins
+        if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+        cb(new Error(`CORS: origin ${origin} not allowed`));
+      }
+    : true,
+  credentials: true,
 }));
+
+// ── Body parsing ────────────────────────────────────────────
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: false }));
 
-// Serve the frontend from the project root
+// ── No-cache for service worker and env config ───────────────
+app.use((req, res, next) => {
+  if (/\/(sw\.js|env\.js)(\?.*)?$/.test(req.path)) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+  next();
+});
+
+// ── Static frontend ─────────────────────────────────────────
 app.use(express.static(path.join(__dirname, "../..")));
 
-app.get("/ping", (_req, res) => res.json({ message: "pong" }));
-app.get("/api/health", (_req, res) => {
-  res.json({
-    ok: true,
-    service: "teachingboard-backend",
-    uptime: Math.round(process.uptime()),
-    timestamp: new Date().toISOString()
-  });
-});
-app.get("/favicon.ico", (_req, res) => res.status(204).end());
+// ── Utility endpoints ────────────────────────────────────────
+app.get("/ping",         (_req, res) => res.json({ message: "pong" }));
+app.get("/api/health",   (_req, res) => res.json({ status: "ok", ts: Date.now() }));
+app.get("/favicon.ico",  (_req, res) => res.status(204).end());
 
-// ── API routes ─────────────────────────────────────────────
-app.use("/api/auth",      authRoutes);
+// ── Rate limiting on auth ────────────────────────────────────
+const authLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,  // 15 minutes
+  max:      30,               // 30 login attempts per IP per window
+  message:  'Too many login attempts — please try again later',
+});
+
+// ── API routes ───────────────────────────────────────────────
+app.use("/api/auth",      authLimiter, authRoutes);
 app.use("/api/quizzes",   quizRoutes);
 app.use("/api/attempts",  attemptRoutes);
 app.use("/api/lessons",   lessonRoutes);

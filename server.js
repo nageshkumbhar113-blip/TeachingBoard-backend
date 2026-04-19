@@ -75,6 +75,25 @@ function serializeError(error) {
   return serialized;
 }
 
+async function seedAdmin() {
+  try {
+    const User = require("./src/models/User");
+    const existing = await User.findOne({ role: "admin" });
+    if (!existing) {
+      const pin = String(process.env.ADMIN_PIN || "1234").trim();
+      await User.create({
+        user_id:  "admin-1",
+        name:     "Admin",
+        role:     "admin",
+        pin_hash: User.hashPin(pin),
+      });
+      console.log("Admin user seeded (PIN from ADMIN_PIN env or default '1234')");
+    }
+  } catch (err) {
+    console.error("Admin seeding failed:", err.message);
+  }
+}
+
 async function start() {
   loadEnvironment();
   validateRequiredEnv();
@@ -82,6 +101,7 @@ async function start() {
     throw new Error("Database connector is missing. Expected connectToDatabase() or testConnection() export from src/config/db.js");
   }
   await connectToDatabase();
+  await seedAdmin();
   const port = Number(process.env.PORT || 4000);
 
   const server = app.listen(port, "0.0.0.0", () => {
