@@ -21,11 +21,15 @@ const allowedOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(",").map(o => o.trim()).filter(Boolean)
   : null;
 
+// Capacitor Android/iOS always sends https://localhost or capacitor://localhost
+const CAPACITOR_ORIGINS = ['https://localhost', 'http://localhost', 'capacitor://localhost'];
+
 app.use(cors({
   origin: allowedOrigins
     ? (origin, cb) => {
-        // Allow same-origin requests (origin undefined) and listed origins
-        if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+        if (!origin) return cb(null, true);
+        if (allowedOrigins.includes(origin)) return cb(null, true);
+        if (CAPACITOR_ORIGINS.some(o => origin === o || origin.startsWith(o + ':'))) return cb(null, true);
         cb(new Error(`CORS: origin ${origin} not allowed`));
       }
     : true,
