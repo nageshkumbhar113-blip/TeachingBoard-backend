@@ -91,3 +91,18 @@ exports.getQuizById = asyncHandler(async (req, res) => {
     })
   });
 });
+
+exports.deleteQuiz = asyncHandler(async (req, res) => {
+  const quiz = await Quiz.findOneAndDelete({ quiz_id: req.params.id });
+
+  if (!quiz) {
+    throw new AppError("Quiz not found", 404);
+  }
+
+  res.json({
+    success: true,
+    data: {
+      quiz_id: quiz.quiz_id
+    }
+  });
+});
