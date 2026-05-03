@@ -20,6 +20,69 @@ function normalizeString(value, fieldName, { required = true } = {}) {
   return normalized;
 }
 
+function normalizeUrl(value, fieldName) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  return normalizeString(value, fieldName);
+}
+
+function normalizeOptionImages(value, index) {
+  const fieldName = `questions[${index}].option_images`;
+
+  if (value === undefined || value === null || value === "") {
+    return { A: null, B: null, C: null, D: null };
+  }
+
+  if (Array.isArray(value)) {
+    return {
+      A: normalizeUrl(value[0], `${fieldName}[0]`),
+      B: normalizeUrl(value[1], `${fieldName}[1]`),
+      C: normalizeUrl(value[2], `${fieldName}[2]`),
+      D: normalizeUrl(value[3], `${fieldName}[3]`),
+    };
+  }
+
+  if (typeof value === "object") {
+    return {
+      A: normalizeUrl(value.A, `${fieldName}.A`),
+      B: normalizeUrl(value.B, `${fieldName}.B`),
+      C: normalizeUrl(value.C, `${fieldName}.C`),
+      D: normalizeUrl(value.D, `${fieldName}.D`),
+    };
+  }
+
+  throw new AppError(`${fieldName} must be an object or array`, 400);
+}
+
+function normalizeQuestionOptions(question, index) {
+  const fieldName = `questions[${index}].options`;
+
+  if (Array.isArray(question.options)) {
+    const values = question.options.map((option, optionIndex) =>
+      normalizeString(option, `${fieldName}[${optionIndex}]`, { required: false })
+    );
+
+    return {
+      A: values[0] || "",
+      B: values[1] || "",
+      C: values[2] || "",
+      D: values[3] || "",
+    };
+  }
+
+  if (question.options && typeof question.options === "object") {
+    return {
+      A: normalizeString(question.options.A, `${fieldName}.A`, { required: false }),
+      B: normalizeString(question.options.B, `${fieldName}.B`, { required: false }),
+      C: normalizeString(question.options.C, `${fieldName}.C`, { required: false }),
+      D: normalizeString(question.options.D, `${fieldName}.D`, { required: false }),
+    };
+  }
+
+  throw new AppError(`${fieldName} must be an object or array`, 400);
+}
+
 function normalizeQuestions(questions) {
   if (!Array.isArray(questions) || questions.length === 0) {
     throw new AppError("questions must be a non-empty array", 400);
@@ -30,27 +93,31 @@ function normalizeQuestions(questions) {
       throw new AppError(`questions[${index}] must be an object`, 400);
     }
 
-    const options = Array.isArray(question.options)
-      ? question.options.map((option, optionIndex) => {
-          const normalizedOption = normalizeString(
-            option,
-            `questions[${index}].options[${optionIndex}]`
-          );
-          return normalizedOption;
-        })
-      : null;
+    const options = normalizeQuestionOptions(question, index);
+    const optionImages = normalizeOptionImages(question.option_images, index);
+    const answerInput = normalizeString(question.answer, `questions[${index}].answer`);
 
-    if (!options || options.length < 2) {
-      throw new AppError(`questions[${index}].options must contain at least 2 values`, 400);
+    const populatedKeys = ["A", "B", "C", "D"].filter(key =>
+      options[key] || optionImages[key]
+    );
+    if (populatedKeys.length < 2) {
+      throw new AppError(`questions[${index}] must contain at least 2 populated options`, 400);
     }
 
-    const answer = normalizeString(question.answer, `questions[${index}].answer`);
+    let answer = answerInput.toUpperCase();
+    if (!["A", "B", "C", "D"].includes(answer)) {
+      const answerByText = populatedKeys.find(key => options[key] === answerInput);
+      if (!answerByText) {
+        throw new AppError(
+          `questions[${index}].answer must be A/B/C/D or match one of the provided option texts`,
+          400
+        );
+      }
+      answer = answerByText;
+    }
 
-    if (!options.includes(answer)) {
-      throw new AppError(
-        `questions[${index}].answer must match one of the provided options`,
-        400
-      );
+    if (!populatedKeys.includes(answer)) {
+      throw new AppError(`questions[${index}].answer must point to a populated option`, 400);
     }
 
     return {
@@ -58,6 +125,7 @@ function normalizeQuestions(questions) {
       question: normalizeString(question.question, `questions[${index}].question`),
       options,
       answer,
+      option_images: optionImages,
       image:
         question.image === undefined || question.image === null || question.image === ""
           ? null
@@ -112,6 +180,7 @@ function sanitizeQuestions(questions, includeAnswers) {
     question: question.question,
     options: question.options,
     image: question.image || null,
+    option_images: question.option_images || {},
     ...(includeAnswers ? { answer: question.answer } : {})
   }));
 }

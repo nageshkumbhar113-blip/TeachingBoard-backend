@@ -13,12 +13,8 @@ const quizQuestionSchema = new mongoose.Schema(
       trim: true
     },
     options: {
-      type: [String],
-      required: true,
-      validate: {
-        validator: value => Array.isArray(value) && value.length >= 2,
-        message: "Each question must contain at least 2 options"
-      }
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
     },
     answer: {
       type: String,
@@ -28,6 +24,10 @@ const quizQuestionSchema = new mongoose.Schema(
     image: {
       type: String,
       default: null
+    },
+    option_images: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
     }
   },
   {

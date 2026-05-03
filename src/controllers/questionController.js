@@ -6,6 +6,51 @@ const AppError       = require('../utils/AppError');
 const VALID_TYPES       = new Set(['mcq', 'tf', 'fib', 'mtp']);
 const VALID_DIFFICULTIES = new Set(['easy', 'medium', 'hard']);
 
+function normalizeUrl(value) {
+  const trimmed = String(value || '').trim();
+  return trimmed || null;
+}
+
+function normalizeOptionMap(body, type) {
+  if (type === 'tf') {
+    return { A: 'True', B: 'False' };
+  }
+
+  if (body.options && typeof body.options === 'object' && !Array.isArray(body.options)) {
+    return {
+      A: String(body.options.A || '').trim(),
+      B: String(body.options.B || '').trim(),
+      C: String(body.options.C || '').trim(),
+      D: String(body.options.D || '').trim(),
+    };
+  }
+
+  return {
+    A: String(body.option1 || '').trim(),
+    B: String(body.option2 || '').trim(),
+    C: String(body.option3 || '').trim(),
+    D: String(body.option4 || '').trim(),
+  };
+}
+
+function normalizeOptionImages(body) {
+  if (body.option_images && typeof body.option_images === 'object' && !Array.isArray(body.option_images)) {
+    return {
+      A: normalizeUrl(body.option_images.A),
+      B: normalizeUrl(body.option_images.B),
+      C: normalizeUrl(body.option_images.C),
+      D: normalizeUrl(body.option_images.D),
+    };
+  }
+
+  return {
+    A: normalizeUrl(body.option1_image),
+    B: normalizeUrl(body.option2_image),
+    C: normalizeUrl(body.option3_image),
+    D: normalizeUrl(body.option4_image),
+  };
+}
+
 function normalizeQuestion(body) {
   const question = String(body.question || '').trim();
   if (!question) throw new AppError('question is required', 400);
@@ -14,17 +59,20 @@ function normalizeQuestion(body) {
   const difficulty = VALID_DIFFICULTIES.has((body.difficulty || '').toLowerCase()) ? body.difficulty.toLowerCase() : 'medium';
   const answer     = String(body.answer || '').trim();
   if (!answer) throw new AppError('answer is required', 400);
+  const options = normalizeOptionMap(body, type);
+  const optionImages = normalizeOptionImages(body);
 
   return {
     question,
     type,
     difficulty,
     answer,
-    options:  body.options  ?? {},
+    options,
     batch:    String(body.batch   || '').trim(),
     subject:  String(body.subject || '').trim(),
     chapter:  String(body.chapter || '').trim(),
-    image:    body.image ? String(body.image).trim() : null,
+    image:    normalizeUrl(body.image),
+    option_images: optionImages,
     tags:     Array.isArray(body.tags) ? body.tags.map(String) : [],
   };
 }

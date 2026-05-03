@@ -12,6 +12,7 @@ const questionSchema = new mongoose.Schema(
     subject:    { type: String, default: '', trim: true, index: true },
     chapter:    { type: String, default: '', trim: true },
     image:      { type: String, default: null },
+    option_images: { type: mongoose.Schema.Types.Mixed, default: {} },
     tags:       { type: [String], default: [] },
   },
   {
