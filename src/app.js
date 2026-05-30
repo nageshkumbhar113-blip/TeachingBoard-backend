@@ -9,6 +9,7 @@ const quizRoutes     = require("./routes/quizRoutes");
 const attemptRoutes  = require("./routes/attemptRoutes");
 const lessonRoutes   = require("./routes/lessonRoutes");
 const questionRoutes = require("./routes/questionRoutes");
+const studentRoutes  = require("./routes/studentRoutes");
 const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
 const { createRateLimiter }             = require("./middleware/rateLimiter");
 
@@ -71,6 +72,7 @@ app.use("/api/quizzes",   quizRoutes);
 app.use("/api/attempts",  attemptRoutes);
 app.use("/api/lessons",   lessonRoutes);
 app.use("/api/questions", questionRoutes);
+app.use("/api/students",  studentRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

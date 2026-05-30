@@ -7,6 +7,13 @@ function isAdminRequest(req) {
   return req.user?.role === "admin";
 }
 
+function getAllowedBatches(req) {
+  if (req.user?.role !== 'student') return null;
+  return Array.isArray(req.userDoc?.assigned_batches)
+    ? req.userDoc.assigned_batches.map(item => String(item || '').trim()).filter(Boolean)
+    : [];
+}
+
 function parseStatusFilter(rawStatus, isAdmin) {
   if (rawStatus === undefined) {
     return null;
@@ -48,6 +55,15 @@ exports.createQuiz = asyncHandler(async (req, res) => {
 });
 
 exports.getQuizzes = asyncHandler(async (req, res) => {
+  if (req.authDenied) {
+    return res.status(403).json({
+      success: false,
+      message: req.authDenied.message,
+      code: req.authDenied.code,
+      expiryDate: req.authDenied.expiryDate || '',
+    });
+  }
+
   const isAdmin = isAdminRequest(req);
   const statusFilter = parseStatusFilter(req.query.status, isAdmin);
   const filter = {};
@@ -56,6 +72,14 @@ exports.getQuizzes = asyncHandler(async (req, res) => {
     filter.status = statusFilter;
   } else if (!isAdmin) {
     filter.status = "published";
+  }
+
+  const allowedBatches = getAllowedBatches(req);
+  if (allowedBatches && !allowedBatches.length) {
+    return res.json({ success: true, count: 0, data: [] });
+  }
+  if (allowedBatches) {
+    filter.batch = { $in: allowedBatches };
   }
 
   const quizzes = await Quiz.find(filter).sort({ updated_at: -1 });
@@ -73,6 +97,15 @@ exports.getQuizzes = asyncHandler(async (req, res) => {
 });
 
 exports.getQuizById = asyncHandler(async (req, res) => {
+  if (req.authDenied) {
+    return res.status(403).json({
+      success: false,
+      message: req.authDenied.message,
+      code: req.authDenied.code,
+      expiryDate: req.authDenied.expiryDate || '',
+    });
+  }
+
   const isAdmin = isAdminRequest(req);
   const quiz = await Quiz.findOne({ quiz_id: req.params.id });
 
@@ -81,6 +114,11 @@ exports.getQuizById = asyncHandler(async (req, res) => {
   }
 
   if (!isAdmin && quiz.status !== "published") {
+    throw new AppError("Quiz not found", 404);
+  }
+
+  const allowedBatches = getAllowedBatches(req);
+  if (allowedBatches && (!quiz.batch || !allowedBatches.includes(quiz.batch))) {
     throw new AppError("Quiz not found", 404);
   }
 

@@ -27,9 +27,31 @@ function validatePayload(body) {
 }
 
 exports.getLessons = asyncHandler(async (req, res) => {
+  if (req.authDenied) {
+    return res.status(403).json({
+      success: false,
+      message: req.authDenied.message,
+      code: req.authDenied.code,
+      expiryDate: req.authDenied.expiryDate || '',
+    });
+  }
+
   const filter = {};
   if (req.query.batch)   filter.batch   = String(req.query.batch).trim();
   if (req.query.subject) filter.subject = String(req.query.subject).trim();
+
+  if (req.user?.role === 'student') {
+    const allowedBatches = Array.isArray(req.userDoc?.assigned_batches)
+      ? req.userDoc.assigned_batches.map(item => String(item || '').trim()).filter(Boolean)
+      : [];
+    if (!allowedBatches.length) {
+      return res.json({ success: true, count: 0, data: [] });
+    }
+    if (filter.batch && !allowedBatches.includes(filter.batch)) {
+      return res.json({ success: true, count: 0, data: [] });
+    }
+    filter.batch = filter.batch || { $in: allowedBatches };
+  }
 
   const rows = await Lesson.find(filter).sort({ updated_at: -1 }).lean();
   res.json({ success: true, count: rows.length, data: rows });

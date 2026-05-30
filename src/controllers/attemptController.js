@@ -55,6 +55,15 @@ exports.createAttempt = asyncHandler(async (req, res) => {
     throw new AppError("Only published quizzes can be attempted", 400);
   }
 
+  if (req.user?.role === 'student') {
+    const allowedBatches = Array.isArray(req.userDoc?.assigned_batches)
+      ? req.userDoc.assigned_batches.map(item => String(item || '').trim()).filter(Boolean)
+      : [];
+    if (!allowedBatches.includes(quiz.batch || '')) {
+      throw new AppError("Quiz not found", 404);
+    }
+  }
+
   const submittedAnswers = normalizeAttemptAnswers(req.body.answers);
 
   const LETTER_INDEX = { a: 0, b: 1, c: 2, d: 3 };

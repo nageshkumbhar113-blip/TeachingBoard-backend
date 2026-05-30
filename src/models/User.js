@@ -10,10 +10,21 @@ function _pinHash(pin, secret) {
 
 const userSchema = new mongoose.Schema(
   {
-    user_id:  { type: String, required: true, unique: true, index: true, trim: true },
-    name:     { type: String, required: true, trim: true, index: true },
-    role:     { type: String, enum: ['admin', 'student'], required: true },
-    pin_hash: { type: String, default: null },
+    user_id:          { type: String, required: true, unique: true, index: true, trim: true },
+    name:             { type: String, required: true, trim: true, index: true },
+    role:             { type: String, enum: ['admin', 'student'], required: true },
+    pin_hash:         { type: String, default: null },
+    student_code:     { type: String, default: null, unique: true, sparse: true, trim: true, index: true },
+    mobile:           { type: String, default: '', trim: true },
+    status:           { type: String, enum: ['pending', 'active', 'blocked'], default: 'active', index: true },
+    assigned_batches: { type: [String], default: [] },
+    expiry_date:      { type: Date, default: null, index: true },
+    approved_at:      { type: Date, default: null },
+    approved_by:      { type: String, default: '' },
+    request_source:   { type: String, enum: ['admin', 'self'], default: 'admin' },
+    last_login_at:    { type: Date, default: null },
+    device_id:        { type: String, default: null },
+    device_bound_at:  { type: Date, default: null },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },

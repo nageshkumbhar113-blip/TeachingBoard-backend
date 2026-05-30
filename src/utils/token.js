@@ -41,6 +41,7 @@ function createToken(user) {
     id: user.id,
     name: user.name,
     role: user.role,
+    student_code: user.student_code || "",
     exp: Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS
   };
 
