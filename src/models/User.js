@@ -23,6 +23,7 @@ const userSchema = new mongoose.Schema(
     approved_by:      { type: String, default: '' },
     request_source:   { type: String, enum: ['admin', 'self'], default: 'admin' },
     last_login_at:    { type: Date, default: null },
+    school_name:      { type: String, default: '', trim: true },
     device_id:        { type: String, default: null },
     device_bound_at:  { type: Date, default: null },
   },

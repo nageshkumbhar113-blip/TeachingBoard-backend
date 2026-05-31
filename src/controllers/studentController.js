@@ -43,6 +43,7 @@ function serializeStudent(student) {
     request_source: student.request_source || 'admin',
     created_at: student.created_at || null,
     updated_at: student.updated_at || null,
+    school_name: student.school_name || '',
     device_bound: !!student.device_id,
     device_bound_at: student.device_bound_at || null,
   };
@@ -150,4 +151,42 @@ exports.resetDevice = asyncHandler(async (req, res) => {
   student.device_bound_at = null;
   await student.save();
   res.json({ success: true, message: 'Device binding reset' });
+});
+
+exports.selfRegister = asyncHandler(async (req, res) => {
+  const name        = String(req.body.name        || '').trim();
+  const mobile      = String(req.body.mobile      || '').trim();
+  const school_name = String(req.body.school_name || '').trim();
+  const pin         = normalizePin(req.body.pin);
+
+  if (!name)                          throw new AppError('Name is required', 400);
+  if (!school_name)                   throw new AppError('School name is required', 400);
+  if (!pin || !/^\d{4}$/.test(pin))   throw new AppError('PIN must be 4 digits', 400);
+
+  // Auto-generate unique student_code from name
+  const prefix = name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) || 'STU';
+  let student_code, attempts = 0;
+  do {
+    student_code = prefix + String(Math.floor(100 + Math.random() * 900));
+    attempts++;
+  } while (attempts < 10 && await User.findOne({ student_code, role: 'student' }));
+
+  const student = await User.create({
+    user_id:        `student-${randomUUID()}`,
+    name,
+    role:           'student',
+    student_code,
+    mobile,
+    school_name,
+    status:         'pending',
+    request_source: 'self',
+    pin_hash:       User.hashPin(pin),
+  });
+
+  res.status(201).json({
+    success:      true,
+    message:      'Registration request submitted. Wait for admin approval.',
+    student_code: student.student_code,
+    name:         student.name,
+  });
 });
