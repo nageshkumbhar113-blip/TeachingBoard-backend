@@ -1,5 +1,6 @@
 const express = require('express');
 const { requireAdmin } = require('../middleware/auth');
+const { createRateLimiter } = require('../middleware/rateLimiter');
 const {
   createStudent,
   getStudents,
@@ -10,7 +11,14 @@ const {
 
 const router = express.Router();
 
-router.post('/register', selfRegister);          // public — no auth needed
+// 5 registration attempts per IP per hour
+const registerLimiter = createRateLimiter({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: 'Too many registration attempts. Please try again after an hour.',
+});
+
+router.post('/register', registerLimiter, selfRegister); // public — no auth needed
 router.get('/', requireAdmin, getStudents);
 router.post('/', requireAdmin, createStudent);
 router.patch('/:id', requireAdmin, updateStudent);

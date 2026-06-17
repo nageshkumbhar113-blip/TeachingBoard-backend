@@ -1,5 +1,10 @@
 require("dotenv").config();
 
+if (!process.env.JWT_SECRET && !process.env.AUTH_SECRET) {
+  console.error('FATAL: JWT_SECRET environment variable is not set. Server will not start.');
+  process.exit(1);
+}
+
 const path    = require("path");
 const express = require("express");
 const cors    = require("cors");
@@ -14,6 +19,16 @@ const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
 const { createRateLimiter }             = require("./middleware/rateLimiter");
 
 const app = express();
+
+// ── Security headers ─────────────────────────────────────────
+app.disable('x-powered-by');
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  next();
+});
 
 // ── CORS ────────────────────────────────────────────────────
 // Set CORS_ORIGIN in env: comma-separated list of allowed origins.
@@ -52,11 +67,38 @@ app.use((req, res, next) => {
 });
 
 // ── Static frontend ─────────────────────────────────────────
-app.use(express.static(path.join(__dirname, "../..")));
+// Try repo root first (works locally and on most hosts).
+// FRONTEND_ROOT env var allows override when rootDir limits parent access (e.g. Render).
+const FRONTEND_ROOT = process.env.FRONTEND_ROOT
+  ? path.resolve(process.env.FRONTEND_ROOT)
+  : path.resolve(__dirname, "../..");
+
+app.use(express.static(FRONTEND_ROOT));
 
 // ── Utility endpoints ────────────────────────────────────────
 app.get("/ping",         (_req, res) => res.json({ message: "pong" }));
-app.get("/api/health",   (_req, res) => res.json({ status: "ok", ts: Date.now() }));
+app.get("/api/health",   (_req, res) => res.json({
+  status: "ok",
+  ts: Date.now(),
+  frontendRoot: FRONTEND_ROOT,
+  dirname: __dirname,
+}));
+
+// ── Short-URL redirects (works on Render without vercel.json) ──
+app.get("/student", (req, res) => {
+  const qs = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+  res.redirect(302, "/student-app/index.html" + qs);
+});
+app.get("/admin", (req, res) => res.redirect(302, "/admin-app/admin.html"));
+app.get("/get-app", (req, res) => res.redirect(302, "/get-app.html"));
+
+// ── Explicit HTML fallbacks (in case static path misses on Render) ──
+function _sendFrontend(rel) {
+  return (_req, res) => res.sendFile(path.join(FRONTEND_ROOT, rel));
+}
+app.get("/admin-app/admin.html",    _sendFrontend("admin-app/admin.html"));
+app.get("/student-app/",            _sendFrontend("student-app/index.html"));
+app.get("/student-app/index.html",  _sendFrontend("student-app/index.html"));
 app.get("/favicon.ico",  (_req, res) => res.status(204).end());
 
 // ── Rate limiting on auth ────────────────────────────────────

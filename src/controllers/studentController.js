@@ -49,11 +49,15 @@ function serializeStudent(student) {
   };
 }
 
-exports.getStudents = asyncHandler(async (_req, res) => {
-  const students = await User.find({ role: 'student' }).sort({ created_at: -1 }).lean();
+exports.getStudents = asyncHandler(async (req, res) => {
+  const limit = Math.min(Math.max(parseInt(req.query.limit) || 500, 1), 1000);
+  const skip  = Math.max(parseInt(req.query.skip) || 0, 0);
+  const students = await User.find({ role: 'student' }).sort({ created_at: -1 }).skip(skip).limit(limit).lean();
   res.json({
     success: true,
     count: students.length,
+    skip,
+    limit,
     data: students.map(serializeStudent),
   });
 });

@@ -106,8 +106,10 @@ exports.getQuestions = asyncHandler(async (req, res) => {
     filter.batch = filter.batch || { $in: allowedBatches };
   }
 
-  const rows = await Question.find(filter).sort({ created_at: -1 }).lean();
-  res.json({ success: true, count: rows.length, data: rows });
+  const limit = Math.min(Math.max(parseInt(req.query.limit) || 1000, 1), 2000);
+  const skip  = Math.max(parseInt(req.query.skip)  || 0, 0);
+  const rows = await Question.find(filter).sort({ created_at: -1 }).skip(skip).limit(limit).lean();
+  res.json({ success: true, count: rows.length, skip, limit, data: rows });
 });
 
 exports.createQuestion = asyncHandler(async (req, res) => {

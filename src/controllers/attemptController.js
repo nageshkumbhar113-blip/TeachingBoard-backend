@@ -55,6 +55,10 @@ exports.createAttempt = asyncHandler(async (req, res) => {
     throw new AppError("Only published quizzes can be attempted", 400);
   }
 
+  if (!quiz.questions || quiz.questions.length === 0) {
+    throw new AppError("Quiz has no questions", 400);
+  }
+
   if (req.user?.role === 'student') {
     const allowedBatches = Array.isArray(req.userDoc?.assigned_batches)
       ? req.userDoc.assigned_batches.map(item => String(item || '').trim()).filter(Boolean)
@@ -66,23 +70,30 @@ exports.createAttempt = asyncHandler(async (req, res) => {
 
   const submittedAnswers = normalizeAttemptAnswers(req.body.answers);
 
-  const LETTER_INDEX = { a: 0, b: 1, c: 2, d: 3 };
-
   const evaluatedAnswers = quiz.questions.map(question => {
     let submittedAnswer = submittedAnswers.get(question.q_id) || "";
 
-    // Resolve MCQ letter (A/B/C/D) to option value for correct server-side scoring
-    if (submittedAnswer && Array.isArray(question.options) && question.options.length > 0) {
-      const idx = LETTER_INDEX[submittedAnswer.toLowerCase()];
-      if (idx !== undefined && question.options[idx] !== undefined) {
-        submittedAnswer = String(question.options[idx]);
-      }
+    // Resolve the stored answer letter (A/B/C/D) to its option text for comparison.
+    // Options are stored as { A: '...', B: '...', C: '...', D: '...' }.
+    // This handles MCQ, TF (data-val="True"/"False"), and FIB consistently.
+    const answerText =
+      question.options && typeof question.options === "object" && !Array.isArray(question.options)
+        ? (question.options[question.answer] || question.answer)
+        : question.answer;
+
+    // Also allow submitting a raw letter (A/B/C/D) — resolve it to option text
+    if (submittedAnswer && /^[A-Da-d]$/.test(submittedAnswer)) {
+      const optText = question.options?.[submittedAnswer.toUpperCase()];
+      if (optText) submittedAnswer = optText;
     }
 
     return {
       q_id: question.q_id,
       submitted_answer: submittedAnswer,
-      is_correct: submittedAnswer !== "" && submittedAnswer === question.answer
+      is_correct: submittedAnswer !== "" && (
+        submittedAnswer === question.answer ||   // letter match
+        submittedAnswer === answerText           // text match
+      ),
     };
   });
 
@@ -92,8 +103,30 @@ exports.createAttempt = asyncHandler(async (req, res) => {
   const wrongAnswers = attemptedAnswers - correctAnswers;
   const skippedAnswers = totalQuestions - attemptedAnswers;
 
+  // Use client-supplied attempt_id if present (allows idempotent retries from offline sync)
+  const clientAttemptId = String(req.body.attempt_id || "").trim();
+  if (clientAttemptId) {
+    const existing = await Attempt.findOne({ attempt_id: clientAttemptId }).lean();
+    if (existing) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          attempt_id: existing.attempt_id,
+          quiz_id: existing.quiz_id,
+          quiz_version: existing.quiz_version,
+          score: existing.score,
+          total_questions: existing.total_questions,
+          correct_answers: existing.correct_answers,
+          wrong_answers: existing.wrong_answers,
+          skipped_answers: existing.skipped_answers,
+          submitted_at: existing.submitted_at,
+        },
+      });
+    }
+  }
+
   const attempt = await Attempt.create({
-    attempt_id: `attempt_${randomUUID()}`,
+    attempt_id: clientAttemptId || `attempt_${randomUUID()}`,
     quiz_id: quiz.quiz_id,
     quiz_version: quiz.version,
     quiz_title: quiz.title,
@@ -132,7 +165,9 @@ exports.getAttempts = asyncHandler(async (req, res) => {
   if (req.query.student_name) filter.student_name = String(req.query.student_name).trim();
   if (req.query.batch)        filter.batch        = String(req.query.batch).trim();
 
-  const attempts = await Attempt.find(filter).sort({ submitted_at: -1 });
+  const limit = Math.min(Math.max(parseInt(req.query.limit) || 200, 1), 1000);
+  const skip  = Math.max(parseInt(req.query.skip) || 0, 0);
+  const attempts = await Attempt.find(filter).sort({ submitted_at: -1 }).skip(skip).limit(limit).lean();
 
-  res.json({ success: true, count: attempts.length, data: attempts });
+  res.json({ success: true, count: attempts.length, skip, limit, data: attempts });
 });
