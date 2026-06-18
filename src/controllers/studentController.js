@@ -46,6 +46,7 @@ function serializeStudent(student) {
     school_name: student.school_name || '',
     device_bound: !!student.device_id,
     device_bound_at: student.device_bound_at || null,
+    shared_device: !!student.shared_device,
   };
 }
 
@@ -142,6 +143,15 @@ exports.updateStudent = asyncHandler(async (req, res) => {
     const pin = normalizePin(req.body.pin);
     if (!pin || !/^\d{4}$/.test(pin)) throw new AppError('pin must be 4 digits', 400);
     student.pin_hash = User.hashPin(pin);
+  }
+
+  if (req.body.shared_device !== undefined) {
+    student.shared_device = !!req.body.shared_device;
+    // If enabling shared_device, release device lock so any device can login
+    if (student.shared_device) {
+      student.device_id = null;
+      student.device_bound_at = null;
+    }
   }
 
   await student.save();

@@ -159,6 +159,23 @@ exports.createAttempt = asyncHandler(async (req, res) => {
   });
 });
 
+// GET /api/attempts/my — student fetches their own attempts
+exports.getMyAttempts = asyncHandler(async (req, res) => {
+  const studentCode = req.user?.student_code || req.user?.username;
+  if (!studentCode) return res.status(401).json({ success: false, message: 'Not authenticated' });
+
+  const limit = Math.min(Math.max(parseInt(req.query.limit) || 200, 1), 1000);
+  const skip  = Math.max(parseInt(req.query.skip) || 0, 0);
+
+  const attempts = await Attempt.find({ student_name: studentCode })
+    .sort({ submitted_at: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+
+  res.json({ success: true, count: attempts.length, skip, limit, data: attempts });
+});
+
 exports.getAttempts = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.quiz_id)      filter.quiz_id      = String(req.query.quiz_id).trim();

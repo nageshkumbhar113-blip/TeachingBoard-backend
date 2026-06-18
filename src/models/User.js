@@ -26,6 +26,7 @@ const userSchema = new mongoose.Schema(
     school_name:      { type: String, default: '', trim: true },
     device_id:        { type: String, default: null },
     device_bound_at:  { type: Date, default: null },
+    shared_device:    { type: Boolean, default: false },  // true = multiple students can share one device
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },

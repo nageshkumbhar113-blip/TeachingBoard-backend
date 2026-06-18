@@ -18,6 +18,7 @@ function serializeStudent(student) {
     status: student.status || 'active',
     assigned_batches: normalizeBatches(student.assigned_batches),
     expiry_date: normalizeExpiryDate(student.expiry_date),
+    shared_device: !!student.shared_device,
   };
 }
 
@@ -76,7 +77,8 @@ exports.login = asyncHandler(async (req, res) => {
   if (deviceId) {
     if (!student.device_id) {
       bindDevice = true;
-    } else if (student.device_id !== deviceId) {
+    } else if (student.device_id !== deviceId && !student.shared_device) {
+      // shared_device students can login from any device (siblings on same phone)
       return res.status(403).json({
         success: false,
         message: 'हे account दुसऱ्या device वर registered आहे. Admin ला reset करायला सांगा.',
