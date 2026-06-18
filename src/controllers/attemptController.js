@@ -134,6 +134,7 @@ exports.createAttempt = asyncHandler(async (req, res) => {
     chapter: quiz.chapter,
     batch: quiz.batch,
     student_name: studentName,
+    student_code: req.user?.student_code || '',
     answers: evaluatedAnswers,
     score: correctAnswers,
     total_questions: totalQuestions,
@@ -161,13 +162,19 @@ exports.createAttempt = asyncHandler(async (req, res) => {
 
 // GET /api/attempts/my — student fetches their own attempts
 exports.getMyAttempts = asyncHandler(async (req, res) => {
-  const studentCode = req.user?.student_code || req.user?.username;
-  if (!studentCode) return res.status(401).json({ success: false, message: 'Not authenticated' });
+  const studentCode = req.user?.student_code;
+  const studentName = req.user?.name;
+  if (!studentCode && !studentName) return res.status(401).json({ success: false, message: 'Not authenticated' });
 
   const limit = Math.min(Math.max(parseInt(req.query.limit) || 200, 1), 1000);
   const skip  = Math.max(parseInt(req.query.skip) || 0, 0);
 
-  const attempts = await Attempt.find({ student_name: studentCode })
+  // Filter by student_code (new attempts) OR student_name (legacy attempts without code)
+  const filter = studentCode
+    ? { $or: [{ student_code: studentCode }, { student_code: '', student_name: studentName }] }
+    : { student_name: studentName };
+
+  const attempts = await Attempt.find(filter)
     .sort({ submitted_at: -1 })
     .skip(skip)
     .limit(limit)

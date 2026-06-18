@@ -66,6 +66,12 @@ const attemptSchema = new mongoose.Schema(
       required: true,
       trim: true
     },
+    student_code: {
+      type: String,
+      default: '',
+      trim: true,
+      index: true
+    },
     answers: {
       type: [attemptAnswerSchema],
       required: true
