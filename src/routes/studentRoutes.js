@@ -6,6 +6,7 @@ const {
   getStudents,
   updateStudent,
   resetDevice,
+  deleteStudent,
   selfRegister,
 } = require('../controllers/studentController');
 
@@ -22,6 +23,7 @@ router.post('/register', registerLimiter, selfRegister); // public — no auth n
 router.get('/', requireAdmin, getStudents);
 router.post('/', requireAdmin, createStudent);
 router.patch('/:id', requireAdmin, updateStudent);
+router.delete('/:id', requireAdmin, deleteStudent);
 router.post('/:id/reset-device', requireAdmin, resetDevice);
 
 module.exports = router;

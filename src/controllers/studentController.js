@@ -167,6 +167,13 @@ exports.resetDevice = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Device binding reset' });
 });
 
+exports.deleteStudent = asyncHandler(async (req, res) => {
+  const student = await User.findOne({ user_id: req.params.id, role: 'student' });
+  if (!student) throw new AppError('Student not found', 404);
+  await student.deleteOne();
+  res.json({ success: true, message: 'Student deleted' });
+});
+
 exports.selfRegister = asyncHandler(async (req, res) => {
   const name        = String(req.body.name        || '').trim();
   const mobile      = String(req.body.mobile      || '').trim();
