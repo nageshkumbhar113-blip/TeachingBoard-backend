@@ -12,8 +12,10 @@ const userSchema = new mongoose.Schema(
   {
     user_id:          { type: String, required: true, unique: true, index: true, trim: true },
     name:             { type: String, required: true, trim: true, index: true },
-    role:             { type: String, enum: ['admin', 'student'], required: true },
+    role:             { type: String, enum: ['admin', 'student', 'teacher', 'parent'], required: true },
     pin_hash:         { type: String, default: null },
+
+    // Student-specific
     student_code:     { type: String, default: null, unique: true, sparse: true, trim: true, index: true },
     mobile:           { type: String, default: '', trim: true },
     status:           { type: String, enum: ['pending', 'active', 'blocked'], default: 'active', index: true },
@@ -26,7 +28,18 @@ const userSchema = new mongoose.Schema(
     school_name:      { type: String, default: '', trim: true },
     device_id:        { type: String, default: null },
     device_bound_at:  { type: Date, default: null },
-    shared_device:    { type: Boolean, default: false },  // true = multiple students can share one device
+    shared_device:    { type: Boolean, default: false },
+
+    // Teacher-specific
+    teacher_code:       { type: String, default: null, unique: true, sparse: true, trim: true, index: true },
+    assigned_students:  { type: [String], default: [] }, // array of student_codes
+
+    // Parent-specific
+    parent_code:  { type: String, default: null, unique: true, sparse: true, trim: true, index: true },
+    children:     { type: [String], default: [] }, // array of student_codes
+
+    // Shared: FCM device token for push notifications
+    device_token: { type: String, default: null, trim: true },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },

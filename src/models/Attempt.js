@@ -1,26 +1,5 @@
 const { mongoose } = require("../config/db");
 
-const attemptAnswerSchema = new mongoose.Schema(
-  {
-    q_id: {
-      type: String,
-      required: true,
-      trim: true
-    },
-    submitted_answer: {
-      type: String,
-      default: ""
-    },
-    is_correct: {
-      type: Boolean,
-      required: true
-    }
-  },
-  {
-    _id: false
-  }
-);
-
 const attemptSchema = new mongoose.Schema(
   {
     attempt_id: {
@@ -72,9 +51,10 @@ const attemptSchema = new mongoose.Schema(
       trim: true,
       index: true
     },
-    answers: {
-      type: [attemptAnswerSchema],
-      required: true
+    // IDs of questions answered incorrectly — used by teacher/parent dashboard
+    wrong_q_ids: {
+      type: [String],
+      default: []
     },
     score: {
       type: Number,

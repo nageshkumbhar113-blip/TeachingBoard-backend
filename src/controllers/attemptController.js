@@ -1,8 +1,10 @@
 const { randomUUID } = require("crypto");
 const Attempt = require("../models/Attempt");
 const Quiz = require("../models/Quiz");
+const User = require("../models/User");
 const asyncHandler = require("../utils/asyncHandler");
 const AppError = require("../utils/AppError");
+const { sendToUser } = require("../utils/fcm");
 
 function normalizeAnswerValue(value) {
   return String(value || "").trim();
@@ -73,15 +75,11 @@ exports.createAttempt = asyncHandler(async (req, res) => {
   const evaluatedAnswers = quiz.questions.map(question => {
     let submittedAnswer = submittedAnswers.get(question.q_id) || "";
 
-    // Resolve the stored answer letter (A/B/C/D) to its option text for comparison.
-    // Options are stored as { A: '...', B: '...', C: '...', D: '...' }.
-    // This handles MCQ, TF (data-val="True"/"False"), and FIB consistently.
     const answerText =
       question.options && typeof question.options === "object" && !Array.isArray(question.options)
         ? (question.options[question.answer] || question.answer)
         : question.answer;
 
-    // Also allow submitting a raw letter (A/B/C/D) — resolve it to option text
     if (submittedAnswer && /^[A-Da-d]$/.test(submittedAnswer)) {
       const optText = question.options?.[submittedAnswer.toUpperCase()];
       if (optText) submittedAnswer = optText;
@@ -91,8 +89,8 @@ exports.createAttempt = asyncHandler(async (req, res) => {
       q_id: question.q_id,
       submitted_answer: submittedAnswer,
       is_correct: submittedAnswer !== "" && (
-        submittedAnswer === question.answer ||   // letter match
-        submittedAnswer === answerText           // text match
+        submittedAnswer === question.answer ||
+        submittedAnswer === answerText
       ),
     };
   });
@@ -102,11 +100,16 @@ exports.createAttempt = asyncHandler(async (req, res) => {
   const totalQuestions = quiz.questions.length;
   const wrongAnswers = attemptedAnswers - correctAnswers;
   const skippedAnswers = totalQuestions - attemptedAnswers;
+  const wrongQIds = evaluatedAnswers
+    .filter(a => !a.is_correct && a.submitted_answer !== "")
+    .map(a => a.q_id);
 
   // Use client-supplied attempt_id if present (allows idempotent retries from offline sync)
   const clientAttemptId = String(req.body.attempt_id || "").trim();
   if (clientAttemptId) {
-    const existing = await Attempt.findOne({ attempt_id: clientAttemptId }).lean();
+    const existing = await Attempt.findOne({ attempt_id: clientAttemptId })
+      .select('-wrong_q_ids')
+      .lean();
     if (existing) {
       return res.status(200).json({
         success: true,
@@ -125,6 +128,7 @@ exports.createAttempt = asyncHandler(async (req, res) => {
     }
   }
 
+  const studentCode = req.user?.student_code || '';
   const attempt = await Attempt.create({
     attempt_id: clientAttemptId || `attempt_${randomUUID()}`,
     quiz_id: quiz.quiz_id,
@@ -134,8 +138,8 @@ exports.createAttempt = asyncHandler(async (req, res) => {
     chapter: quiz.chapter,
     batch: quiz.batch,
     student_name: studentName,
-    student_code: req.user?.student_code || '',
-    answers: evaluatedAnswers,
+    student_code: studentCode,
+    wrong_q_ids: wrongQIds,
     score: correctAnswers,
     total_questions: totalQuestions,
     correct_answers: correctAnswers,
@@ -143,6 +147,12 @@ exports.createAttempt = asyncHandler(async (req, res) => {
     skipped_answers: skippedAnswers,
     submitted_at: new Date()
   });
+
+  // Notify assigned teachers via FCM (non-blocking)
+  if (studentCode) {
+    _notifyTeachers(studentCode, studentName, quiz.title, correctAnswers, totalQuestions)
+      .catch(err => console.warn('FCM teacher notify failed:', err.message));
+  }
 
   res.status(201).json({
     success: true,
@@ -160,6 +170,32 @@ exports.createAttempt = asyncHandler(async (req, res) => {
   });
 });
 
+async function _notifyTeachers(studentCode, studentName, quizTitle, score, total) {
+  const teachers = await User.find({
+    role: 'teacher',
+    assigned_students: studentCode,
+    device_token: { $exists: true, $ne: null, $ne: '' }
+  }).select('device_token').lean();
+
+  const parents = await User.find({
+    role: 'parent',
+    children: studentCode,
+    device_token: { $exists: true, $ne: null, $ne: '' }
+  }).select('device_token').lean();
+
+  const tokens = [
+    ...teachers.map(t => t.device_token),
+    ...parents.map(p => p.device_token),
+  ].filter(Boolean);
+
+  if (!tokens.length) return;
+
+  const title = `${studentName} — Test Complete`;
+  const body  = `${quizTitle}: ${score}/${total}`;
+
+  await Promise.all(tokens.map(token => sendToUser(token, title, body).catch(() => {})));
+}
+
 // GET /api/attempts/my — student fetches their own attempts
 exports.getMyAttempts = asyncHandler(async (req, res) => {
   const studentCode = req.user?.student_code;
@@ -169,12 +205,12 @@ exports.getMyAttempts = asyncHandler(async (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query.limit) || 200, 1), 1000);
   const skip  = Math.max(parseInt(req.query.skip) || 0, 0);
 
-  // Filter by student_code (new attempts) OR student_name (legacy attempts without code)
   const filter = studentCode
     ? { $or: [{ student_code: studentCode }, { student_code: '', student_name: studentName }] }
     : { student_name: studentName };
 
   const attempts = await Attempt.find(filter)
+    .select('-wrong_q_ids')
     .sort({ submitted_at: -1 })
     .skip(skip)
     .limit(limit)
@@ -188,10 +224,15 @@ exports.getAttempts = asyncHandler(async (req, res) => {
   if (req.query.quiz_id)      filter.quiz_id      = String(req.query.quiz_id).trim();
   if (req.query.student_name) filter.student_name = String(req.query.student_name).trim();
   if (req.query.batch)        filter.batch        = String(req.query.batch).trim();
+  if (req.query.student_code) filter.student_code = String(req.query.student_code).trim();
 
   const limit = Math.min(Math.max(parseInt(req.query.limit) || 200, 1), 1000);
   const skip  = Math.max(parseInt(req.query.skip) || 0, 0);
-  const attempts = await Attempt.find(filter).sort({ submitted_at: -1 }).skip(skip).limit(limit).lean();
+  const attempts = await Attempt.find(filter)
+    .sort({ submitted_at: -1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
 
   res.json({ success: true, count: attempts.length, skip, limit, data: attempts });
 });

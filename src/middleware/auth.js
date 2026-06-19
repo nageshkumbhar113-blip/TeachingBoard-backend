@@ -67,4 +67,36 @@ async function requireStudent(req, res, next) {
   next();
 }
 
-module.exports = { attachUserIfPresent, requireAuth, requireAdmin, requireStudent };
+async function requireTeacher(req, res, next) {
+  const payload = await _attachResolvedUser(req);
+  if (!payload || payload.role !== 'teacher') {
+    return res.status(403).json({ success: false, message: 'Teacher login required' });
+  }
+  next();
+}
+
+async function requireParent(req, res, next) {
+  const payload = await _attachResolvedUser(req);
+  if (!payload || payload.role !== 'parent') {
+    return res.status(403).json({ success: false, message: 'Parent login required' });
+  }
+  next();
+}
+
+async function requireTeacherOrAdmin(req, res, next) {
+  const payload = await _attachResolvedUser(req);
+  if (!payload || !['teacher', 'admin'].includes(payload.role)) {
+    return res.status(403).json({ success: false, message: 'Teacher or admin access required' });
+  }
+  next();
+}
+
+module.exports = {
+  attachUserIfPresent,
+  requireAuth,
+  requireAdmin,
+  requireStudent,
+  requireTeacher,
+  requireParent,
+  requireTeacherOrAdmin,
+};
