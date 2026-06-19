@@ -155,6 +155,44 @@ exports.updateStudent = asyncHandler(async (req, res) => {
   }
 
   await student.save();
+
+  // Propagate expiry to teacher and parent when expiry_date is updated
+  if (req.body.expiry_date !== undefined) {
+    const code = student.student_code;
+
+    // Parent: same expiry as the student
+    await User.updateMany(
+      { role: 'parent', children: code },
+      { $set: { expiry_date: student.expiry_date } }
+    );
+
+    // Teacher: expiry = MAX of all their assigned students' expiry dates
+    // If any student has null expiry (unlimited), teacher stays unlimited too
+    const teachers = await User.find(
+      { role: 'teacher', assigned_students: code },
+      'user_id assigned_students'
+    ).lean();
+
+    for (const teacher of teachers) {
+      const codes = (teacher.assigned_students || []).filter(Boolean);
+      if (!codes.length) continue;
+      const peers = await User.find(
+        { role: 'student', student_code: { $in: codes } },
+        'expiry_date'
+      ).lean();
+
+      const newExpiry = peers.some(s => !s.expiry_date)
+        ? null
+        : peers.reduce((max, s) =>
+            (!max || s.expiry_date > max) ? s.expiry_date : max, null);
+
+      await User.updateOne(
+        { user_id: teacher.user_id },
+        { $set: { expiry_date: newExpiry } }
+      );
+    }
+  }
+
   res.json({ success: true, data: serializeStudent(student) });
 });
 
