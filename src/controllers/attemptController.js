@@ -174,13 +174,13 @@ async function _notifyTeachers(studentCode, studentName, quizTitle, score, total
   const teachers = await User.find({
     role: 'teacher',
     assigned_students: studentCode,
-    device_token: { $exists: true, $ne: null, $ne: '' }
+    device_token: { $exists: true, $nin: [null, ''] }
   }).select('device_token').lean();
 
   const parents = await User.find({
     role: 'parent',
     children: studentCode,
-    device_token: { $exists: true, $ne: null, $ne: '' }
+    device_token: { $exists: true, $nin: [null, ''] }
   }).select('device_token').lean();
 
   const tokens = [
@@ -192,8 +192,9 @@ async function _notifyTeachers(studentCode, studentName, quizTitle, score, total
 
   const title = `${studentName} — Test Complete`;
   const body  = `${quizTitle}: ${score}/${total}`;
+  const data  = { student_code: studentCode };
 
-  await Promise.all(tokens.map(token => sendToUser(token, title, body).catch(() => {})));
+  await Promise.all(tokens.map(token => sendToUser(token, title, body, data).catch(() => {})));
 }
 
 // GET /api/attempts/my — student fetches their own attempts

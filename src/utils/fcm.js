@@ -19,24 +19,17 @@ function _init() {
   const sa = process.env.FIREBASE_SERVICE_ACCOUNT;
   if (!sa) return null;
 
-  let admin;
   try {
-    admin = require('firebase-admin');
-  } catch {
-    console.warn('FCM: firebase-admin not installed. Push notifications disabled.');
-    return null;
-  }
+    const { initializeApp, getApps, cert } = require('firebase-admin/app');
+    const { getMessaging } = require('firebase-admin/messaging');
 
-  try {
     const serviceAccount = typeof sa === 'string' ? JSON.parse(sa) : sa;
 
-    if (!admin.apps.length) {
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-      });
+    if (!getApps().length) {
+      initializeApp({ credential: cert(serviceAccount) });
     }
 
-    _messaging = admin.messaging();
+    _messaging = getMessaging();
     console.log('FCM: Initialized successfully');
     return _messaging;
   } catch (err) {
