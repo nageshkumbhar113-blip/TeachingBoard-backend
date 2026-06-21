@@ -35,6 +35,7 @@ function validateRequiredEnv() {
     hasMONGODB_URI: !!String(process.env.MONGODB_URI || "").trim(),
     hasJWT_SECRET: !!String(process.env.JWT_SECRET || "").trim(),
     hasCORS_ORIGIN: !!String(process.env.CORS_ORIGIN || "").trim(),
+    hasFIREBASE_SERVICE_ACCOUNT: !!String(process.env.FIREBASE_SERVICE_ACCOUNT || "").trim(),
     onRender: !!String(process.env.RENDER || process.env.RENDER_EXTERNAL_URL || "").trim()
   });
 
@@ -102,6 +103,14 @@ async function start() {
   }
   await connectToDatabase();
   await seedAdmin();
+
+  // Initialize FCM at startup so we know immediately if it's configured
+  try {
+    const { sendToUser } = require('./src/utils/fcm');
+    // Calling with empty token triggers _init() without actually sending
+    await sendToUser('', '', '');
+  } catch { /* no-op */ }
+
   const port = Number(process.env.PORT || 4000);
 
   const server = app.listen(port, "0.0.0.0", () => {
