@@ -67,7 +67,7 @@ async function sendToUser(deviceToken, title, body, data = {}) {
     ),
     android: {
       priority: 'high',
-      notification: { sound: 'default', clickAction: 'FLUTTER_NOTIFICATION_CLICK' },
+      notification: { sound: 'default', channelId: 'teachingboard_alerts' },
     },
     apns: {
       payload: { aps: { sound: 'default' } },
