@@ -20,10 +20,22 @@ function _init() {
   if (!sa) return null;
 
   try {
+    // Parse JSON
+    let serviceAccount;
+    try {
+      serviceAccount = typeof sa === 'string' ? JSON.parse(sa) : sa;
+    } catch (parseErr) {
+      console.warn('FCM: JSON parse failed —', parseErr.message);
+      return null;
+    }
+
+    // Render env vars sometimes double-escape \n → actual newlines required for PEM
+    if (serviceAccount.private_key && typeof serviceAccount.private_key === 'string') {
+      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+    }
+
     const { initializeApp, getApps, cert } = require('firebase-admin/app');
     const { getMessaging } = require('firebase-admin/messaging');
-
-    const serviceAccount = typeof sa === 'string' ? JSON.parse(sa) : sa;
 
     if (!getApps().length) {
       initializeApp({ credential: cert(serviceAccount) });
@@ -34,6 +46,7 @@ function _init() {
     return _messaging;
   } catch (err) {
     console.warn('FCM: Init failed —', err.message);
+    console.warn('FCM: Stack —', err.stack);
     return null;
   }
 }
