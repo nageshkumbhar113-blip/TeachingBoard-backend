@@ -19,6 +19,7 @@ const batchRoutes    = require("./routes/batchRoutes");
 const { adminRouter: teacherAdminRoutes, teacherRouter: teacherDashRoutes } = require("./routes/teacherRoutes");
 const { adminRouter: parentAdminRoutes,  parentRouter: parentDashRoutes  } = require("./routes/parentRoutes");
 const appVersionRoutes = require("./routes/appVersionRoutes");
+const { adminWordRouter, vocabRouter, studentWordRouter } = require("./routes/wordRoutes");
 const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
 const { createRateLimiter }             = require("./middleware/rateLimiter");
 
@@ -125,6 +126,9 @@ app.use("/api/teacher",   teacherDashRoutes);
 app.use("/api/parents",      parentAdminRoutes);
 app.use("/api/parent",       parentDashRoutes);
 app.use("/api/app-version",  appVersionRoutes);
+app.use("/api/admin/words", adminWordRouter);
+app.use("/api/vocab",       vocabRouter);
+app.use("/api/student",     studentWordRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

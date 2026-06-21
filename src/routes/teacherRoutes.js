@@ -14,6 +14,11 @@ const {
   getStrongTopics,
   getRanking,
 } = require('../controllers/teacherController');
+const {
+  sendNotification,
+  getNotificationHistory,
+} = require('../controllers/notificationController');
+const { getTeacherVocabScores } = require('../controllers/wordController');
 
 // ── Admin CRUD: mounted at /api/teachers ──────────────────────────────────────
 const adminRouter = express.Router();
@@ -32,5 +37,8 @@ teacherRouter.get('/analytics/monthly',           requireTeacher, getMonthlyAnal
 teacherRouter.get('/analytics/weak-topics',       requireTeacher, getWeakTopics);
 teacherRouter.get('/analytics/strong-topics',     requireTeacher, getStrongTopics);
 teacherRouter.get('/analytics/ranking',           requireTeacher, getRanking);
+teacherRouter.post('/send-notification',          requireTeacher, sendNotification);
+teacherRouter.get('/notification-history',        requireTeacher, getNotificationHistory);
+teacherRouter.get('/vocab-scores',                requireTeacher, getTeacherVocabScores);
 
 module.exports = { adminRouter, teacherRouter };
