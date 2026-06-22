@@ -16,7 +16,8 @@ const userSchema = new mongoose.Schema(
     pin_hash:         { type: String, default: null },
 
     // Student-specific
-    student_code:     { type: String, default: null, unique: true, sparse: true, trim: true, index: true },
+    // default omitted so sparse index skips non-student users (default:null causes 11000 with multiple null values)
+    student_code:     { type: String, unique: true, sparse: true, trim: true, index: true },
     mobile:           { type: String, default: '', trim: true },
     status:           { type: String, enum: ['pending', 'active', 'blocked'], default: 'active', index: true },
     assigned_batches: { type: [String], default: [] },
@@ -31,11 +32,11 @@ const userSchema = new mongoose.Schema(
     shared_device:    { type: Boolean, default: false },
 
     // Teacher-specific
-    teacher_code:       { type: String, default: null, unique: true, sparse: true, trim: true, index: true },
+    teacher_code:       { type: String, unique: true, sparse: true, trim: true, index: true },
     assigned_students:  { type: [String], default: [] }, // array of student_codes
 
     // Parent-specific
-    parent_code:  { type: String, default: null, unique: true, sparse: true, trim: true, index: true },
+    parent_code:  { type: String, unique: true, sparse: true, trim: true, index: true },
     children:     { type: [String], default: [] }, // array of student_codes
 
     // Shared: FCM device token for push notifications
