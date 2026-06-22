@@ -1,6 +1,7 @@
 const { randomUUID }   = require('crypto');
-const Word             = require('../models/Word');
-const VocabAttempt     = require('../models/VocabAttempt');
+const Word                = require('../models/Word');
+const VocabSubjectConfig  = require('../models/VocabSubjectConfig');
+const VocabAttempt        = require('../models/VocabAttempt');
 const User             = require('../models/User');
 const asyncHandler     = require('../utils/asyncHandler');
 const AppError         = require('../utils/AppError');
@@ -293,14 +294,21 @@ exports.getTest = asyncHandler(async (req, res) => {
     meaning:       meaningLang === 'english' ? w.meaning_en : w.meaning_mr,
   }));
 
+  const cfg = await VocabSubjectConfig.findOne({ batch, subject }).lean();
+  const ALL_SECTIONS = ['listen', 'meaning', 'picture', 'spelling'];
+  const active_sections = (cfg?.active_sections?.length)
+    ? cfg.active_sections.filter(s => ALL_SECTIONS.includes(s))
+    : ALL_SECTIONS;
+
   res.json({
-    success:      true,
-    test_num:     testNum,
-    word_from:    wFrom,
-    word_to:      Math.min(wTo, wFrom + words.length - 1),
-    meaning_lang: meaningLang,
-    word_count:   wordData.length,
-    words:        wordData,
+    success:         true,
+    test_num:        testNum,
+    word_from:       wFrom,
+    word_to:         Math.min(wTo, wFrom + words.length - 1),
+    meaning_lang:    meaningLang,
+    word_count:      wordData.length,
+    words:           wordData,
+    active_sections: active_sections,
   });
 });
 
@@ -510,4 +518,42 @@ exports.getTeacherVocabScores = asyncHandler(async (req, res) => {
   data.sort((a, b) => a.student_name.localeCompare(b.student_name));
 
   res.json({ success: true, data });
+});
+
+// ─── Admin: Vocab Subject Config ──────────────────────────────────────────────
+
+// GET /api/admin/words/vocab-config?batch=X&subject=Y
+exports.getVocabConfig = asyncHandler(async (req, res) => {
+  const batch   = String(req.query.batch   || '').trim();
+  const subject = String(req.query.subject || '').trim();
+  if (!batch || !subject) throw new AppError('batch and subject required', 400);
+
+  const ALL_SECTIONS = ['listen', 'meaning', 'picture', 'spelling'];
+  const cfg = await VocabSubjectConfig.findOne({ batch, subject }).lean();
+  const active_sections = (cfg?.active_sections?.length)
+    ? cfg.active_sections.filter(s => ALL_SECTIONS.includes(s))
+    : ALL_SECTIONS;
+
+  res.json({ success: true, data: { batch, subject, active_sections } });
+});
+
+// POST /api/admin/words/vocab-config
+// body: { batch, subject, active_sections: ['listen','meaning',...] }
+exports.saveVocabConfig = asyncHandler(async (req, res) => {
+  const batch   = String(req.body.batch   || '').trim();
+  const subject = String(req.body.subject || '').trim();
+  if (!batch || !subject) throw new AppError('batch and subject required', 400);
+
+  const ALL_SECTIONS = ['listen', 'meaning', 'picture', 'spelling'];
+  const raw = Array.isArray(req.body.active_sections) ? req.body.active_sections : [];
+  const active_sections = raw.filter(s => ALL_SECTIONS.includes(s));
+  if (!active_sections.length) throw new AppError('At least one section required', 400);
+
+  const cfg = await VocabSubjectConfig.findOneAndUpdate(
+    { batch, subject },
+    { $set: { active_sections } },
+    { upsert: true, new: true, runValidators: true }
+  ).lean();
+
+  res.json({ success: true, data: { batch: cfg.batch, subject: cfg.subject, active_sections: cfg.active_sections } });
 });

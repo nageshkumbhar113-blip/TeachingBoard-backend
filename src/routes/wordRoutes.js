@@ -12,10 +12,14 @@ const {
   getTest,
   submitAttempt,
   addStudentWord,
+  getVocabConfig,
+  saveVocabConfig,
 } = require('../controllers/wordController');
 
 // ── Admin: /api/admin/words ───────────────────────────────────────────────────
 const adminWordRouter = express.Router();
+adminWordRouter.get('/vocab-config',  requireAdmin, getVocabConfig);
+adminWordRouter.post('/vocab-config', requireAdmin, saveVocabConfig);
 adminWordRouter.get('/',             requireAdmin, listWords);
 adminWordRouter.post('/auto-fill',   requireAdmin, autoFillWord);
 adminWordRouter.post('/bulk',        requireAdmin, bulkCreateWords);
