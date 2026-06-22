@@ -7,6 +7,7 @@ const {
   deleteWord,
   bulkCreateWords,
   autoFillWord,
+  getVocabSubjects,
   getTestList,
   getTest,
   submitAttempt,
@@ -25,6 +26,7 @@ adminWordRouter.delete('/:id',       requireAdmin, deleteWord);
 // ── Student vocab: /api/vocab ─────────────────────────────────────────────────
 const vocabRouter = express.Router();
 vocabRouter.get('/auto-fill',        requireStudent, autoFillWord);
+vocabRouter.get('/subjects',         requireStudent, getVocabSubjects);
 vocabRouter.get('/test-list',        requireStudent, getTestList);
 vocabRouter.get('/test/:num',        requireStudent, getTest);
 vocabRouter.post('/attempt',         requireStudent, submitAttempt);

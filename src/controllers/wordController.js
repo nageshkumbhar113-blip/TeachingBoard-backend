@@ -200,6 +200,14 @@ exports.autoFillWord = asyncHandler(async (req, res) => {
 
 // ─── Student: Vocab Tests ─────────────────────────────────────────────────────
 
+// GET /api/vocab/subjects?batch=X  — subjects that have at least 1 word
+exports.getVocabSubjects = asyncHandler(async (req, res) => {
+  const batch = String(req.query.batch || '').trim();
+  if (!batch) throw new AppError('batch is required', 400);
+  const subjects = await Word.distinct('subject', { batch, subject: { $nin: ['', null] } });
+  res.json({ success: true, subjects: subjects.sort() });
+});
+
 // GET /api/vocab/test-list?batch=X&subject=Y
 exports.getTestList = asyncHandler(async (req, res) => {
   const studentDoc  = req.userDoc;
