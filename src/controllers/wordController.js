@@ -33,6 +33,7 @@ function _sanitizeWord(w) {
     pronunciation: String(w.pronunciation || '').trim(),
     phonics:       String(w.phonics       || '').trim(),
     image_url:     String(w.image_url     || '').trim(),
+    emoji:         String(w.emoji         || '').trim(),
     difficulty:    ['easy', 'medium', 'hard'].includes(w.difficulty) ? w.difficulty : 'medium',
     tags:          Array.isArray(w.tags) ? w.tags.map(t => String(t).trim()).filter(Boolean) : [],
     added_by:      w.added_by === 'student' ? 'student' : 'admin',
@@ -88,7 +89,7 @@ exports.updateWord = asyncHandler(async (req, res) => {
   if (!wordId) throw new AppError('word id required', 400);
 
   const allow = ['word', 'meaning_mr', 'meaning_en', 'pronunciation', 'phonics',
-                  'image_url', 'difficulty', 'tags'];
+                  'image_url', 'emoji', 'difficulty', 'tags'];
   const update = {};
   for (const key of allow) {
     if (req.body[key] !== undefined) {
@@ -286,6 +287,7 @@ exports.getTest = asyncHandler(async (req, res) => {
     pronunciation: w.pronunciation,
     phonics:       w.phonics,
     image_url:     w.image_url,
+    emoji:         w.emoji,
     seq_num:       w.seq_num,
     // Active meaning based on student preference
     meaning:       meaningLang === 'english' ? w.meaning_en : w.meaning_mr,

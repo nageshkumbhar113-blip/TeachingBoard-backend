@@ -12,6 +12,7 @@ const wordSchema = new mongoose.Schema(
     pronunciation: { type: String, default: '', trim: true },
     phonics:       { type: String, default: '', trim: true },
     image_url:     { type: String, default: '', trim: true },
+    emoji:         { type: String, default: '', trim: true },
     difficulty:    { type: String, enum: ['easy', 'medium', 'hard'], default: 'medium' },
     tags:          [{ type: String, trim: true }],
     added_by:      { type: String, enum: ['admin', 'student'], default: 'admin' },
