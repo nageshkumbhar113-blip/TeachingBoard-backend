@@ -10,6 +10,10 @@ const { sendToMany }   = require('../utils/fcm');
 const WORDS_PER_TEST = 20;
 const PASS_PCT       = 0.60;
 
+function escapeRegex(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function normalizeCode(v) {
   return String(v || '').trim().toUpperCase();
 }
@@ -56,10 +60,11 @@ exports.listWords = asyncHandler(async (req, res) => {
   if (batch)   filter.batch   = batch;
   if (subject) filter.subject = subject;
   if (search) {
+    const safeSearch = escapeRegex(search);
     filter.$or = [
-      { word:       { $regex: search, $options: 'i' } },
-      { meaning_mr: { $regex: search, $options: 'i' } },
-      { meaning_en: { $regex: search, $options: 'i' } },
+      { word:       { $regex: safeSearch, $options: 'i' } },
+      { meaning_mr: { $regex: safeSearch, $options: 'i' } },
+      { meaning_en: { $regex: safeSearch, $options: 'i' } },
     ];
   }
 
@@ -406,6 +411,13 @@ exports.addStudentWord = asyncHandler(async (req, res) => {
   const batch       = String(req.body.batch   || studentDoc?.assigned_batches?.[0] || '').trim();
   const subject     = String(req.body.subject || '').trim();
 
+  const assignedBatches = Array.isArray(studentDoc?.assigned_batches)
+    ? studentDoc.assigned_batches.map(b => String(b).trim())
+    : [];
+  if (batch && assignedBatches.length && !assignedBatches.includes(batch)) {
+    throw new AppError('You are not enrolled in this batch', 403);
+  }
+
   const data = _sanitizeWord({
     ...req.body,
     batch,
@@ -419,7 +431,7 @@ exports.addStudentWord = asyncHandler(async (req, res) => {
   if (!data.subject) throw new AppError('subject is required', 400);
 
   // Avoid duplicate words in same batch+subject
-  const exists = await Word.findOne({ batch, subject, word: { $regex: `^${data.word}$`, $options: 'i' } }).lean();
+  const exists = await Word.findOne({ batch, subject, word: { $regex: `^${escapeRegex(data.word)}$`, $options: 'i' } }).lean();
   if (exists) {
     return res.json({ success: true, message: 'Word already exists in bank', data: exists });
   }
@@ -518,6 +530,52 @@ exports.getTeacherVocabScores = asyncHandler(async (req, res) => {
   data.sort((a, b) => a.student_name.localeCompare(b.student_name));
 
   res.json({ success: true, data });
+});
+
+// POST /api/admin/words/resequence
+exports.resequenceWords = asyncHandler(async (req, res) => {
+  const batch   = String(req.body.batch   || '').trim();
+  const subject = String(req.body.subject || '').trim();
+
+  if (!batch)   throw new AppError('batch is required', 400);
+  if (!subject) throw new AppError('subject is required', 400);
+
+  const words = await Word.find({ batch, subject })
+    .sort({ seq_num: 1 })
+    .select('_id')
+    .lean();
+
+  if (words.length) {
+    const ops = words.map((w, i) => ({
+      updateOne: {
+        filter: { _id: w._id },
+        update: { $set: { seq_num: i + 1 } },
+      },
+    }));
+    await Word.bulkWrite(ops, { ordered: false });
+  }
+
+  res.json({ success: true, count: words.length });
+});
+
+// GET /api/admin/words/test-words?batch=X&subject=Y&test_num=N
+exports.getTestWordsForAdmin = asyncHandler(async (req, res) => {
+  const batch   = String(req.query.batch    || '').trim();
+  const subject = String(req.query.subject  || '').trim();
+  const testNum = parseInt(req.query.test_num);
+
+  if (!batch)               throw new AppError('batch is required', 400);
+  if (!subject)             throw new AppError('subject is required', 400);
+  if (!testNum || testNum < 1) throw new AppError('test_num must be a positive integer', 400);
+
+  const wFrom = (testNum - 1) * WORDS_PER_TEST + 1;
+  const wTo   = testNum * WORDS_PER_TEST;
+
+  const words = await Word.find({ batch, subject, seq_num: { $gte: wFrom, $lte: wTo } })
+    .sort({ seq_num: 1 })
+    .lean();
+
+  res.json({ success: true, total: words.length, count: words.length, data: words });
 });
 
 // ─── Admin: Vocab Subject Config ──────────────────────────────────────────────

@@ -84,10 +84,8 @@ exports.login = asyncHandler(async (req, res) => {
     if (!pin)         return res.status(400).json({ success: false, message: 'pin is required' });
 
     const teacher = await User.findOne({ teacher_code: teacherCode, role: 'teacher' });
-    if (!teacher) return res.status(404).json({ success: false, message: 'Teacher account not found' });
-
-    if (!teacher.verifyPin(pin)) {
-      return res.status(401).json({ success: false, message: 'Invalid teacher PIN' });
+    if (!teacher || !teacher.verifyPin(pin)) {
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
     teacher.last_login_at = new Date();
@@ -115,10 +113,8 @@ exports.login = asyncHandler(async (req, res) => {
     if (!pin)        return res.status(400).json({ success: false, message: 'pin is required' });
 
     const parent = await User.findOne({ parent_code: parentCode, role: 'parent' });
-    if (!parent) return res.status(404).json({ success: false, message: 'Parent account not found' });
-
-    if (!parent.verifyPin(pin)) {
-      return res.status(401).json({ success: false, message: 'Invalid parent PIN' });
+    if (!parent || !parent.verifyPin(pin)) {
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
     parent.last_login_at = new Date();
@@ -150,12 +146,8 @@ exports.login = asyncHandler(async (req, res) => {
   }
 
   const student = await User.findOne({ student_code: studentCode, role: 'student' });
-  if (!student) {
-    return res.status(404).json({ success: false, message: 'Student account not found' });
-  }
-
-  if (!student.verifyPin(pin)) {
-    return res.status(401).json({ success: false, message: 'Invalid student PIN' });
+  if (!student || !student.verifyPin(pin)) {
+    return res.status(401).json({ success: false, message: 'Invalid credentials' });
   }
 
   const deviceId = String(req.body.device_id || '').trim();

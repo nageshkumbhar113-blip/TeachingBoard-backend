@@ -62,7 +62,9 @@ function verifyToken(token) {
 
   const expectedSignature = sign(encodedPayload);
 
-  if (signature !== expectedSignature) {
+  const sigBuf = Buffer.from(signature);
+  const expBuf = Buffer.from(expectedSignature);
+  if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
     throw new Error("Invalid token signature");
   }
 

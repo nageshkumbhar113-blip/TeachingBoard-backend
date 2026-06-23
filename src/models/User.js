@@ -2,8 +2,9 @@ const { mongoose } = require('../config/db');
 const crypto       = require('crypto');
 
 function _pinHash(pin, secret) {
+  if (!secret) throw new Error('JWT_SECRET is required for PIN hashing');
   return crypto
-    .createHmac('sha256', secret || 'dev-fallback')
+    .createHmac('sha256', secret)
     .update(String(pin || ''))
     .digest('hex');
 }
@@ -49,14 +50,15 @@ const userSchema = new mongoose.Schema(
 );
 
 userSchema.statics.hashPin = function(pin) {
-  const secret = process.env.JWT_SECRET || process.env.AUTH_SECRET || 'dev-fallback';
+  const secret = process.env.JWT_SECRET || process.env.AUTH_SECRET;
   return _pinHash(pin, secret);
 };
 
 userSchema.methods.verifyPin = function(pin) {
   if (!this.pin_hash) return false;
-  const secret = process.env.JWT_SECRET || process.env.AUTH_SECRET || 'dev-fallback';
-  return this.pin_hash === _pinHash(pin, secret);
+  const secret = process.env.JWT_SECRET || process.env.AUTH_SECRET;
+  const computed = _pinHash(pin, secret);
+  return crypto.timingSafeEqual(Buffer.from(this.pin_hash), Buffer.from(computed));
 };
 
 module.exports = mongoose.models.User || mongoose.model('User', userSchema);

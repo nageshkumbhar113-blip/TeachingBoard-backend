@@ -129,6 +129,7 @@ exports.createAttempt = asyncHandler(async (req, res) => {
   }
 
   const studentCode = req.user?.student_code || '';
+  if (!studentCode) throw new AppError('Student code missing from session — please log in again', 401);
   const attempt = await Attempt.create({
     attempt_id: clientAttemptId || `attempt_${randomUUID()}`,
     quiz_id: quiz.quiz_id,

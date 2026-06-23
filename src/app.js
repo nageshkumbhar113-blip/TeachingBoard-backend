@@ -42,18 +42,16 @@ const allowedOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(",").map(o => o.trim()).filter(Boolean)
   : null;
 
-// Capacitor Android/iOS always sends https://localhost or capacitor://localhost
-const CAPACITOR_ORIGINS = ['https://localhost', 'http://localhost', 'capacitor://localhost'];
+// Capacitor Android sends capacitor://localhost (production) or https://localhost (dev)
+const CAPACITOR_ORIGINS = new Set(['capacitor://localhost', 'https://localhost', 'http://localhost']);
 
 app.use(cors({
-  origin: allowedOrigins
-    ? (origin, cb) => {
-        if (!origin) return cb(null, true);
-        if (allowedOrigins.includes(origin)) return cb(null, true);
-        if (CAPACITOR_ORIGINS.some(o => origin === o || origin.startsWith(o + ':'))) return cb(null, true);
-        cb(new Error(`CORS: origin ${origin} not allowed`));
-      }
-    : true,
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true); // server-to-server / curl / Render health checks
+    if (CAPACITOR_ORIGINS.has(origin)) return cb(null, true);
+    if (allowedOrigins && allowedOrigins.includes(origin)) return cb(null, true);
+    cb(new Error(`CORS: origin '${origin}' not allowed`));
+  },
   credentials: true,
 }));
 
@@ -82,12 +80,7 @@ app.use(express.static(FRONTEND_ROOT));
 
 // ── Utility endpoints ────────────────────────────────────────
 app.get("/ping",         (_req, res) => res.json({ message: "pong" }));
-app.get("/api/health",   (_req, res) => res.json({
-  status: "ok",
-  ts: Date.now(),
-  frontendRoot: FRONTEND_ROOT,
-  dirname: __dirname,
-}));
+app.get("/api/health",   (_req, res) => res.json({ status: "ok", ts: Date.now() }));
 
 // ── Short-URL redirects (works on Render without vercel.json) ──
 app.get("/student", (req, res) => {
@@ -113,6 +106,12 @@ const authLimiter = createRateLimiter({
   message:  'Too many login attempts — please try again later',
 });
 
+const vocabLimiter = createRateLimiter({
+  windowMs: 60 * 1000,  // 1 minute
+  max:      60,         // 60 requests per IP per minute
+  message:  'Too many requests — please slow down',
+});
+
 // ── API routes ───────────────────────────────────────────────
 app.use("/api/auth",      authLimiter, authRoutes);
 app.use("/api/quizzes",   quizRoutes);
@@ -127,8 +126,8 @@ app.use("/api/parents",      parentAdminRoutes);
 app.use("/api/parent",       parentDashRoutes);
 app.use("/api/app-version",  appVersionRoutes);
 app.use("/api/admin/words", adminWordRouter);
-app.use("/api/vocab",       vocabRouter);
-app.use("/api/student",     studentWordRouter);
+app.use("/api/vocab",       vocabLimiter, vocabRouter);
+app.use("/api/student",     vocabLimiter, studentWordRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
