@@ -7,6 +7,7 @@ const {
   deleteWord,
   bulkCreateWords,
   autoFillWord,
+  suggestEmoji,
   getVocabSubjects,
   getTestList,
   getTest,
@@ -20,16 +21,17 @@ const {
 
 // ── Admin: /api/admin/words ───────────────────────────────────────────────────
 const adminWordRouter = express.Router();
-adminWordRouter.get('/vocab-config',  requireAdmin, getVocabConfig);
-adminWordRouter.post('/vocab-config', requireAdmin, saveVocabConfig);
-adminWordRouter.get('/test-words',   requireAdmin, getTestWordsForAdmin);
-adminWordRouter.post('/resequence',  requireAdmin, resequenceWords);
-adminWordRouter.get('/',             requireAdmin, listWords);
-adminWordRouter.post('/auto-fill',   requireAdmin, autoFillWord);
-adminWordRouter.post('/bulk',        requireAdmin, bulkCreateWords);
-adminWordRouter.post('/',            requireAdmin, createWord);
-adminWordRouter.patch('/:id',        requireAdmin, updateWord);
-adminWordRouter.delete('/:id',       requireAdmin, deleteWord);
+adminWordRouter.get('/vocab-config',    requireAdmin, getVocabConfig);
+adminWordRouter.post('/vocab-config',   requireAdmin, saveVocabConfig);
+adminWordRouter.get('/test-words',      requireAdmin, getTestWordsForAdmin);
+adminWordRouter.post('/resequence',     requireAdmin, resequenceWords);
+adminWordRouter.get('/suggest-emoji',   requireAdmin, suggestEmoji);
+adminWordRouter.get('/',                requireAdmin, listWords);
+adminWordRouter.post('/auto-fill',      requireAdmin, autoFillWord);
+adminWordRouter.post('/bulk',           requireAdmin, bulkCreateWords);
+adminWordRouter.post('/',               requireAdmin, createWord);
+adminWordRouter.patch('/:id',           requireAdmin, updateWord);
+adminWordRouter.delete('/:id',          requireAdmin, deleteWord);
 
 // ── Student vocab: /api/vocab ─────────────────────────────────────────────────
 const vocabRouter = express.Router();

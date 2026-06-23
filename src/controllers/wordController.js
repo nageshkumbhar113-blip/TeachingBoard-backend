@@ -1,5 +1,6 @@
 const { randomUUID }   = require('crypto');
 const Word                = require('../models/Word');
+const EmojiCache          = require('../models/EmojiCache');
 const VocabSubjectConfig  = require('../models/VocabSubjectConfig');
 const VocabAttempt        = require('../models/VocabAttempt');
 const User             = require('../models/User');
@@ -16,6 +17,46 @@ function escapeRegex(str) {
 
 function normalizeCode(v) {
   return String(v || '').trim().toUpperCase();
+}
+
+// Convert emoji character to OpenEmoji hexcode string e.g. "🍎" → "1F34E"
+function emojiToHexcode(emojiChar) {
+  return [...emojiChar]
+    .map(c => c.codePointAt(0).toString(16).toUpperCase())
+    .join('-');
+}
+
+// Fetch SVG from OpenEmoji CDN, base64-encode, save to EmojiCache.
+// Returns the data URL or null if fetch fails.
+async function _cacheEmoji(emojiChar) {
+  if (!emojiChar) return null;
+  const hexcode = emojiToHexcode(emojiChar);
+  const existing = await EmojiCache.findOne({ hexcode }).lean();
+  if (existing) return existing.svg;
+
+  try {
+    const url = `https://cdn.jsdelivr.net/npm/openmoji/color/svg/${hexcode}.svg`;
+    const svgRes = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!svgRes.ok) return null;
+    const svgText = await svgRes.text();
+    const dataUrl = `data:image/svg+xml;base64,${Buffer.from(svgText).toString('base64')}`;
+    await EmojiCache.create({ hexcode, emoji: emojiChar, svg: dataUrl });
+    return dataUrl;
+  } catch {
+    return null;
+  }
+}
+
+// In-memory cache for openmoji.json (loaded once per server lifetime)
+let _emojiData = null;
+async function _loadEmojiData() {
+  if (_emojiData) return _emojiData;
+  const res = await fetch('https://cdn.jsdelivr.net/npm/openmoji@15.0.0/data/openmoji.json', {
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!res.ok) throw new Error('Failed to load OpenEmoji data');
+  _emojiData = await res.json();
+  return _emojiData;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -39,6 +80,7 @@ function _sanitizeWord(w) {
     phonics:       String(w.phonics       || '').trim(),
     image_url:     String(w.image_url     || '').trim(),
     emoji:         String(w.emoji         || '').trim(),
+    visual_type:   ['word', 'emoji', 'image'].includes(w.visual_type) ? w.visual_type : 'word',
     difficulty:    ['easy', 'medium', 'hard'].includes(w.difficulty) ? w.difficulty : 'medium',
     tags:          Array.isArray(w.tags) ? w.tags.map(t => String(t).trim()).filter(Boolean) : [],
     added_by:      w.added_by === 'student' ? 'student' : 'admin',
@@ -86,6 +128,11 @@ exports.createWord = asyncHandler(async (req, res) => {
   const seq_num = await _nextSeqNum(data.batch, data.subject);
   const word = await Word.create({ word_id: randomUUID(), ...data, seq_num });
 
+  // Pre-cache emoji SVG so first student load is instant
+  if (data.visual_type === 'emoji' && data.emoji) {
+    _cacheEmoji(data.emoji).catch(() => {});
+  }
+
   res.status(201).json({ success: true, data: word });
 });
 
@@ -95,13 +142,17 @@ exports.updateWord = asyncHandler(async (req, res) => {
   if (!wordId) throw new AppError('word id required', 400);
 
   const allow = ['word', 'meaning_mr', 'meaning_en', 'pronunciation', 'phonics',
-                  'image_url', 'emoji', 'difficulty', 'tags'];
+                  'image_url', 'emoji', 'visual_type', 'difficulty', 'tags'];
   const update = {};
   for (const key of allow) {
     if (req.body[key] !== undefined) {
-      update[key] = key === 'tags'
-        ? (Array.isArray(req.body.tags) ? req.body.tags.map(t => String(t).trim()).filter(Boolean) : [])
-        : String(req.body[key]).trim();
+      if (key === 'tags') {
+        update[key] = Array.isArray(req.body.tags) ? req.body.tags.map(t => String(t).trim()).filter(Boolean) : [];
+      } else if (key === 'visual_type') {
+        update[key] = ['word', 'emoji', 'image'].includes(req.body[key]) ? req.body[key] : 'word';
+      } else {
+        update[key] = String(req.body[key]).trim();
+      }
     }
   }
 
@@ -112,6 +163,12 @@ exports.updateWord = asyncHandler(async (req, res) => {
   ).lean();
 
   if (!word) throw new AppError('Word not found', 404);
+
+  // Pre-cache emoji SVG after update
+  if (update.visual_type === 'emoji' && update.emoji) {
+    _cacheEmoji(update.emoji).catch(() => {});
+  }
+
   res.json({ success: true, data: word });
 });
 
@@ -284,20 +341,35 @@ exports.getTest = asyncHandler(async (req, res) => {
 
   if (!words.length) throw new AppError('No words found for this test', 404);
 
+  // Batch-fetch cached emoji SVGs for words that use emoji visual type
+  const emojiWords = words.filter(w => w.visual_type === 'emoji' && w.emoji);
+  const hexcodes   = [...new Set(emojiWords.map(w => emojiToHexcode(w.emoji)))];
+  const cachedEmojis = hexcodes.length
+    ? await EmojiCache.find({ hexcode: { $in: hexcodes } }).lean()
+    : [];
+  const emojiSvgMap = Object.fromEntries(cachedEmojis.map(e => [e.hexcode, e.svg]));
+
   // Return word data only — frontend handles question rendering
-  const wordData = words.map(w => ({
-    word_id:       w.word_id,
-    word:          w.word,
-    meaning_mr:    w.meaning_mr,
-    meaning_en:    w.meaning_en,
-    pronunciation: w.pronunciation,
-    phonics:       w.phonics,
-    image_url:     w.image_url,
-    emoji:         w.emoji,
-    seq_num:       w.seq_num,
-    // Active meaning based on student preference
-    meaning:       meaningLang === 'english' ? w.meaning_en : w.meaning_mr,
-  }));
+  const wordData = words.map(w => {
+    const base = {
+      word_id:       w.word_id,
+      word:          w.word,
+      meaning_mr:    w.meaning_mr,
+      meaning_en:    w.meaning_en,
+      pronunciation: w.pronunciation,
+      phonics:       w.phonics,
+      image_url:     w.image_url,
+      emoji:         w.emoji,
+      visual_type:   w.visual_type || 'word',
+      seq_num:       w.seq_num,
+      meaning:       meaningLang === 'english' ? w.meaning_en : w.meaning_mr,
+    };
+    if (w.visual_type === 'emoji' && w.emoji) {
+      const hex = emojiToHexcode(w.emoji);
+      if (emojiSvgMap[hex]) base.emoji_svg = emojiSvgMap[hex];
+    }
+    return base;
+  });
 
   const cfg = await VocabSubjectConfig.findOne({ batch, subject }).lean();
   const ALL_SECTIONS = ['listen', 'meaning', 'picture', 'spelling'];
@@ -614,4 +686,29 @@ exports.saveVocabConfig = asyncHandler(async (req, res) => {
   ).lean();
 
   res.json({ success: true, data: { batch: cfg.batch, subject: cfg.subject, active_sections: cfg.active_sections } });
+});
+
+// GET /api/admin/words/suggest-emoji?word=apple
+// Searches openmoji.json by word, returns top 10 matching emoji
+exports.suggestEmoji = asyncHandler(async (req, res) => {
+  const word = String(req.query.word || '').trim().toLowerCase();
+  if (!word) throw new AppError('word is required', 400);
+
+  const data = await _loadEmojiData();
+
+  const matches = [];
+  for (const e of data) {
+    // Skip skin-tone variants (they have skintone set)
+    if (!e.emoji || e.skintone) continue;
+    const ann   = (e.annotation    || '').toLowerCase();
+    const tags  = (e.tags          || '').toLowerCase();
+    const oTags = (e.openmoji_tags || '').toLowerCase();
+
+    if (ann.includes(word) || tags.includes(word) || oTags.includes(word)) {
+      matches.push({ emoji: e.emoji, hexcode: e.hexcode, annotation: e.annotation });
+      if (matches.length >= 10) break;
+    }
+  }
+
+  res.json({ success: true, suggestions: matches });
 });

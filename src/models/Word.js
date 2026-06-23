@@ -13,6 +13,7 @@ const wordSchema = new mongoose.Schema(
     phonics:       { type: String, default: '', trim: true },
     image_url:     { type: String, default: '', trim: true },
     emoji:         { type: String, default: '', trim: true },
+    visual_type:   { type: String, enum: ['word', 'emoji', 'image'], default: 'word' },
     difficulty:    { type: String, enum: ['easy', 'medium', 'hard'], default: 'medium' },
     tags:          [{ type: String, trim: true }],
     added_by:      { type: String, enum: ['admin', 'student'], default: 'admin' },
