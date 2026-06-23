@@ -8,6 +8,7 @@ const {
   bulkCreateWords,
   autoFillWord,
   suggestEmoji,
+  uploadWordImage,
   getVocabSubjects,
   getTestList,
   getTest,
@@ -26,6 +27,7 @@ adminWordRouter.post('/vocab-config',   requireAdmin, saveVocabConfig);
 adminWordRouter.get('/test-words',      requireAdmin, getTestWordsForAdmin);
 adminWordRouter.post('/resequence',     requireAdmin, resequenceWords);
 adminWordRouter.get('/suggest-emoji',   requireAdmin, suggestEmoji);
+adminWordRouter.post('/upload-image',   requireAdmin, uploadWordImage);
 adminWordRouter.get('/',                requireAdmin, listWords);
 adminWordRouter.post('/auto-fill',      requireAdmin, autoFillWord);
 adminWordRouter.post('/bulk',           requireAdmin, bulkCreateWords);

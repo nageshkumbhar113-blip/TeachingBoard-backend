@@ -1,4 +1,5 @@
 const { randomUUID }   = require('crypto');
+const { v2: cloudinary } = require('cloudinary');
 const Word                = require('../models/Word');
 const EmojiCache          = require('../models/EmojiCache');
 const VocabSubjectConfig  = require('../models/VocabSubjectConfig');
@@ -7,6 +8,13 @@ const User             = require('../models/User');
 const asyncHandler     = require('../utils/asyncHandler');
 const AppError         = require('../utils/AppError');
 const { sendToMany }   = require('../utils/fcm');
+
+cloudinary.config({
+  cloud_name:  process.env.CLOUDINARY_CLOUD_NAME,
+  api_key:     process.env.CLOUDINARY_API_KEY,
+  api_secret:  process.env.CLOUDINARY_API_SECRET,
+  secure:      true,
+});
 
 const WORDS_PER_TEST = 20;
 const PASS_PCT       = 0.60;
@@ -686,6 +694,27 @@ exports.saveVocabConfig = asyncHandler(async (req, res) => {
   ).lean();
 
   res.json({ success: true, data: { batch: cfg.batch, subject: cfg.subject, active_sections: cfg.active_sections } });
+});
+
+// POST /api/admin/words/upload-image
+// body: { data: "data:image/webp;base64,..." }   (base64 data URL from client compression)
+// Returns: { url: "https://res.cloudinary.com/..." }
+exports.uploadWordImage = asyncHandler(async (req, res) => {
+  const { data } = req.body;
+  if (!data || !data.startsWith('data:image/')) throw new AppError('image data required', 400);
+  if (!process.env.CLOUDINARY_CLOUD_NAME) throw new AppError('Cloudinary not configured', 500);
+
+  // Validate size — base64 of 1MB ≈ 1.37M chars; reject > 3MB base64
+  if (data.length > 3 * 1024 * 1024) throw new AppError('Image too large (max ~2 MB)', 400);
+
+  const result = await cloudinary.uploader.upload(data, {
+    folder:          'teachingboard/words',
+    resource_type:   'image',
+    transformation:  [{ quality: 'auto:good', fetch_format: 'auto' }],
+    allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'gif'],
+  });
+
+  res.json({ success: true, url: result.secure_url });
 });
 
 // GET /api/admin/words/suggest-emoji?word=apple
