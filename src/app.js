@@ -20,6 +20,7 @@ const { adminRouter: teacherAdminRoutes, teacherRouter: teacherDashRoutes } = re
 const { adminRouter: parentAdminRoutes,  parentRouter: parentDashRoutes  } = require("./routes/parentRoutes");
 const appVersionRoutes = require("./routes/appVersionRoutes");
 const { adminWordRouter, vocabRouter, studentWordRouter } = require("./routes/wordRoutes");
+const { adminRouter: wordTestAdminRouter, studentRouter: wordTestStudentRouter } = require("./routes/wordTestRoutes");
 const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
 const { createRateLimiter }             = require("./middleware/rateLimiter");
 
@@ -125,9 +126,11 @@ app.use("/api/teacher",   teacherDashRoutes);
 app.use("/api/parents",      parentAdminRoutes);
 app.use("/api/parent",       parentDashRoutes);
 app.use("/api/app-version",  appVersionRoutes);
-app.use("/api/admin/words", adminWordRouter);
-app.use("/api/vocab",       vocabLimiter, vocabRouter);
-app.use("/api/student",     vocabLimiter, studentWordRouter);
+app.use("/api/admin/words",      adminWordRouter);
+app.use("/api/admin/word-tests", wordTestAdminRouter);
+app.use("/api/vocab",            vocabLimiter, vocabRouter);
+app.use("/api/student",          vocabLimiter, studentWordRouter);
+app.use("/api/word-tests",       vocabLimiter, wordTestStudentRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

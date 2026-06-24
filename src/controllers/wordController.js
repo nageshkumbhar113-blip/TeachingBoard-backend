@@ -89,6 +89,7 @@ function _sanitizeWord(w) {
     image_url:     String(w.image_url     || '').trim(),
     emoji:         String(w.emoji         || '').trim(),
     visual_type:   ['word', 'emoji', 'image'].includes(w.visual_type) ? w.visual_type : 'word',
+    word_category: ['general', 'color', 'number', 'alphabet'].includes(w.word_category) ? w.word_category : 'general',
     difficulty:    ['easy', 'medium', 'hard'].includes(w.difficulty) ? w.difficulty : 'medium',
     tags:          Array.isArray(w.tags) ? w.tags.map(t => String(t).trim()).filter(Boolean) : [],
     added_by:      w.added_by === 'student' ? 'student' : 'admin',
@@ -150,7 +151,7 @@ exports.updateWord = asyncHandler(async (req, res) => {
   if (!wordId) throw new AppError('word id required', 400);
 
   const allow = ['word', 'meaning_mr', 'meaning_en', 'pronunciation', 'phonics',
-                  'image_url', 'emoji', 'visual_type', 'difficulty', 'tags'];
+                  'image_url', 'emoji', 'visual_type', 'word_category', 'difficulty', 'tags'];
   const update = {};
   for (const key of allow) {
     if (req.body[key] !== undefined) {
@@ -158,6 +159,8 @@ exports.updateWord = asyncHandler(async (req, res) => {
         update[key] = Array.isArray(req.body.tags) ? req.body.tags.map(t => String(t).trim()).filter(Boolean) : [];
       } else if (key === 'visual_type') {
         update[key] = ['word', 'emoji', 'image'].includes(req.body[key]) ? req.body[key] : 'word';
+      } else if (key === 'word_category') {
+        update[key] = ['general', 'color', 'number', 'alphabet'].includes(req.body[key]) ? req.body[key] : 'general';
       } else {
         update[key] = String(req.body[key]).trim();
       }
@@ -483,6 +486,75 @@ async function _notifyVocabComplete(studentCode, studentName, batch, subject, te
     await sendToMany(tokens, title, body, data);
   }
 }
+
+// GET /api/vocab/dictionary?batch=X&subject=Y&page=1&q=search
+exports.getDictionary = asyncHandler(async (req, res) => {
+  const batch   = String(req.query.batch   || '').trim();
+  const subject = String(req.query.subject || '').trim();
+  const page    = Math.max(1, parseInt(req.query.page) || 1);
+  const q       = String(req.query.q       || '').trim();
+
+  if (!batch)   throw new AppError('batch is required', 400);
+  if (!subject) throw new AppError('subject is required', 400);
+
+  const filter = { batch, subject };
+  if (q) {
+    const safe = escapeRegex(q);
+    filter.$or = [
+      { word:       { $regex: safe, $options: 'i' } },
+      { meaning_mr: { $regex: safe, $options: 'i' } },
+      { meaning_en: { $regex: safe, $options: 'i' } },
+    ];
+  }
+
+  const total      = await Word.countDocuments(filter);
+  const totalPages = q ? 1 : Math.ceil(total / WORDS_PER_TEST) || 1;
+  const skip       = q ? 0 : (page - 1) * WORDS_PER_TEST;
+  const limit      = q ? 30 : WORDS_PER_TEST;
+
+  const words = await Word.find(filter)
+    .sort({ seq_num: 1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+
+  // Batch-fetch emoji SVGs
+  const emojiWords   = words.filter(w => w.visual_type === 'emoji' && w.emoji);
+  const hexcodes     = [...new Set(emojiWords.map(w => emojiToHexcode(w.emoji)))];
+  const cachedEmojis = hexcodes.length
+    ? await EmojiCache.find({ hexcode: { $in: hexcodes } }).lean()
+    : [];
+  const emojiSvgMap  = Object.fromEntries(cachedEmojis.map(e => [e.hexcode, e.svg]));
+
+  const wordData = words.map(w => {
+    const base = {
+      word_id:       w.word_id,
+      word:          w.word,
+      meaning_mr:    w.meaning_mr,
+      meaning_en:    w.meaning_en,
+      pronunciation: w.pronunciation,
+      image_url:     w.image_url,
+      emoji:         w.emoji,
+      visual_type:   w.visual_type || 'word',
+      seq_num:       w.seq_num,
+    };
+    if (w.visual_type === 'emoji' && w.emoji) {
+      const hex = emojiToHexcode(w.emoji);
+      if (emojiSvgMap[hex]) base.emoji_svg = emojiSvgMap[hex];
+    }
+    return base;
+  });
+
+  res.json({
+    success:     true,
+    total,
+    page:        q ? 1 : page,
+    total_pages: totalPages,
+    test_num:    q ? null : page,
+    word_count:  wordData.length,
+    words:       wordData,
+  });
+});
 
 // POST /api/student/words  (student adds unknown word to shared bank)
 exports.addStudentWord = asyncHandler(async (req, res) => {
