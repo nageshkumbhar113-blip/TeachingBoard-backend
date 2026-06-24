@@ -2,6 +2,11 @@ const { decodeTokenFromHeader } = require('../utils/token');
 const User = require('../models/User');
 const { isExpiredDate, normalizeExpiryDate } = require('../utils/accountStatus');
 
+// 60-second in-memory cache — avoids DB hit on every API request.
+// Max 200 entries; stale entries evicted lazily on insert.
+const _userCache = new Map();
+const _CACHE_TTL = 60_000;
+
 function _studentDenial(userDoc) {
   if (!userDoc || userDoc.role !== 'student') return null;
   if (userDoc.status === 'blocked') {
@@ -21,8 +26,24 @@ async function _attachResolvedUser(req) {
   if (!payload) return null;
 
   req.user = payload;
+
+  const now = Date.now();
+  const hit = _userCache.get(payload.id);
+  if (hit && (now - hit.at) < _CACHE_TTL) {
+    req.userDoc = hit.doc;
+    return payload;
+  }
+
   const userDoc = await User.findOne({ user_id: payload.id }).lean().catch(() => null);
-  if (userDoc) req.userDoc = userDoc;
+  if (userDoc) {
+    req.userDoc = userDoc;
+    _userCache.set(payload.id, { doc: userDoc, at: now });
+    if (_userCache.size > 200) {
+      for (const [k, v] of _userCache) {
+        if (now - v.at > _CACHE_TTL) _userCache.delete(k);
+      }
+    }
+  }
   return payload;
 }
 
