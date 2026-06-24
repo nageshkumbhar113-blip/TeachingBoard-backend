@@ -21,6 +21,7 @@ const { adminRouter: parentAdminRoutes,  parentRouter: parentDashRoutes  } = req
 const appVersionRoutes = require("./routes/appVersionRoutes");
 const { adminWordRouter, vocabRouter, studentWordRouter } = require("./routes/wordRoutes");
 const { adminRouter: wordTestAdminRouter, studentRouter: wordTestStudentRouter } = require("./routes/wordTestRoutes");
+const feeRoutes                         = require("./routes/feeRoutes");
 const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
 const { createRateLimiter }             = require("./middleware/rateLimiter");
 
@@ -131,6 +132,7 @@ app.use("/api/admin/word-tests", wordTestAdminRouter);
 app.use("/api/vocab",            vocabLimiter, vocabRouter);
 app.use("/api/student",          vocabLimiter, studentWordRouter);
 app.use("/api/word-tests",       vocabLimiter, wordTestStudentRouter);
+app.use("/api/fee",              feeRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
