@@ -1,21 +1,14 @@
 /* ═══════════════════════════════════════════════════════════════
    TestAssembler.js — Converts word bank into a generated question set.
-   Word bank fetched ONCE. Emoji SVGs batched ONCE. Zero extra DB
-   queries per question after initial load.
+   Word bank fetched ONCE. Zero extra DB queries per question.
+   emoji_svg is NOT embedded in options — emoji char renders natively
+   on Android (Noto Color Emoji), saving ~95% WordTest document size.
 ═══════════════════════════════════════════════════════════════ */
 
 const { randomUUID }                        = require('crypto');
 const Word                                  = require('../models/Word');
-const EmojiCache                            = require('../models/EmojiCache');
 const { QUESTION_TYPE_RULES, COLOR_POOL }   = require('./QuestionTypeRules');
 const DistractorGenerator                   = require('./DistractorGenerator');
-
-// ── Emoji helper (same as wordController) ────────────────────────
-function _emojiToHexcode(emojiChar) {
-  return [...emojiChar]
-    .map(c => c.codePointAt(0).toString(16).toUpperCase())
-    .join('-');
-}
 
 // ── Fisher-Yates shuffle ─────────────────────────────────────────
 function _shuffle(arr) {
@@ -34,7 +27,6 @@ function _wordToItem(word, rule) {
     text:      '',
     image_url: word.image_url || '',
     emoji:     word.emoji     || '',
-    emoji_svg: word.emoji_svg || '',
     colour:    '',
   };
 
@@ -65,7 +57,6 @@ function _buildOptions(correctItem, distractorItems) {
     text:      item.text      || '',
     image_url: item.image_url || '',
     emoji:     item.emoji     || '',
-    emoji_svg: item.emoji_svg || '',
     colour:    item.colour    || '',
     is_correct:!!item._correct,
   }));
@@ -86,23 +77,7 @@ function _buildOptions(correctItem, distractorItems) {
 async function assemble(batch, subject, questionConfigs) {
   // 1. Fetch entire word bank for this batch+subject ONCE
   const rawWords = await Word.find({ batch, subject }).sort({ seq_num: 1 }).lean();
-
-  // 2. Batch-fetch all emoji SVGs needed by this word pool ONCE
-  const emojiWords = rawWords.filter(w => w.emoji);
-  const hexcodes   = [...new Set(emojiWords.map(w => _emojiToHexcode(w.emoji)))];
-  const cached     = hexcodes.length
-    ? await EmojiCache.find({ hexcode: { $in: hexcodes } }).lean()
-    : [];
-  const svgMap = Object.fromEntries(cached.map(e => [e.hexcode, e.svg]));
-
-  // 3. Attach emoji_svg to word objects (in-memory enrichment)
-  const wordPool = rawWords.map(w => {
-    if (w.emoji) {
-      const hex = _emojiToHexcode(w.emoji);
-      return { ...w, emoji_svg: svgMap[hex] || '' };
-    }
-    return { ...w, emoji_svg: '' };
-  });
+  const wordPool = rawWords;
 
   const usedWordIds = new Set();
   const questions   = [];

@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════
    DistractorGenerator.js — Generates wrong options for word-test questions.
    All strategies work on the in-memory wordPool (no extra DB queries).
-   Returns DistractorItem[]: { word_id, text, image_url, emoji, emoji_svg, colour }
+   Returns DistractorItem[]: { word_id, text, image_url, emoji, colour }
 ═══════════════════════════════════════════════════════════════ */
 
 const { COLOR_POOL, ALPHABET_POOL, NUMBER_POOL } = require('./QuestionTypeRules');
@@ -98,7 +98,6 @@ function _item(overrides) {
     text:      '',
     image_url: '',
     emoji:     '',
-    emoji_svg: '',
     colour:    '',
     ...overrides,
   };
@@ -112,7 +111,7 @@ function _sameSubjectImages(correctWordId, wordPool) {
   )
   .slice(0, 3)
   .map(w => _item({ word_id: w.word_id, text: w.word, image_url: w.image_url,
-                     emoji: w.emoji || '', emoji_svg: w.emoji_svg || '' }));
+                     emoji: w.emoji || '' }));
 }
 
 function _sameSubjectWords(correctWordId, wordPool) {
@@ -173,8 +172,8 @@ function _fixedNumberPool(correctText) {
 /**
  * Generate distractors for a given strategy.
  * @param {string}   strategy   - key from QUESTION_TYPE_RULES.distractor_strategy
- * @param {object}   correctWord - lean Word document (already has emoji_svg attached if needed)
- * @param {object[]} wordPool    - all words in batch+subject (lean, emoji_svg pre-attached)
+ * @param {object}   correctWord - lean Word document from word bank
+ * @param {object[]} wordPool    - all words in batch+subject (lean Word docs)
  * @returns {DistractorItem[]} up to 3 distractor items
  */
 function generate(strategy, correctWord, wordPool) {
