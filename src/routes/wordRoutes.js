@@ -12,6 +12,7 @@ const {
   getVocabSubjects,
   getTestList,
   getTest,
+  getDictionary,
   submitAttempt,
   addStudentWord,
   getVocabConfig,
@@ -41,6 +42,7 @@ vocabRouter.get('/auto-fill',        requireStudent, autoFillWord);
 vocabRouter.get('/subjects',         requireStudent, getVocabSubjects);
 vocabRouter.get('/test-list',        requireStudent, getTestList);
 vocabRouter.get('/test/:num',        requireStudent, getTest);
+vocabRouter.get('/dictionary',       requireStudent, getDictionary);
 vocabRouter.post('/attempt',         requireStudent, submitAttempt);
 
 // ── Student adds word: /api/student ──────────────────────────────────────────
