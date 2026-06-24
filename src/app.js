@@ -22,6 +22,7 @@ const appVersionRoutes = require("./routes/appVersionRoutes");
 const { adminWordRouter, vocabRouter, studentWordRouter } = require("./routes/wordRoutes");
 const { adminRouter: wordTestAdminRouter, studentRouter: wordTestStudentRouter } = require("./routes/wordTestRoutes");
 const feeRoutes                         = require("./routes/feeRoutes");
+const { adminRouter: noteAdminRouter, studentRouter: noteStudentRouter } = require("./routes/noteRoutes");
 const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
 const { createRateLimiter }             = require("./middleware/rateLimiter");
 
@@ -58,6 +59,8 @@ app.use(cors({
 }));
 
 // ── Body parsing ────────────────────────────────────────────
+// Higher limit for PDF note uploads only (base64 of 10MB PDF ≈ 13.5MB JSON)
+app.use('/api/admin/notes/upload', express.json({ limit: '15mb' }));
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: false }));
 
@@ -133,6 +136,8 @@ app.use("/api/vocab",            vocabLimiter, vocabRouter);
 app.use("/api/student",          vocabLimiter, studentWordRouter);
 app.use("/api/word-tests",       vocabLimiter, wordTestStudentRouter);
 app.use("/api/fee",              feeRoutes);
+app.use("/api/admin/notes",     noteAdminRouter);
+app.use("/api/notes",           noteStudentRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
