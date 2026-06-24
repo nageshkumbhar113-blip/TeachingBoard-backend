@@ -4,6 +4,7 @@
 
 const WordTest        = require('../models/WordTest');
 const WordTestAttempt = require('../models/WordTestAttempt');
+const Word            = require('../models/Word');
 const asyncHandler    = require('../utils/asyncHandler');
 const AppError        = require('../utils/AppError');
 const { getStats }    = require('../engine/WordBankStats');
@@ -79,6 +80,98 @@ exports.saveDraft = asyncHandler(async (req, res) => {
   });
 
   res.status(201).json({ success: true, test_id: test.test_id, message: 'Draft saved.' });
+});
+
+// ══════════════════════════════════════════════════════════════════
+// ADMIN — Auto-generate tests from Word Bank (20 words per test)
+// POST /api/admin/word-tests/auto-generate
+// body: { batch, subject, words_per_test?, question_configs?, overwrite? }
+// ══════════════════════════════════════════════════════════════════
+const DEFAULT_AUTO_CONFIGS = [
+  { type: 'listen_choose_word',  count: 5 },
+  { type: 'listen_pick_picture', count: 5 },
+  { type: 'listen_meaning_mr',   count: 4 },
+  { type: 'listen_spelling',     count: 4 },
+  { type: 'listen_type_word',    count: 2 },
+];
+const DEFAULT_WORDS_PER_TEST = 20;
+
+exports.autoGenerate = asyncHandler(async (req, res) => {
+  const { batch, subject, words_per_test, question_configs, overwrite } = req.body;
+
+  if (!batch)   throw new AppError('batch is required', 400);
+  if (!subject) throw new AppError('subject is required', 400);
+
+  const chunkSize = Math.min(50, Math.max(5, Number(words_per_test) || DEFAULT_WORDS_PER_TEST));
+  const configs   = Array.isArray(question_configs) && question_configs.length
+    ? question_configs
+    : DEFAULT_AUTO_CONFIGS;
+
+  // Check existing draft/published tests for this batch+subject
+  const existingCount = await WordTest.countDocuments({ batch, subject });
+  if (existingCount > 0 && !overwrite) {
+    return res.json({
+      success:  false,
+      conflict: true,
+      existing: existingCount,
+      message:  `${existingCount} test(s) already exist for ${batch} › ${subject}. Send overwrite:true to replace.`,
+    });
+  }
+
+  // Fetch all words sorted by seq_num
+  const words = await Word.find({ batch, subject }).sort({ seq_num: 1 }).lean();
+  if (words.length === 0) throw new AppError('No words in word bank for this batch+subject', 422);
+
+  // Split into chunks
+  const chunks = [];
+  for (let i = 0; i < words.length; i += chunkSize) {
+    chunks.push(words.slice(i, i + chunkSize));
+  }
+
+  // Delete old tests if overwrite
+  if (overwrite && existingCount > 0) {
+    await WordTest.deleteMany({ batch, subject });
+  }
+
+  const created  = [];
+  const warnings = [];
+
+  for (let idx = 0; idx < chunks.length; idx++) {
+    const chunkWords  = chunks[idx];
+    const wordIds     = new Set(chunkWords.map(w => w.word_id));
+    const chunkNum    = idx + 1;
+    const title       = `${subject} — Set ${chunkNum}`;
+
+    // assemble uses the full chunk as the word pool
+    const result = await assemble(batch, subject, configs, chunkWords);
+
+    if (result.questions.length === 0) {
+      warnings.push(`Set ${chunkNum}: no questions generated (${chunkWords.length} words). Skipped.`);
+      continue;
+    }
+
+    const test = await WordTest.create({
+      title,
+      batch,
+      subject,
+      status:          'draft',
+      questions:        result.questions,
+      total_questions:  result.questions.length,
+      pass_percent:     60,
+      created_by:       req.user?.id || 'auto',
+    });
+
+    created.push({ test_id: test.test_id, title, questions: result.questions.length });
+    if (result.warnings.length) warnings.push(...result.warnings.map(w => `Set ${chunkNum}: ${w}`));
+  }
+
+  res.status(201).json({
+    success:      true,
+    created_count: created.length,
+    tests:         created,
+    warnings,
+    message:       `${created.length} test draft(s) created for ${batch} › ${subject}.`,
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════

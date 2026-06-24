@@ -31,7 +31,11 @@ function _wordToItem(word, rule) {
   };
 
   switch (rule.answer_field) {
-    case 'image_url':   base.text = word.word;        break;
+    case 'image_url':
+      base.text = word.word;
+      // emoji-only word: no image_url but has emoji — still valid visual
+      if (!base.image_url && word.emoji) base.emoji = word.emoji;
+      break;
     case 'meaning_mr':  base.text = word.meaning_mr;  break;
     case 'meaning_en':  base.text = word.meaning_en;  break;
     case 'word':
@@ -74,10 +78,11 @@ function _buildOptions(correctItem, distractorItems) {
  *   questions — array of WordTestQuestion-compatible objects
  *   warnings  — string[] describing any types that produced fewer Qs than requested
  */
-async function assemble(batch, subject, questionConfigs) {
-  // 1. Fetch entire word bank for this batch+subject ONCE
-  const rawWords = await Word.find({ batch, subject }).sort({ seq_num: 1 }).lean();
-  const wordPool = rawWords;
+async function assemble(batch, subject, questionConfigs, preloadedWords) {
+  // Use preloaded words (for auto-generate chunks) or fetch from DB
+  const wordPool = preloadedWords
+    ? preloadedWords
+    : await Word.find({ batch, subject }).sort({ seq_num: 1 }).lean();
 
   const usedWordIds = new Set();
   const questions   = [];
@@ -94,11 +99,12 @@ async function assemble(batch, subject, questionConfigs) {
     const requestedCount = Math.max(1, parseInt(config.count) || 1);
 
     // Filter eligible words for this type (not already used + required fields present)
-    const eligible = wordPool.filter(w =>
-      !usedWordIds.has(w.word_id) &&
-      rule.requires_fields.every(f => w[f] && String(w[f]).trim() !== '') &&
-      (!rule.requires_category || w.word_category === rule.requires_category)
-    );
+    const eligible = wordPool.filter(w => {
+      if (usedWordIds.has(w.word_id)) return false;
+      if (rule.requires_category && w.word_category !== rule.requires_category) return false;
+      if (rule.has_visual) return !!(w.image_url || w.emoji);
+      return rule.requires_fields.every(f => w[f] && String(w[f]).trim() !== '');
+    });
 
     // typing type: no distractors needed, just 1 word per question
     // all others: need distractor pool to be large enough

@@ -7,6 +7,7 @@ const adminRouter = express.Router();
 
 adminRouter.get('/stats',                       requireAdmin, ctrl.getWordBankStats);
 adminRouter.post('/generate',                   requireAdmin, ctrl.generatePreview);
+adminRouter.post('/auto-generate',              requireAdmin, ctrl.autoGenerate);
 adminRouter.post('/',                           requireAdmin, ctrl.saveDraft);
 adminRouter.get('/',                            requireAdmin, ctrl.listTests);
 adminRouter.get('/:test_id',                    requireAdmin, ctrl.getTestAdmin);

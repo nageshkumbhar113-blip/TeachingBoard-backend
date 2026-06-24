@@ -114,6 +114,15 @@ function _sameSubjectImages(correctWordId, wordPool) {
                      emoji: w.emoji || '' }));
 }
 
+function _sameSubjectVisuals(correctWordId, wordPool) {
+  return _shuffle(
+    wordPool.filter(w => w.word_id !== correctWordId && (w.image_url || w.emoji))
+  )
+  .slice(0, 3)
+  .map(w => _item({ word_id: w.word_id, text: w.word, image_url: w.image_url || '',
+                     emoji: w.emoji || '' }));
+}
+
 function _sameSubjectWords(correctWordId, wordPool) {
   return _shuffle(
     wordPool.filter(w => w.word_id !== correctWordId)
@@ -179,6 +188,7 @@ function _fixedNumberPool(correctText) {
 function generate(strategy, correctWord, wordPool) {
   switch (strategy) {
     case 'same_subject_images':      return _sameSubjectImages(correctWord.word_id, wordPool);
+    case 'same_subject_visuals':     return _sameSubjectVisuals(correctWord.word_id, wordPool);
     case 'same_subject_words':       return _sameSubjectWords(correctWord.word_id, wordPool);
     case 'same_subject_meanings_mr': return _sameSubjectMeaningsMr(correctWord.word_id, wordPool);
     case 'same_subject_meanings_en': return _sameSubjectMeaningsEn(correctWord.word_id, wordPool);
