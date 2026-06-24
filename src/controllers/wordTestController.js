@@ -74,7 +74,7 @@ exports.saveDraft = asyncHandler(async (req, res) => {
     status:          'draft',
     questions,
     total_questions: questions.length,
-    pass_percent:    pass_percent || 60,
+    pass_percent:    Math.min(100, Math.max(0, Number(pass_percent) || 60)),
     created_by:      req.user?.id || '',
   });
 
@@ -124,7 +124,7 @@ exports.updateTest = asyncHandler(async (req, res) => {
   const { title, questions, pass_percent } = req.body;
   if (title)                      test.title         = title.trim();
   if (Array.isArray(questions))  { test.questions = questions; test.total_questions = questions.length; }
-  if (pass_percent !== undefined) test.pass_percent  = pass_percent;
+  if (pass_percent !== undefined) test.pass_percent = Math.min(100, Math.max(0, Number(pass_percent) || 60));
 
   await test.save();
   res.json({ success: true, message: 'Test updated.' });
@@ -219,27 +219,35 @@ exports.listStudentTests = asyncHandler(async (req, res) => {
   if (!batch)   throw new AppError('batch is required', 400);
   if (!subject) throw new AppError('subject is required', 400);
 
-  // Verify the student is allowed to access this batch
-  const assignedBatches = Array.isArray(req.user?.assigned_batches) ? req.user.assigned_batches : [];
-  if (assignedBatches.length > 0 && !assignedBatches.includes(batch))
-    throw new AppError('Access denied for this batch', 403);
+  // Verify the student is allowed to access this batch by checking DB (JWT doesn't carry assigned_batches)
+  const studentCode = req.user?.student_code || '';
+  if (studentCode) {
+    const studentDoc = await require('../models/User').findOne(
+      { student_code: studentCode, role: 'student' },
+      { assigned_batches: 1 }
+    ).lean();
+    const assigned = Array.isArray(studentDoc?.assigned_batches) ? studentDoc.assigned_batches : [];
+    if (assigned.length > 0 && !assigned.includes(batch))
+      throw new AppError('Access denied for this batch', 403);
+  }
 
   const tests = await WordTest.find(
     { batch, subject, status: 'published' },
     { test_id: 1, title: 1, total_questions: 1, pass_percent: 1, published_at: 1 }
   ).sort({ published_at: -1 }).lean();
 
-  const studentCode = req.user?.student_code || '';
-  const testIds     = tests.map(t => t.test_id);
+  const testIds = tests.map(t => t.test_id);
 
   const attempts = studentCode && testIds.length
     ? await WordTestAttempt.find(
         { test_id: { $in: testIds }, student_code: studentCode },
-        { test_id: 1, score: 1, total: 1, passed: 1 }
-      ).lean()
+        { test_id: 1, score: 1, total: 1, passed: 1, submitted_at: 1 }
+      ).sort({ submitted_at: -1 }).lean()
     : [];
 
-  const attemptMap = Object.fromEntries(attempts.map(a => [a.test_id, a]));
+  // Keep only the latest attempt per test (sort desc ensures first match is latest)
+  const attemptMap = {};
+  attempts.forEach(a => { if (!attemptMap[a.test_id]) attemptMap[a.test_id] = a; });
 
   const result = tests.map(t => ({
     ...t,
