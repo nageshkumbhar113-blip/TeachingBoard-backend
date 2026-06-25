@@ -14,7 +14,7 @@ cloudinary.config({
 // POST /api/admin/notes/upload
 // body: { title, batch, subject, data: "data:application/pdf;base64,..." }
 exports.uploadNote = asyncHandler(async (req, res) => {
-  const { title, batch, subject, data } = req.body;
+  const { title, batch, subject, chapter, data } = req.body;
   if (!title)   throw new AppError('title is required', 400);
   if (!batch)   throw new AppError('batch is required', 400);
   if (!subject) throw new AppError('subject is required', 400);
@@ -39,6 +39,7 @@ exports.uploadNote = asyncHandler(async (req, res) => {
     title:                title.trim(),
     batch:                batch.trim(),
     subject:              subject.trim(),
+    chapter:              (chapter || '').trim(),
     cloudinary_url:       result.secure_url,
     cloudinary_public_id: result.public_id,
     file_size_bytes:      fileSizeBytes,
@@ -53,13 +54,33 @@ exports.listNotesAdmin = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.batch)   filter.batch   = req.query.batch;
   if (req.query.subject) filter.subject = req.query.subject;
+  if (req.query.chapter) filter.chapter = req.query.chapter;
 
   const notes = await Note.find(filter)
     .sort({ created_at: -1 })
-    .select('-cloudinary_url')   // URL not needed in admin list either
+    .select('-cloudinary_url')
     .lean();
 
   res.json({ success: true, notes });
+});
+
+// PUT /api/admin/notes/:id
+exports.updateNote = asyncHandler(async (req, res) => {
+  const { title, batch, subject, chapter } = req.body;
+  if (!title)   throw new AppError('title is required', 400);
+  if (!batch)   throw new AppError('batch is required', 400);
+  if (!subject) throw new AppError('subject is required', 400);
+
+  const note = await Note.findOne({ note_id: req.params.id });
+  if (!note) throw new AppError('Note not found', 404);
+
+  note.title   = title.trim();
+  note.batch   = batch.trim();
+  note.subject = subject.trim();
+  note.chapter = (chapter || '').trim();
+  await note.save();
+
+  res.json({ success: true, note_id: note.note_id });
 });
 
 // DELETE /api/admin/notes/:id

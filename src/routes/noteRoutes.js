@@ -6,6 +6,7 @@ const ctrl            = require('../controllers/noteController');
 const adminRouter = express.Router();
 adminRouter.post('/upload',  requireAdmin, ctrl.uploadNote);
 adminRouter.get('/',         requireAdmin, ctrl.listNotesAdmin);
+adminRouter.put('/:id',      requireAdmin, ctrl.updateNote);
 adminRouter.delete('/:id',   requireAdmin, ctrl.deleteNote);
 
 // ── Student: /api/notes ───────────────────────────────────────────────────────

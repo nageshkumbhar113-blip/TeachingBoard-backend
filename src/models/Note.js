@@ -6,6 +6,7 @@ const noteSchema = new mongoose.Schema({
   title:                { type: String, required: true, trim: true },
   batch:                { type: String, required: true, trim: true },
   subject:              { type: String, required: true, trim: true },
+  chapter:              { type: String, default: '', trim: true },
   cloudinary_url:       { type: String, required: true },   // server-only, NEVER sent to student
   cloudinary_public_id: { type: String, required: true },   // for Cloudinary destroy
   file_size_bytes:      { type: Number, default: 0 },
