@@ -63,9 +63,8 @@ async function requireAuth(req, res, next) {
 
 async function requireAdmin(req, res, next) {
   const payload = await _attachResolvedUser(req);
-  if (!payload || payload.role !== 'admin') {
-    return res.status(403).json({ success: false, message: 'Admin access required' });
-  }
+  if (!payload) return res.status(401).json({ success: false, message: 'Authentication required' });
+  if (payload.role !== 'admin') return res.status(403).json({ success: false, message: 'Admin access required' });
   next();
 }
 
@@ -90,17 +89,15 @@ async function requireStudent(req, res, next) {
 
 async function requireTeacher(req, res, next) {
   const payload = await _attachResolvedUser(req);
-  if (!payload || payload.role !== 'teacher') {
-    return res.status(403).json({ success: false, message: 'Teacher login required' });
-  }
+  if (!payload) return res.status(401).json({ success: false, message: 'Authentication required' });
+  if (payload.role !== 'teacher') return res.status(403).json({ success: false, message: 'Teacher access required' });
   next();
 }
 
 async function requireParent(req, res, next) {
   const payload = await _attachResolvedUser(req);
-  if (!payload || payload.role !== 'parent') {
-    return res.status(403).json({ success: false, message: 'Parent login required' });
-  }
+  if (!payload) return res.status(401).json({ success: false, message: 'Authentication required' });
+  if (payload.role !== 'parent') return res.status(403).json({ success: false, message: 'Parent access required' });
   next();
 }
 
