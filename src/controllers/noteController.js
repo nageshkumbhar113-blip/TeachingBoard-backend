@@ -1,4 +1,5 @@
 const { v2: cloudinary } = require('cloudinary');
+const { Readable }   = require('stream');
 const Note         = require('../models/Note');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError     = require('../utils/AppError');
@@ -143,22 +144,18 @@ exports.viewNoteStudent = asyncHandler(async (req, res) => {
   }
   if (!pdfResp.ok) throw new AppError('PDF not available', 502);
 
-  res.setHeader('Content-Type',            'application/pdf');
-  res.setHeader('Content-Disposition',     'inline');
-  res.setHeader('Cache-Control',           'private, no-store');
-  res.setHeader('X-Content-Type-Options',  'nosniff');
+  res.setHeader('Content-Type',           'application/pdf');
+  res.setHeader('Content-Disposition',    'inline');
+  res.setHeader('Cache-Control',          'private, no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
 
-  // Stream PDF binary to student
-  const reader = pdfResp.body.getReader();
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      res.write(Buffer.from(value));
-    }
-    res.end();
-  } catch (e) {
-    // Headers already sent — can't change status, just close
-    res.end();
-  }
+  // Forward Content-Length so Render proxy streams instead of buffering
+  const cl = pdfResp.headers.get('content-length');
+  if (cl) res.setHeader('Content-Length', cl);
+
+  // Pipe using Node.js streams — handles backpressure, no manual loop needed
+  const nodeStream = Readable.fromWeb(pdfResp.body);
+  nodeStream.on('error', () => res.end());
+  res.on('close', () => nodeStream.destroy());
+  nodeStream.pipe(res);
 });
