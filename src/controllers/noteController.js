@@ -124,8 +124,10 @@ exports.viewNoteStudent = asyncHandler(async (req, res) => {
   if (!note) throw new AppError('Note not found', 404);
 
   // Batch gate: student can only view notes for their own assigned batches
-  const assignedBatches = Array.isArray(req.userDoc?.assigned_batches) ? req.userDoc.assigned_batches : [];
-  const noteBatchLower  = (note.batch || '').toLowerCase();
+  const assignedBatches = Array.isArray(req.userDoc?.assigned_batches)
+    ? req.userDoc.assigned_batches.map(b => String(b || '').trim()).filter(Boolean)
+    : [];
+  const noteBatchLower  = (note.batch || '').trim().toLowerCase();
   if (assignedBatches.length > 0 && !assignedBatches.some(b => b.toLowerCase() === noteBatchLower))
     throw new AppError('Access denied — this note is not for your batch', 403);
 
@@ -148,11 +150,15 @@ exports.viewNoteStudent = asyncHandler(async (req, res) => {
 
   // Stream PDF binary to student
   const reader = pdfResp.body.getReader();
-  const pump   = async () => {
-    const { done, value } = await reader.read();
-    if (done) { res.end(); return; }
-    res.write(Buffer.from(value));
-    await pump();
-  };
-  await pump();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(Buffer.from(value));
+    }
+    res.end();
+  } catch (e) {
+    // Headers already sent — can't change status, just close
+    res.end();
+  }
 });

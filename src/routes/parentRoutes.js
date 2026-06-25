@@ -7,6 +7,7 @@ const {
   deleteParent,
   getMyChildren,
   getChildAttempts,
+  getChildFee,
   updateDeviceToken,
 } = require('../controllers/parentController');
 
@@ -21,6 +22,7 @@ adminRouter.delete('/:id', requireAdmin, deleteParent);
 const parentRouter = express.Router();
 parentRouter.get('/children',                requireParent, getMyChildren);
 parentRouter.get('/children/:code/attempts', requireParent, getChildAttempts);
+parentRouter.get('/children/:code/fee',      requireParent, getChildFee);
 parentRouter.patch('/device-token',          requireParent, updateDeviceToken);
 
 module.exports = { adminRouter, parentRouter };

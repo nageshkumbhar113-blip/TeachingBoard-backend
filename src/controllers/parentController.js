@@ -1,6 +1,8 @@
 const { randomUUID } = require('crypto');
 const User = require('../models/User');
 const Attempt = require('../models/Attempt');
+const FeeRecord = require('../models/FeeRecord');
+const FeeConfig  = require('../models/FeeConfig');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 
@@ -183,6 +185,56 @@ exports.getChildAttempts = asyncHandler(async (req, res) => {
     .lean();
 
   res.json({ success: true, count: attempts.length, skip, limit, data: attempts });
+});
+
+// ── Parent: child fee records ─────────────────────────────────────────────────
+
+exports.getChildFee = asyncHandler(async (req, res) => {
+  const parentDoc = req.userDoc || await User.findOne({ user_id: req.user.id }).lean();
+  if (!parentDoc) throw new AppError('Parent not found', 404);
+
+  const studentCode = normalizeCode(req.params.code);
+  if (!studentCode) throw new AppError('student_code is required', 400);
+
+  const childCodes = Array.isArray(parentDoc.children)
+    ? parentDoc.children.map(c => normalizeCode(c))
+    : [];
+  if (!childCodes.includes(studentCode))
+    throw new AppError('Student is not your child', 403);
+
+  const records = await FeeRecord.find({ student_code: studentCode })
+    .sort({ created_at: -1 })
+    .lean();
+
+  if (!records.length) return res.json({ success: true, data: [] });
+
+  const configIds = [...new Set(records.map(r => r.fee_config_id))];
+  const configs   = await FeeConfig.find({ fee_config_id: { $in: configIds } }).lean();
+  const configMap = new Map(configs.map(c => [c.fee_config_id, c]));
+
+  const data = records.map(r => {
+    const cfg = configMap.get(r.fee_config_id) || {};
+    return {
+      fee_record_id:           r.fee_record_id,
+      label:                   cfg.label || '',
+      fee_type:                cfg.fee_type || 'tuition',
+      due_date:                cfg.due_date || null,
+      config_status:           cfg.status || 'active',
+      total_amount:            r.total_amount,
+      paid_amount:             r.paid_amount,
+      status:                  r.status,
+      next_installment_amount: r.next_installment_amount,
+      next_installment_date:   r.next_installment_date,
+      payments:                r.payments.map(p => ({
+        amount:       p.amount,
+        paid_at:      p.paid_at,
+        payment_mode: p.payment_mode,
+        note:         p.note,
+      })),
+    };
+  });
+
+  res.json({ success: true, data });
 });
 
 // ── Parent: register FCM device token ────────────────────────────────────────
