@@ -8,6 +8,11 @@ const answerSchema = new mongoose.Schema({
   time_ms:      { type: Number, default: 0 },
 }, { _id: false, versionKey: false });
 
+const sectionSchema = new mongoose.Schema({
+  score: { type: Number, default: 0 },
+  total: { type: Number, default: 0 },
+}, { _id: false, versionKey: false });
+
 const wordTestAttemptSchema = new mongoose.Schema({
   attempt_id:   { type: String, required: true, unique: true, index: true, default: () => randomUUID() },
   test_id:      { type: String, required: true, index: true },
@@ -19,6 +24,12 @@ const wordTestAttemptSchema = new mongoose.Schema({
   total:        { type: Number, default: 0 },
   passed:       { type: Boolean, default: false },
   submitted_at: { type: Date, default: () => new Date() },
+  section_scores: {
+    listening:  { type: sectionSchema, default: () => ({ score: 0, total: 0 }) },
+    vocabulary: { type: sectionSchema, default: () => ({ score: 0, total: 0 }) },
+    spelling:   { type: sectionSchema, default: () => ({ score: 0, total: 0 }) },
+  },
+  weak_word_ids: { type: [String], default: [] },
 }, { collection: 'word_test_attempts', versionKey: false });
 
 wordTestAttemptSchema.index({ test_id: 1, student_code: 1 });

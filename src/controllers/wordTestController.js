@@ -9,6 +9,16 @@ const asyncHandler    = require('../utils/asyncHandler');
 const AppError        = require('../utils/AppError');
 const { getStats }    = require('../engine/WordBankStats');
 const { assemble }    = require('../engine/TestAssembler');
+const User            = require('../models/User');
+
+// Question type → skill category mapping (used for section_scores)
+const SKILL_MAP = {
+  listen_choose_word:  'listening',
+  listen_pick_picture: 'listening',
+  listen_meaning_mr:   'vocabulary',
+  listen_spelling:     'spelling',
+  listen_type_word:    'spelling',
+};
 
 // ══════════════════════════════════════════════════════════════════
 // ADMIN — Stats (called before creating a test)
@@ -430,15 +440,41 @@ exports.submitAttempt = asyncHandler(async (req, res) => {
   const total  = test.questions.length;
   const passed = total > 0 && (score / total * 100) >= test.pass_percent;
 
+  // Compute section_scores and weak_word_ids from graded answers
+  const qMetaMap = Object.fromEntries(
+    test.questions.map(q => [q.question_id, { type: q.type, word_id: q.word_id }])
+  );
+  const secs = {
+    listening:  { score: 0, total: 0 },
+    vocabulary: { score: 0, total: 0 },
+    spelling:   { score: 0, total: 0 },
+  };
+  const weakSet = new Set();
+  scoredAnswers.forEach(a => {
+    const meta  = qMetaMap[a.question_id];
+    if (!meta) return;
+    const skill = SKILL_MAP[meta.type];
+    if (!skill) return;
+    secs[skill].total++;
+    if (a.is_correct) {
+      secs[skill].score++;
+    } else if (meta.word_id) {
+      weakSet.add(meta.word_id);
+    }
+  });
+  const weak_word_ids = [...weakSet].slice(0, 20);
+
   const attempt = await WordTestAttempt.create({
-    test_id:      test.test_id,
-    student_code: studentCode,
-    batch:        test.batch,
-    subject:      test.subject,
-    answers:      scoredAnswers,
+    test_id:        test.test_id,
+    student_code:   studentCode,
+    batch:          test.batch,
+    subject:        test.subject,
+    answers:        scoredAnswers,
     score,
     total,
     passed,
+    section_scores: secs,
+    weak_word_ids,
   });
 
   // Return correct answers so student can review after submit
@@ -454,5 +490,250 @@ exports.submitAttempt = asyncHandler(async (req, res) => {
     passed,
     percent:         total > 0 ? Math.round(score / total * 100) : 0,
     correct_answers: correctAnswers,
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════
+// STUDENT — My word test analytics
+// GET /api/word-tests/analytics?batch=&subject=
+// ══════════════════════════════════════════════════════════════════
+exports.studentAnalytics = asyncHandler(async (req, res) => {
+  const studentCode = req.user?.student_code;
+  if (!studentCode) throw new AppError('Student identity missing', 401);
+
+  const batch   = String(req.query.batch   || '').trim();
+  const subject = String(req.query.subject || '').trim();
+
+  const filter = { student_code: studentCode };
+  if (batch)   filter.batch   = batch;
+  if (subject) filter.subject = subject;
+
+  const attempts = await WordTestAttempt.find(filter, {
+    test_id: 1, score: 1, total: 1, passed: 1,
+    submitted_at: 1, section_scores: 1, weak_word_ids: 1, subject: 1,
+  }).sort({ submitted_at: -1 }).limit(20).lean();
+
+  if (!attempts.length) {
+    return res.json({
+      success: true,
+      summary: { attempts: 0, avg_percent: 0, pass_rate: 0 },
+      sections: {
+        listening:  { avg: null, attempts_with_data: 0 },
+        vocabulary: { avg: null, attempts_with_data: 0 },
+        spelling:   { avg: null, attempts_with_data: 0 },
+      },
+      weak_words:   [],
+      recent_tests: [],
+    });
+  }
+
+  // Overall summary
+  const pctSum    = attempts.reduce((s, a) => s + (a.total > 0 ? (a.score / a.total) * 100 : 0), 0);
+  const passCount = attempts.filter(a => a.passed).length;
+
+  // Section averages — only count attempts that have section data (total > 0)
+  const secAgg = {
+    listening:  { sum: 0, cnt: 0 },
+    vocabulary: { sum: 0, cnt: 0 },
+    spelling:   { sum: 0, cnt: 0 },
+  };
+  attempts.forEach(a => {
+    const ss = a.section_scores || {};
+    for (const skill of ['listening', 'vocabulary', 'spelling']) {
+      const s = ss[skill];
+      if (s && s.total > 0) {
+        secAgg[skill].sum += (s.score / s.total) * 100;
+        secAgg[skill].cnt++;
+      }
+    }
+  });
+  const sections = {};
+  for (const [skill, d] of Object.entries(secAgg)) {
+    sections[skill] = {
+      avg:                d.cnt > 0 ? Math.round(d.sum / d.cnt) : null,
+      attempts_with_data: d.cnt,
+    };
+  }
+
+  // Weak words — collect across attempts, rank by frequency, fetch names
+  const wordFreq = {};
+  attempts.forEach(a => {
+    (a.weak_word_ids || []).forEach(wid => { wordFreq[wid] = (wordFreq[wid] || 0) + 1; });
+  });
+  const topWeakIds = Object.entries(wordFreq)
+    .sort((a, b) => b[1] - a[1]).slice(0, 5).map(([id]) => id);
+  const weakDocs = topWeakIds.length
+    ? await Word.find({ word_id: { $in: topWeakIds } }, { word_id: 1, word: 1, _id: 0 }).lean()
+    : [];
+  const wordNameMap = Object.fromEntries(weakDocs.map(w => [w.word_id, w.word]));
+  const weak_words = topWeakIds.map(wid => ({
+    word_id: wid, word: wordNameMap[wid] || wid, miss_count: wordFreq[wid],
+  }));
+
+  // Recent tests — fetch titles, build lightweight list
+  const testIds  = [...new Set(attempts.map(a => a.test_id))];
+  const testDocs = await WordTest.find({ test_id: { $in: testIds } }, { test_id: 1, title: 1, _id: 0 }).lean();
+  const titleMap = Object.fromEntries(testDocs.map(t => [t.test_id, t.title]));
+
+  const recent_tests = attempts.slice(0, 10).map(a => {
+    const pct = a.total > 0 ? Math.round((a.score / a.total) * 100) : 0;
+    const ss  = a.section_scores || {};
+    return {
+      test_id:      a.test_id,
+      title:        titleMap[a.test_id] || 'Word Test',
+      subject:      a.subject,
+      percent:      pct,
+      passed:       a.passed,
+      submitted_at: a.submitted_at,
+      sections: {
+        listening:  ss.listening?.total  > 0 ? Math.round(ss.listening.score  / ss.listening.total  * 100) : null,
+        vocabulary: ss.vocabulary?.total > 0 ? Math.round(ss.vocabulary.score / ss.vocabulary.total * 100) : null,
+        spelling:   ss.spelling?.total   > 0 ? Math.round(ss.spelling.score   / ss.spelling.total   * 100) : null,
+      },
+    };
+  });
+
+  res.json({
+    success: true,
+    summary: {
+      attempts:    attempts.length,
+      avg_percent: Math.round(pctSum / attempts.length),
+      pass_rate:   Math.round(passCount / attempts.length * 100),
+    },
+    sections,
+    weak_words,
+    recent_tests,
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════
+// ADMIN — Class word test analytics
+// GET /api/admin/word-tests/analytics?batch=&subject=
+// ══════════════════════════════════════════════════════════════════
+exports.classAnalytics = asyncHandler(async (req, res) => {
+  const batch   = String(req.query.batch   || '').trim();
+  const subject = String(req.query.subject || '').trim();
+  if (!batch)   throw new AppError('batch is required', 400);
+  if (!subject) throw new AppError('subject is required', 400);
+
+  const attempts = await WordTestAttempt.find({ batch, subject }, {
+    student_code: 1, score: 1, total: 1, passed: 1,
+    section_scores: 1, weak_word_ids: 1,
+  }).lean();
+
+  if (!attempts.length) {
+    return res.json({
+      success: true,
+      class_summary: { students_attempted: 0, avg_percent: 0, pass_rate: 0, sections: {} },
+      students: [],
+      common_weak_words: [],
+    });
+  }
+
+  // Aggregate per student
+  const sm = {};
+  attempts.forEach(a => {
+    if (!sm[a.student_code]) {
+      sm[a.student_code] = {
+        code: a.student_code, attempts: 0, pctSum: 0, pctCnt: 0, passedCnt: 0,
+        secs: {
+          listening:  { sum: 0, cnt: 0 },
+          vocabulary: { sum: 0, cnt: 0 },
+          spelling:   { sum: 0, cnt: 0 },
+        },
+      };
+    }
+    const s = sm[a.student_code];
+    s.attempts++;
+    if (a.total > 0) { s.pctSum += (a.score / a.total) * 100; s.pctCnt++; }
+    if (a.passed) s.passedCnt++;
+    const ss = a.section_scores || {};
+    for (const skill of ['listening', 'vocabulary', 'spelling']) {
+      const sec = ss[skill];
+      if (sec && sec.total > 0) {
+        s.secs[skill].sum += (sec.score / sec.total) * 100;
+        s.secs[skill].cnt++;
+      }
+    }
+  });
+
+  // Fetch student names
+  const codes    = Object.keys(sm);
+  const userDocs = await User.find(
+    { student_code: { $in: codes }, role: 'student' },
+    { student_code: 1, name: 1, _id: 0 }
+  ).lean();
+  const nameMap = Object.fromEntries(userDocs.map(u => [u.student_code, u.name]));
+
+  // Build student rows
+  const students = Object.values(sm).map(s => {
+    const avg_percent = s.pctCnt > 0 ? Math.round(s.pctSum / s.pctCnt) : 0;
+    const secAvgs = {};
+    let weakestSkill = null; let weakestVal = 101;
+    for (const skill of ['listening', 'vocabulary', 'spelling']) {
+      const v = s.secs[skill].cnt > 0 ? Math.round(s.secs[skill].sum / s.secs[skill].cnt) : null;
+      secAvgs[skill] = v;
+      if (v !== null && v < weakestVal) { weakestVal = v; weakestSkill = skill; }
+    }
+    const attention = avg_percent < 50 || Object.values(secAvgs).some(v => v !== null && v < 40);
+    return {
+      student_code:    s.code,
+      name:            nameMap[s.code] || s.code,
+      attempts:        s.attempts,
+      avg_percent,
+      passed_count:    s.passedCnt,
+      sections:        secAvgs,
+      weakest_section: weakestSkill,
+      attention,
+    };
+  }).sort((a, b) => a.avg_percent - b.avg_percent);
+
+  // Class-wide section averages (average of student averages)
+  const classSecs = {
+    listening:  { sum: 0, cnt: 0 },
+    vocabulary: { sum: 0, cnt: 0 },
+    spelling:   { sum: 0, cnt: 0 },
+  };
+  students.forEach(s => {
+    for (const skill of ['listening', 'vocabulary', 'spelling']) {
+      if (s.sections[skill] !== null) {
+        classSecs[skill].sum += s.sections[skill];
+        classSecs[skill].cnt++;
+      }
+    }
+  });
+  const classSectionAvgs = {};
+  for (const [skill, d] of Object.entries(classSecs)) {
+    classSectionAvgs[skill] = { avg: d.cnt > 0 ? Math.round(d.sum / d.cnt) : null };
+  }
+
+  const classAvgPct  = students.length
+    ? Math.round(students.reduce((s, st) => s + st.avg_percent, 0) / students.length) : 0;
+  const classPassRate = attempts.length
+    ? Math.round(attempts.filter(a => a.passed).length / attempts.length * 100) : 0;
+
+  // Common weak words
+  const wordFreq = {};
+  attempts.forEach(a => {
+    (a.weak_word_ids || []).forEach(wid => { wordFreq[wid] = (wordFreq[wid] || 0) + 1; });
+  });
+  const topIds   = Object.entries(wordFreq).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([id]) => id);
+  const weakDocs = topIds.length
+    ? await Word.find({ word_id: { $in: topIds } }, { word_id: 1, word: 1, _id: 0 }).lean() : [];
+  const wNameMap = Object.fromEntries(weakDocs.map(w => [w.word_id, w.word]));
+  const common_weak_words = topIds.map(id => ({
+    word_id: id, word: wNameMap[id] || id, miss_count: wordFreq[id],
+  }));
+
+  res.json({
+    success: true,
+    class_summary: {
+      students_attempted: students.length,
+      avg_percent:        classAvgPct,
+      pass_rate:          classPassRate,
+      sections:           classSectionAvgs,
+    },
+    students,
+    common_weak_words,
   });
 });

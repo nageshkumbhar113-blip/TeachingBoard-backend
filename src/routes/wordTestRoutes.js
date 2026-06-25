@@ -6,6 +6,7 @@ const ctrl = require('../controllers/wordTestController');
 const adminRouter = express.Router();
 
 adminRouter.get('/stats',                       requireAdmin, ctrl.getWordBankStats);
+adminRouter.get('/analytics',                   requireAdmin, ctrl.classAnalytics);   // before /:test_id
 adminRouter.post('/generate',                   requireAdmin, ctrl.generatePreview);
 adminRouter.post('/auto-generate',              requireAdmin, ctrl.autoGenerate);
 adminRouter.post('/',                           requireAdmin, ctrl.saveDraft);
@@ -20,6 +21,7 @@ adminRouter.get('/:test_id/results',            requireAdmin, ctrl.getTestResult
 // ── Student router (/api/word-tests) ─────────────────────────────
 const studentRouter = express.Router();
 
+studentRouter.get('/analytics',                 requireStudent, ctrl.studentAnalytics); // before /:test_id
 studentRouter.get('/',                          requireStudent, ctrl.listStudentTests);
 studentRouter.get('/:test_id',                  requireStudent, ctrl.getTestStudent);
 studentRouter.post('/:test_id/attempt',         requireStudent, ctrl.submitAttempt);
