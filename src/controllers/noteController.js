@@ -119,9 +119,9 @@ exports.viewNoteStudent = asyncHandler(async (req, res) => {
   const note = await Note.findOne({ note_id: req.params.id, status: 'active' });
   if (!note) throw new AppError('Note not found', 404);
 
-  // Batch gate: student can only view notes for their own batch
-  const studentBatch = req.userDoc?.batch;
-  if (studentBatch && note.batch !== studentBatch)
+  // Batch gate: student can only view notes for their own assigned batches
+  const assignedBatches = Array.isArray(req.userDoc?.assigned_batches) ? req.userDoc.assigned_batches : [];
+  if (assignedBatches.length > 0 && !assignedBatches.includes(note.batch))
     throw new AppError('Access denied — this note is not for your batch', 403);
 
   // Increment view count (non-blocking, ignore errors)
