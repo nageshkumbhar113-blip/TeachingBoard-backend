@@ -2,10 +2,11 @@ const { Schema, model } = require('mongoose');
 const { randomUUID }    = require('crypto');
 
 const paymentSchema = new Schema({
-  amount:    { type: Number, required: true, min: 0 },
-  paid_at:   { type: Date, default: () => new Date() },
-  note:      { type: String, trim: true, default: '' },
-  marked_by: { type: String, trim: true, default: '' },
+  amount:       { type: Number, required: true, min: 0 },
+  paid_at:      { type: Date, default: () => new Date() },
+  payment_mode: { type: String, enum: ['cash', 'online', 'upi', 'cheque', 'other'], default: 'cash' },
+  note:         { type: String, trim: true, default: '' },
+  marked_by:    { type: String, trim: true, default: '' },
 }, { _id: false });
 
 const feeRecordSchema = new Schema({

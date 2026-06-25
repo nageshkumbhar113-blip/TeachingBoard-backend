@@ -154,11 +154,18 @@ exports.addPayment = asyncHandler(async (req, res) => {
   }).lean();
   if (!config) throw new AppError('Unauthorized', 403);
 
-  const amount = Number(req.body.amount);
+  const amount       = Number(req.body.amount);
   if (!amount || amount <= 0) throw new AppError('amount must be > 0', 400);
+
+  const validModes   = ['cash', 'online', 'upi', 'cheque', 'other'];
+  const payment_mode = validModes.includes(req.body.payment_mode) ? req.body.payment_mode : 'cash';
+  const paid_at      = req.body.paid_date ? new Date(req.body.paid_date) : new Date();
+  if (isNaN(paid_at.getTime())) throw new AppError('paid_date is invalid', 400);
 
   record.payments.push({
     amount,
+    paid_at,
+    payment_mode,
     note:      String(req.body.note || '').trim(),
     marked_by: teacherDoc.name || teacherDoc.user_id,
   });
@@ -257,7 +264,7 @@ exports.updateUpiSettings = asyncHandler(async (req, res) => {
   const upi_id   = String(req.body.upi_id   || '').trim();
   const upi_name = String(req.body.upi_name || '').trim();
 
-  await teacherDoc.constructor.updateOne(
+  await User.updateOne(
     { user_id: teacherDoc.user_id },
     { $set: { fee_upi_id: upi_id, fee_upi_name: upi_name } }
   );

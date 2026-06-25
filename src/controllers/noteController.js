@@ -3,6 +3,10 @@ const Note         = require('../models/Note');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError     = require('../utils/AppError');
 
+function _iregex(s) {
+  return { $regex: new RegExp('^' + String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') };
+}
+
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key:    process.env.CLOUDINARY_API_KEY,
@@ -102,8 +106,8 @@ exports.deleteNote = asyncHandler(async (req, res) => {
 // Returns metadata only — cloudinary_url NEVER included
 exports.listNotesStudent = asyncHandler(async (req, res) => {
   const filter = { status: 'active' };
-  if (req.query.batch)   filter.batch   = req.query.batch;
-  if (req.query.subject) filter.subject = req.query.subject;
+  if (req.query.batch)   filter.batch   = _iregex(req.query.batch);
+  if (req.query.subject) filter.subject = _iregex(req.query.subject);
 
   const notes = await Note.find(filter)
     .sort({ created_at: -1 })
@@ -121,7 +125,8 @@ exports.viewNoteStudent = asyncHandler(async (req, res) => {
 
   // Batch gate: student can only view notes for their own assigned batches
   const assignedBatches = Array.isArray(req.userDoc?.assigned_batches) ? req.userDoc.assigned_batches : [];
-  if (assignedBatches.length > 0 && !assignedBatches.includes(note.batch))
+  const noteBatchLower  = (note.batch || '').toLowerCase();
+  if (assignedBatches.length > 0 && !assignedBatches.some(b => b.toLowerCase() === noteBatchLower))
     throw new AppError('Access denied — this note is not for your batch', 403);
 
   // Increment view count (non-blocking, ignore errors)
