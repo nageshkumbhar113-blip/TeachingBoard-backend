@@ -18,8 +18,10 @@ const feeRecordSchema = new Schema({
   paid_amount:   { type: Number, default: 0, min: 0 },
   status:        { type: String, enum: ['pending', 'partial', 'paid'], default: 'pending', index: true },
   payments:      { type: [paymentSchema], default: [] },
-  notified_days: { type: [String], default: [] }, // ["2026-07-01"] — prevents duplicate daily sends
-  created_at:    { type: Date, default: () => new Date() },
+  notified_days:            { type: [String], default: [] }, // ["2026-07-01"] — prevents duplicate daily sends
+  next_installment_amount:  { type: Number, default: 0 },
+  next_installment_date:    { type: Date,   default: null },
+  created_at:               { type: Date, default: () => new Date() },
 });
 
 feeRecordSchema.index({ fee_config_id: 1, student_code: 1 }, { unique: true });

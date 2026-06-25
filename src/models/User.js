@@ -35,6 +35,8 @@ const userSchema = new mongoose.Schema(
     // Teacher-specific
     teacher_code:       { type: String, unique: true, sparse: true, trim: true, index: true },
     assigned_students:  { type: [String], default: [] }, // array of student_codes
+    fee_upi_id:         { type: String, default: '', trim: true },
+    fee_upi_name:       { type: String, default: '', trim: true },
 
     // Parent-specific
     parent_code:  { type: String, unique: true, sparse: true, trim: true, index: true },

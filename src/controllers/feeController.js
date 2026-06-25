@@ -9,12 +9,15 @@ const asyncHandler = require('../utils/asyncHandler');
 const AppError     = require('../utils/AppError');
 const { sendToMany } = require('../utils/fcm');
 
-// UPI payment deep link config — set UPI_ID and UPI_NAME in Render env vars
-const _UPI_ID   = process.env.UPI_ID   || 'jyotikanagesh1320-1@okicici';
-const _UPI_NAME = process.env.UPI_NAME || 'Teaching Board';
+// UPI payment deep link config — fallback env vars; teachers can override per-account
+const _DEFAULT_UPI_ID   = process.env.UPI_ID   || '';
+const _DEFAULT_UPI_NAME = process.env.UPI_NAME || 'Teaching Board';
 
-function _buildUpiLink(amount, label) {
-  return `upi://pay?pa=${encodeURIComponent(_UPI_ID)}&pn=${encodeURIComponent(_UPI_NAME)}&am=${amount}&cu=INR&tn=${encodeURIComponent(label)}`;
+function _buildUpiLink(amount, label, upiId, upiName) {
+  const pa = upiId   || _DEFAULT_UPI_ID;
+  const pn = upiName || _DEFAULT_UPI_NAME;
+  if (!pa) return null;
+  return `upi://pay?pa=${encodeURIComponent(pa)}&pn=${encodeURIComponent(pn)}&am=${amount}&cu=INR&tn=${encodeURIComponent(label)}`;
 }
 
 function _fmtDate(d) {
@@ -39,19 +42,22 @@ exports.createFeeConfig = asyncHandler(async (req, res) => {
   const teacherDoc = req.userDoc;
   if (!teacherDoc) throw new AppError('Teacher not found', 404);
 
-  const { batch, fee_type, label, total_amount, due_date } = req.body;
+  const { batch, fee_type, label, total_amount, due_date, student_code } = req.body;
   if (!batch)             throw new AppError('batch is required', 400);
   if (!label?.trim())     throw new AppError('label is required', 400);
   if (!total_amount || Number(total_amount) < 1) throw new AppError('total_amount must be ≥ 1', 400);
   if (!due_date)          throw new AppError('due_date is required', 400);
 
   const assignedCodes = Array.isArray(teacherDoc.assigned_students) ? teacherDoc.assigned_students : [];
-  const batchStudents = await User.find({
-    role: 'student',
-    student_code: { $in: assignedCodes },
-    assigned_batches: batch,
-  }).select('student_code name').lean();
 
+  // Single student or all batch students
+  const studentFilter = { role: 'student', student_code: { $in: assignedCodes }, assigned_batches: batch };
+  if (student_code) {
+    if (!assignedCodes.includes(student_code)) throw new AppError('Student not in your assigned list', 403);
+    studentFilter.student_code = student_code;
+  }
+
+  const batchStudents = await User.find(studentFilter).select('student_code name').lean();
   if (!batchStudents.length) throw new AppError('No students found in this batch', 400);
 
   const config = await FeeConfig.create({
@@ -167,6 +173,7 @@ exports.addPayment = asyncHandler(async (req, res) => {
     paid_amount:      record.paid_amount,
     remaining_amount: remaining,
     status:           record.status,
+    upi_link:         remaining > 0 ? _buildUpiLink(remaining, config.label, teacherDoc.fee_upi_id, teacherDoc.fee_upi_name) : null,
     message:          record.status === 'paid' ? '✅ पूर्ण फी मिळाली!' : `₹${remaining} बाकी आहे.`,
   });
 });
@@ -206,6 +213,58 @@ exports.closeFeeConfig = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Fee config closed.' });
 });
 
+// ── Update next installment amount + date on a record ────────────────────────
+exports.updateNextInstallment = asyncHandler(async (req, res) => {
+  const teacherDoc = req.userDoc;
+  if (!teacherDoc) throw new AppError('Teacher not found', 404);
+
+  const record = await FeeRecord.findOne({ fee_record_id: req.params.id });
+  if (!record) throw new AppError('Fee record not found', 404);
+
+  const config = await FeeConfig.findOne({
+    fee_config_id: record.fee_config_id,
+    created_by:    teacherDoc.user_id,
+  }).lean();
+  if (!config) throw new AppError('Unauthorized', 403);
+
+  const amount = Number(req.body.amount || 0);
+  if (amount < 0) throw new AppError('amount must be ≥ 0', 400);
+
+  record.next_installment_amount = amount;
+  record.next_installment_date   = req.body.date ? new Date(req.body.date) : null;
+  await record.save();
+
+  const upi_link = amount > 0 ? _buildUpiLink(amount, config.label, teacherDoc.fee_upi_id, teacherDoc.fee_upi_name) : null;
+  res.json({ success: true, upi_link });
+});
+
+// ── Return teacher's UPI config ───────────────────────────────────────────────
+exports.upiConfig = asyncHandler(async (req, res) => {
+  const teacherDoc = req.userDoc;
+  if (!teacherDoc) throw new AppError('Teacher not found', 404);
+  res.json({
+    success:  true,
+    upi_id:   teacherDoc.fee_upi_id   || '',
+    upi_name: teacherDoc.fee_upi_name || '',
+  });
+});
+
+// ── Save teacher's UPI ID + name ──────────────────────────────────────────────
+exports.updateUpiSettings = asyncHandler(async (req, res) => {
+  const teacherDoc = req.userDoc;
+  if (!teacherDoc) throw new AppError('Teacher not found', 404);
+
+  const upi_id   = String(req.body.upi_id   || '').trim();
+  const upi_name = String(req.body.upi_name || '').trim();
+
+  await teacherDoc.constructor.updateOne(
+    { user_id: teacherDoc.user_id },
+    { $set: { fee_upi_id: upi_id, fee_upi_name: upi_name } }
+  );
+
+  res.json({ success: true, message: 'UPI settings saved.' });
+});
+
 // ── CRON: Process fee reminders (called by cron-job.org daily at 9 AM IST) ───
 exports.processReminders = asyncHandler(async (req, res) => {
   const secret   = String(req.headers['x-cron-secret'] || '').trim();
@@ -218,6 +277,15 @@ exports.processReminders = asyncHandler(async (req, res) => {
   const cutoff   = new Date(); cutoff.setDate(cutoff.getDate() - 30);
 
   const configs = await FeeConfig.find({ status: 'active', due_date: { $gte: cutoff } }).lean();
+
+  // Cache teacher UPI IDs to avoid repeated DB hits
+  const _teacherUpiCache = {};
+  async function _getTeacherUpi(teacherId) {
+    if (_teacherUpiCache[teacherId]) return _teacherUpiCache[teacherId];
+    const t = await User.findOne({ user_id: teacherId }).select('fee_upi_id fee_upi_name').lean();
+    _teacherUpiCache[teacherId] = { id: t?.fee_upi_id || '', name: t?.fee_upi_name || '' };
+    return _teacherUpiCache[teacherId];
+  }
 
   let notified = 0;
 
@@ -266,7 +334,7 @@ exports.processReminders = asyncHandler(async (req, res) => {
           student_code:  record.student_code,
           days_left:     String(days),
           remaining:     String(remaining),
-          upi_link:      _buildUpiLink(remaining, config.label),
+          upi_link:      await (async () => { const u = await _getTeacherUpi(config.created_by); return _buildUpiLink(remaining, config.label, u.id, u.name); })(),
         }).catch(err => console.warn('Fee FCM error:', err.message));
         notified++;
       }
