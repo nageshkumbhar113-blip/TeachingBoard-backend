@@ -15,7 +15,9 @@ async function authStudentByPin(studentCode, pin) {
   const code = normalizeCode(studentCode);
   const student = await User.findOne({ student_code: code, role: 'student' });
   if (!student || !student.verifyPin(String(pin || '').trim())) {
-    throw new AppError('Invalid student code or PIN', 401);
+    // 403 (not 401): the frontend's request() treats 401 as "session expired"
+    // and triggers a global re-login popup, which would disrupt the pay flow.
+    throw new AppError('Invalid student code or PIN', 403);
   }
   if (student.status === 'blocked') {
     throw new AppError('Account is blocked', 403);
