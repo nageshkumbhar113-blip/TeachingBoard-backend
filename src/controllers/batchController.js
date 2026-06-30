@@ -117,46 +117,32 @@ exports.getBatches = asyncHandler(async (req, res) => {
  * Create a new batch in the catalog.
  * Body: { name, icon? }
  */
-// Shared: validate pricing input and compute discounted_price.
-// Returns { pricing_type, base_price, discount, discounted_price }.
-function buildPricingFields({ pricing_type, base_price, discount }) {
-  if (pricing_type !== undefined && !['free', 'paid'].includes(pricing_type)) {
-    throw new AppError('pricing_type must be "free" or "paid"', 400);
-  }
+// Shared: validate subscription pricing input (monthly/yearly + trial).
+// All batches are paid (Jio/Hotstar style); the only free access is the trial.
+// Returns { pricing_type, monthly_price, yearly_price, trial_days }.
+function buildPricingFields({ monthly_price, yearly_price, trial_days }) {
+  const monthly = monthly_price === undefined ? 0 : Number(monthly_price);
+  const yearly  = yearly_price  === undefined ? 0 : Number(yearly_price);
+  const trial   = trial_days    === undefined ? 1 : Number(trial_days);
 
-  // Free batch (or unspecified-but-free)
-  if (pricing_type === 'free') {
-    return { pricing_type: 'free', base_price: 0, discount: null, discounted_price: 0 };
+  if (!Number.isFinite(monthly) || monthly < 0) {
+    throw new AppError('monthly_price must be a number >= 0', 400);
   }
-
-  // Paid batch
-  if (base_price === undefined || base_price < 0) {
-    throw new AppError('base_price is required and must be >= 0', 400);
+  if (!Number.isFinite(yearly) || yearly < 0) {
+    throw new AppError('yearly_price must be a number >= 0', 400);
   }
-
-  let discountedPrice = base_price;
-  let normalizedDiscount = null;
-  if (discount && discount.type && discount.value) {
-    if (!['fixed', 'percentage'].includes(discount.type)) {
-      throw new AppError('discount.type must be "fixed" or "percentage"', 400);
-    }
-    if (discount.value < 0) {
-      throw new AppError('discount value must be >= 0', 400);
-    }
-    if (discount.type === 'fixed') {
-      discountedPrice = Math.max(0, base_price - discount.value);
-    } else {
-      if (discount.value > 100) throw new AppError('discount percentage must be between 0-100', 400);
-      discountedPrice = base_price * (1 - discount.value / 100);
-    }
-    normalizedDiscount = discount;
+  if (monthly <= 0 && yearly <= 0) {
+    throw new AppError('Set at least one of monthly_price or yearly_price', 400);
+  }
+  if (!Number.isFinite(trial) || trial < 0) {
+    throw new AppError('trial_days must be a number >= 0', 400);
   }
 
   return {
     pricing_type: 'paid',
-    base_price,
-    discount: normalizedDiscount,
-    discounted_price: Math.round(discountedPrice * 100) / 100,
+    monthly_price: Math.round(monthly * 100) / 100,
+    yearly_price: Math.round(yearly * 100) / 100,
+    trial_days: Math.floor(trial),
   };
 }
 
@@ -165,8 +151,8 @@ exports.createBatch = asyncHandler(async (req, res) => {
   const icon = String(req.body.icon || '📚').trim() || '📚';
   if (!name) throw new AppError('name is required', 400);
 
-  // Pricing is optional at creation; when pricing_type is provided, persist it.
-  const hasPricing = req.body.pricing_type !== undefined;
+  // Pricing is optional at creation; when monthly/yearly is provided, persist it.
+  const hasPricing = req.body.monthly_price !== undefined || req.body.yearly_price !== undefined;
   const pricingFields = hasPricing ? buildPricingFields(req.body) : {};
   const description = req.body.description !== undefined ? String(req.body.description).trim() : undefined;
 
@@ -184,9 +170,9 @@ exports.createBatch = asyncHandler(async (req, res) => {
       name: batch.name,
       icon: batch.icon,
       pricing_type: batch.pricing_type,
-      base_price: batch.base_price,
-      discount: batch.discount,
-      discounted_price: batch.discounted_price,
+      monthly_price: batch.monthly_price,
+      yearly_price: batch.yearly_price,
+      trial_days: batch.trial_days,
       description: batch.description,
     },
   });
@@ -361,51 +347,10 @@ exports.updateBatchPricing = asyncHandler(async (req, res) => {
   const name = decodeURIComponent(req.params.name || '').trim();
   if (!name) throw new AppError('batch name is required', 400);
 
-  const { pricing_type, base_price, discount, description } = req.body;
+  const updateData = buildPricingFields(req.body);
 
-  if (!pricing_type || !['free', 'paid'].includes(pricing_type)) {
-    throw new AppError('pricing_type must be "free" or "paid"', 400);
-  }
-
-  const updateData = { pricing_type };
-
-  if (pricing_type === 'paid') {
-    if (base_price === undefined || base_price < 0) {
-      throw new AppError('base_price is required and must be >= 0', 400);
-    }
-    updateData.base_price = base_price;
-
-    // Calculate discounted price
-    let discountedPrice = base_price;
-    if (discount && discount.type && discount.value) {
-      if (!['fixed', 'percentage'].includes(discount.type)) {
-        throw new AppError('discount.type must be "fixed" or "percentage"', 400);
-      }
-
-      if (discount.type === 'fixed') {
-        discountedPrice = Math.max(0, base_price - discount.value);
-      } else if (discount.type === 'percentage') {
-        if (discount.value < 0 || discount.value > 100) {
-          throw new AppError('discount percentage must be between 0-100', 400);
-        }
-        discountedPrice = base_price * (1 - discount.value / 100);
-      }
-
-      updateData.discount = discount;
-    } else {
-      updateData.discount = null;
-    }
-
-    updateData.discounted_price = Math.round(discountedPrice * 100) / 100;
-  } else {
-    // Free batch
-    updateData.base_price = 0;
-    updateData.discount = null;
-    updateData.discounted_price = 0;
-  }
-
-  if (description !== undefined) {
-    updateData.description = String(description).trim();
+  if (req.body.description !== undefined) {
+    updateData.description = String(req.body.description).trim();
   }
 
   const batch = await Batch.findOneAndUpdate(
@@ -423,9 +368,9 @@ exports.updateBatchPricing = asyncHandler(async (req, res) => {
     data: {
       name: batch.name,
       pricing_type: batch.pricing_type,
-      base_price: batch.base_price,
-      discount: batch.discount,
-      discounted_price: batch.discounted_price,
+      monthly_price: batch.monthly_price,
+      yearly_price: batch.yearly_price,
+      trial_days: batch.trial_days,
       description: batch.description,
     },
   });
@@ -450,9 +395,9 @@ exports.getBatchPricing = asyncHandler(async (req, res) => {
       name: batch.name,
       icon: batch.icon,
       pricing_type: batch.pricing_type || 'paid',
-      base_price: batch.base_price || 0,
-      discount: batch.discount || null,
-      discounted_price: batch.discounted_price || 0,
+      monthly_price: batch.monthly_price || 0,
+      yearly_price: batch.yearly_price || 0,
+      trial_days: batch.trial_days != null ? batch.trial_days : 1,
       description: batch.description || '',
       is_active: batch.is_active,
     },
@@ -465,16 +410,16 @@ exports.getBatchPricing = asyncHandler(async (req, res) => {
  */
 exports.getAllBatchesPricing = asyncHandler(async (req, res) => {
   const batches = await Batch.find({ is_active: true })
-    .select('name icon pricing_type base_price discount discounted_price description')
+    .select('name icon pricing_type monthly_price yearly_price trial_days description')
     .lean();
 
   const data = batches.map(b => ({
     name: b.name,
     icon: b.icon,
     pricing_type: b.pricing_type || 'paid',
-    base_price: b.base_price || 0,
-    discount: b.discount || null,
-    discounted_price: b.discounted_price || 0,
+    monthly_price: b.monthly_price || 0,
+    yearly_price: b.yearly_price || 0,
+    trial_days: b.trial_days != null ? b.trial_days : 1,
     description: b.description || '',
   }));
 
