@@ -16,6 +16,9 @@ const {
   saveVocabConfig,
   getTestWordsForAdmin,
   resequenceWords,
+  getTestList,
+  getTest,
+  submitAttempt,
 } = require('../controllers/wordController');
 
 // ── Admin: /api/admin/words ───────────────────────────────────────────────────
@@ -38,6 +41,9 @@ const vocabRouter = express.Router();
 vocabRouter.get('/auto-fill',        requireStudent, autoFillWord);
 vocabRouter.get('/subjects',         requireStudent, getVocabSubjects);
 vocabRouter.get('/dictionary',       requireStudent, getDictionary);
+vocabRouter.get('/test-list',        requireStudent, getTestList);
+vocabRouter.get('/test/:num',        requireStudent, getTest);
+vocabRouter.post('/attempt',         requireStudent, submitAttempt);
 
 // ── Student adds word: /api/student ──────────────────────────────────────────
 const studentWordRouter = express.Router();

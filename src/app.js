@@ -23,6 +23,7 @@ const { adminWordRouter, vocabRouter, studentWordRouter } = require("./routes/wo
 const { adminRouter: wordTestAdminRouter, studentRouter: wordTestStudentRouter } = require("./routes/wordTestRoutes");
 const feeRoutes                         = require("./routes/feeRoutes");
 const { adminRouter: noteAdminRouter, studentRouter: noteStudentRouter } = require("./routes/noteRoutes");
+const { adminRouter: slsAdminRouter, studentRouter: slsStudentRouter, slsRouter } = require("./routes/slsRoutes");
 const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
 const { createRateLimiter }             = require("./middleware/rateLimiter");
 
@@ -138,6 +139,9 @@ app.use("/api/word-tests",       vocabLimiter, wordTestStudentRouter);
 app.use("/api/fee",              feeRoutes);
 app.use("/api/admin/notes",     noteAdminRouter);
 app.use("/api/notes",           noteStudentRouter);
+app.use("/api/admin/sls",       slsAdminRouter);
+app.use("/api/sls",             slsStudentRouter);
+app.use("/api/sls",             slsRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

@@ -1,7 +1,17 @@
 const asyncHandler = require('../utils/asyncHandler');
 const AppError     = require('../utils/AppError');
-const Question     = require('../models/Question');
-const Batch        = require('../models/Batch');
+const Question           = require('../models/Question');
+const Batch              = require('../models/Batch');
+const User               = require('../models/User');
+const Word               = require('../models/Word');
+const WordTest           = require('../models/WordTest');
+const VocabSubjectConfig = require('../models/VocabSubjectConfig');
+const VocabAttempt       = require('../models/VocabAttempt');
+const WordTestAttempt    = require('../models/WordTestAttempt');
+const FeeConfig          = require('../models/FeeConfig');
+const FeeRecord          = require('../models/FeeRecord');
+const Note               = require('../models/Note');
+const Lesson             = require('../models/Lesson');
 
 /**
  * GET /api/batches
@@ -107,28 +117,163 @@ exports.getBatches = asyncHandler(async (req, res) => {
  * Create a new batch in the catalog.
  * Body: { name, icon? }
  */
+// Shared: validate pricing input and compute discounted_price.
+// Returns { pricing_type, base_price, discount, discounted_price }.
+function buildPricingFields({ pricing_type, base_price, discount }) {
+  if (pricing_type !== undefined && !['free', 'paid'].includes(pricing_type)) {
+    throw new AppError('pricing_type must be "free" or "paid"', 400);
+  }
+
+  // Free batch (or unspecified-but-free)
+  if (pricing_type === 'free') {
+    return { pricing_type: 'free', base_price: 0, discount: null, discounted_price: 0 };
+  }
+
+  // Paid batch
+  if (base_price === undefined || base_price < 0) {
+    throw new AppError('base_price is required and must be >= 0', 400);
+  }
+
+  let discountedPrice = base_price;
+  let normalizedDiscount = null;
+  if (discount && discount.type && discount.value) {
+    if (!['fixed', 'percentage'].includes(discount.type)) {
+      throw new AppError('discount.type must be "fixed" or "percentage"', 400);
+    }
+    if (discount.value < 0) {
+      throw new AppError('discount value must be >= 0', 400);
+    }
+    if (discount.type === 'fixed') {
+      discountedPrice = Math.max(0, base_price - discount.value);
+    } else {
+      if (discount.value > 100) throw new AppError('discount percentage must be between 0-100', 400);
+      discountedPrice = base_price * (1 - discount.value / 100);
+    }
+    normalizedDiscount = discount;
+  }
+
+  return {
+    pricing_type: 'paid',
+    base_price,
+    discount: normalizedDiscount,
+    discounted_price: Math.round(discountedPrice * 100) / 100,
+  };
+}
+
 exports.createBatch = asyncHandler(async (req, res) => {
   const name = String(req.body.name || '').trim();
   const icon = String(req.body.icon || '📚').trim() || '📚';
   if (!name) throw new AppError('name is required', 400);
 
+  // Pricing is optional at creation; when pricing_type is provided, persist it.
+  const hasPricing = req.body.pricing_type !== undefined;
+  const pricingFields = hasPricing ? buildPricingFields(req.body) : {};
+  const description = req.body.description !== undefined ? String(req.body.description).trim() : undefined;
+
+  const insertDoc = { name, icon, subjects: [], ...pricingFields };
+  if (description !== undefined) insertDoc.description = description;
+
   const batch = await Batch.findOneAndUpdate(
     { name },
-    { $setOnInsert: { name, icon, subjects: [] } },
+    { $setOnInsert: insertDoc },
     { upsert: true, new: true }
   );
-  res.status(201).json({ success: true, data: { name: batch.name, icon: batch.icon } });
+  res.status(201).json({
+    success: true,
+    data: {
+      name: batch.name,
+      icon: batch.icon,
+      pricing_type: batch.pricing_type,
+      base_price: batch.base_price,
+      discount: batch.discount,
+      discounted_price: batch.discounted_price,
+      description: batch.description,
+    },
+  });
 });
 
 /**
  * DELETE /api/batches/:name
- * Remove a batch from the catalog.
+ * Remove a batch and cascade-delete all related data:
+ *   - Students' assigned_batches entry removed
+ *   - Words, WordTests, VocabSubjectConfigs, VocabAttempts, WordTestAttempts deleted
+ *   - FeeConfigs + their FeeRecords deleted
+ *   - Notes and Lessons deleted
+ *   - Questions batch field cleared (questions kept, just unlinked)
  */
 exports.deleteBatch = asyncHandler(async (req, res) => {
   const name = decodeURIComponent(req.params.name || '').trim();
   if (!name) throw new AppError('name is required', 400);
-  await Batch.deleteOne({ name });
+
+  // Find FeeConfig IDs for this batch so we can delete their FeeRecords
+  const feeConfigs = await FeeConfig.find({ batch: name }, { fee_config_id: 1 }).lean();
+  const feeConfigIds = feeConfigs.map(f => f.fee_config_id);
+
+  await Promise.all([
+    Batch.deleteOne({ name }),
+    // Remove batch name from all students' assigned_batches arrays
+    User.updateMany({ assigned_batches: name }, { $pull: { assigned_batches: name } }),
+    // Delete batch-specific content
+    Word.deleteMany({ batch: name }),
+    WordTest.deleteMany({ batch: name }),
+    VocabSubjectConfig.deleteMany({ batch: name }),
+    VocabAttempt.deleteMany({ batch: name }),
+    WordTestAttempt.deleteMany({ batch: name }),
+    FeeConfig.deleteMany({ batch: name }),
+    feeConfigIds.length ? FeeRecord.deleteMany({ fee_config_id: { $in: feeConfigIds } }) : Promise.resolve(),
+    Note.deleteMany({ batch: name }),
+    Lesson.deleteMany({ batch: name }),
+    // Questions are shared content — just unlink from batch rather than deleting
+    Question.updateMany({ batch: name }, { $set: { batch: '' } }),
+  ]);
+
   res.json({ success: true, message: 'Batch deleted' });
+});
+
+/**
+ * PUT /api/batches/:name
+ * Rename a batch and update all references atomically.
+ * Body: { name: newName, icon? }
+ */
+exports.renameBatch = asyncHandler(async (req, res) => {
+  const oldName = decodeURIComponent(req.params.name || '').trim();
+  const newName = String(req.body.name || '').trim();
+  const icon    = req.body.icon !== undefined ? String(req.body.icon).trim() : undefined;
+
+  if (!oldName) throw new AppError('old name is required', 400);
+  if (!newName) throw new AppError('new name is required', 400);
+
+  if (oldName !== newName) {
+    const conflict = await Batch.findOne({ name: newName });
+    if (conflict) throw new AppError(`Batch "${newName}" already exists`, 409);
+  }
+
+  const updateFields = { name: newName };
+  if (icon !== undefined) updateFields.icon = icon || '📚';
+
+  await Promise.all([
+    Batch.updateOne({ name: oldName }, { $set: updateFields }),
+    // Update the batch name string in every collection that stores it
+    ...(oldName !== newName ? [
+      User.updateMany(
+        { assigned_batches: oldName },
+        { $set: { 'assigned_batches.$[el]': newName } },
+        { arrayFilters: [{ el: oldName }] }
+      ),
+      Word.updateMany({ batch: oldName }, { $set: { batch: newName } }),
+      WordTest.updateMany({ batch: oldName }, { $set: { batch: newName } }),
+      VocabSubjectConfig.updateMany({ batch: oldName }, { $set: { batch: newName } }),
+      VocabAttempt.updateMany({ batch: oldName }, { $set: { batch: newName } }),
+      WordTestAttempt.updateMany({ batch: oldName }, { $set: { batch: newName } }),
+      FeeConfig.updateMany({ batch: oldName }, { $set: { batch: newName } }),
+      Note.updateMany({ batch: oldName }, { $set: { batch: newName } }),
+      Lesson.updateMany({ batch: oldName }, { $set: { batch: newName } }),
+      Question.updateMany({ batch: oldName }, { $set: { batch: newName } }),
+    ] : []),
+  ]);
+
+  const updated = await Batch.findOne({ name: newName }).lean();
+  res.json({ success: true, data: { name: updated.name, icon: updated.icon } });
 });
 
 /**
@@ -200,4 +345,138 @@ exports.deleteChapter = asyncHandler(async (req, res) => {
     { $pull: { 'subjects.$.chapters': { name: chapter } } }
   );
   res.json({ success: true });
+});
+
+/**
+ * PUT /api/batches/:name/pricing
+ * Update batch pricing (free/paid, base price, discount, discounted price)
+ * Body: {
+ *   pricing_type: 'free' | 'paid',
+ *   base_price?: number,
+ *   discount?: { type: 'fixed' | 'percentage', value: number },
+ *   description?: string
+ * }
+ */
+exports.updateBatchPricing = asyncHandler(async (req, res) => {
+  const name = decodeURIComponent(req.params.name || '').trim();
+  if (!name) throw new AppError('batch name is required', 400);
+
+  const { pricing_type, base_price, discount, description } = req.body;
+
+  if (!pricing_type || !['free', 'paid'].includes(pricing_type)) {
+    throw new AppError('pricing_type must be "free" or "paid"', 400);
+  }
+
+  const updateData = { pricing_type };
+
+  if (pricing_type === 'paid') {
+    if (base_price === undefined || base_price < 0) {
+      throw new AppError('base_price is required and must be >= 0', 400);
+    }
+    updateData.base_price = base_price;
+
+    // Calculate discounted price
+    let discountedPrice = base_price;
+    if (discount && discount.type && discount.value) {
+      if (!['fixed', 'percentage'].includes(discount.type)) {
+        throw new AppError('discount.type must be "fixed" or "percentage"', 400);
+      }
+
+      if (discount.type === 'fixed') {
+        discountedPrice = Math.max(0, base_price - discount.value);
+      } else if (discount.type === 'percentage') {
+        if (discount.value < 0 || discount.value > 100) {
+          throw new AppError('discount percentage must be between 0-100', 400);
+        }
+        discountedPrice = base_price * (1 - discount.value / 100);
+      }
+
+      updateData.discount = discount;
+    } else {
+      updateData.discount = null;
+    }
+
+    updateData.discounted_price = Math.round(discountedPrice * 100) / 100;
+  } else {
+    // Free batch
+    updateData.base_price = 0;
+    updateData.discount = null;
+    updateData.discounted_price = 0;
+  }
+
+  if (description !== undefined) {
+    updateData.description = String(description).trim();
+  }
+
+  const batch = await Batch.findOneAndUpdate(
+    { name },
+    { $set: updateData },
+    { new: true, lean: true }
+  );
+
+  if (!batch) {
+    throw new AppError(`Batch "${name}" not found`, 404);
+  }
+
+  res.json({
+    success: true,
+    data: {
+      name: batch.name,
+      pricing_type: batch.pricing_type,
+      base_price: batch.base_price,
+      discount: batch.discount,
+      discounted_price: batch.discounted_price,
+      description: batch.description,
+    },
+  });
+});
+
+/**
+ * GET /api/batches/:name/pricing
+ * Get pricing details for a batch
+ */
+exports.getBatchPricing = asyncHandler(async (req, res) => {
+  const name = decodeURIComponent(req.params.name || '').trim();
+  if (!name) throw new AppError('batch name is required', 400);
+
+  const batch = await Batch.findOne({ name }).lean();
+  if (!batch) {
+    throw new AppError(`Batch "${name}" not found`, 404);
+  }
+
+  res.json({
+    success: true,
+    data: {
+      name: batch.name,
+      icon: batch.icon,
+      pricing_type: batch.pricing_type || 'paid',
+      base_price: batch.base_price || 0,
+      discount: batch.discount || null,
+      discounted_price: batch.discounted_price || 0,
+      description: batch.description || '',
+      is_active: batch.is_active,
+    },
+  });
+});
+
+/**
+ * GET /api/batches/pricing/all
+ * Get pricing for all batches (for student view)
+ */
+exports.getAllBatchesPricing = asyncHandler(async (req, res) => {
+  const batches = await Batch.find({ is_active: true })
+    .select('name icon pricing_type base_price discount discounted_price description')
+    .lean();
+
+  const data = batches.map(b => ({
+    name: b.name,
+    icon: b.icon,
+    pricing_type: b.pricing_type || 'paid',
+    base_price: b.base_price || 0,
+    discount: b.discount || null,
+    discounted_price: b.discounted_price || 0,
+    description: b.description || '',
+  }));
+
+  res.json({ success: true, data });
 });

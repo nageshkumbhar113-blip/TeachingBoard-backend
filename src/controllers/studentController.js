@@ -17,6 +17,25 @@ function normalizePin(value) {
   return String(value || '').trim();
 }
 
+// Reject trivially-guessable 4-digit PINs (all-same, sequential, repeating pairs)
+function isWeakPin(pin) {
+  if (!/^\d{4}$/.test(pin)) return true;
+  if (/^(\d)\1{3}$/.test(pin)) return true;            // 0000, 1111…
+  const [a, b, c, d] = pin.split('').map(Number);
+  if (b === a + 1 && c === b + 1 && d === c + 1) return true;  // 1234…
+  if (b === a - 1 && c === b - 1 && d === c - 1) return true;  // 9876…
+  if (a === c && b === d) return true;                  // 1212…
+  return false;
+}
+
+// Basic Indian mobile sanity: 10 digits, starts 6-9, not all-same
+function isValidMobile(mobile) {
+  if (!/^\d{10}$/.test(mobile)) return false;
+  if (/^(\d)\1{9}$/.test(mobile)) return false;
+  if (parseInt(mobile[0], 10) < 6) return false;
+  return true;
+}
+
 function normalizeDate(value) {
   const clean = String(value || '').trim();
   if (!clean) return null;
@@ -221,6 +240,8 @@ exports.selfRegister = asyncHandler(async (req, res) => {
   if (!name)                          throw new AppError('Name is required', 400);
   if (!school_name)                   throw new AppError('School name is required', 400);
   if (!pin || !/^\d{4}$/.test(pin))   throw new AppError('PIN must be 4 digits', 400);
+  if (isWeakPin(pin))                 throw new AppError('PIN is too weak (avoid 0000, 1234, repeating patterns)', 400);
+  if (mobile && !isValidMobile(mobile)) throw new AppError('Invalid mobile number', 400);
 
   // Auto-generate unique student_code from name
   const prefix = name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) || 'STU';
