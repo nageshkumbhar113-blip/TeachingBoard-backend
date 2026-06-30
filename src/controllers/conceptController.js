@@ -181,7 +181,19 @@ exports.getChapterConcepts = asyncHandler(async (req, res) => {
 
 exports.updateConcept = asyncHandler(async (req, res) => {
   const { conceptId } = req.params;
-  const { changesSummary, ...updates } = req.body;
+  const { changesSummary } = req.body;
+
+  // Whitelist updatable fields — model is strict:'throw', so unknown keys
+  // would crash; this also blocks mass-assignment of internal fields.
+  const ALLOWED = [
+    'chapterId', 'language', 'title', 'learningOutcomes', 'description',
+    'shortNotes', 'revisionBox', 'attachments', 'relatedConceptIds',
+    'examTags', 'studyModes', 'aiContext', 'status', 'order'
+  ];
+  const updates = {};
+  for (const key of ALLOWED) {
+    if (req.body[key] !== undefined) updates[key] = req.body[key];
+  }
 
   const concept = await Concept.findById(conceptId);
   if (!concept) {
@@ -204,19 +216,16 @@ exports.updateConcept = asyncHandler(async (req, res) => {
   const updateData = {
     ...updates,
     updated_at: new Date(),
-    lastModifiedBy: req.user?.id || 'admin'
-  };
-
-  if (!updateData.versions) {
-    updateData.$push = {
+    lastModifiedBy: req.user?.id || 'admin',
+    $push: {
       versions: {
         versionNumber: newVersionNumber,
         createdBy: req.user?.id || 'admin',
         createdAt: new Date(),
         changes: changesSummary || 'Updated'
       }
-    };
-  }
+    }
+  };
 
   const updatedConcept = await Concept.findByIdAndUpdate(
     conceptId,
@@ -318,10 +327,16 @@ exports.restoreVersion = asyncHandler(async (req, res) => {
     changedBy: req.user?.id || 'admin'
   });
 
+  // Strip immutable / conflicting fields from the snapshot:
+  //  - _id is immutable
+  //  - versions is also targeted by $push below (would conflict in one update)
+  //  - created_at should be preserved, not overwritten
+  const { _id, versions, created_at, __v, ...snapshotFields } = version.snapshot || {};
+
   const restored = await Concept.findByIdAndUpdate(
     conceptId,
     {
-      ...version.snapshot,
+      ...snapshotFields,
       updated_at: new Date(),
       lastModifiedBy: req.user?.id || 'admin',
       $push: {

@@ -35,9 +35,9 @@ adminRouter.post('/:conceptId/translate',  requireAdmin, autoTranslateContent);
 
 const studentRouter = express.Router();
 
-studentRouter.get('/chapters/:chapterId/concepts', getChapterConcepts);
-studentRouter.get('/search',                       searchConcepts);
-studentRouter.get('/:conceptId/view',              getConcept);
+studentRouter.get('/chapters/:chapterId/concepts', requireStudent, getChapterConcepts);
+studentRouter.get('/search',                       requireStudent, searchConcepts);
+studentRouter.get('/:conceptId/view',              requireStudent, getConcept);
 
 // ════════════════════════════════════════════════════════════════════════════════
 // SLS PHASE 2: Smart Learning System - Questions & Papers

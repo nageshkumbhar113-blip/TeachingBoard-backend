@@ -19,21 +19,29 @@ exports.createQuestion = async (req, res) => {
       difficulty, boardFrequency, questionDiagrams, answerDiagrams
     } = req.body;
 
-    // Validate required fields
-    if (!conceptId || !chapterId || !marks || !questionType) {
+    // Validate required fields (must match SLSQuestion model's required paths)
+    if (!conceptId || !chapterId || !subjectId || !batchId || !marks || !questionType || !difficulty) {
       return res.status(400).json({
         success: false,
-        message: 'Missing required fields: conceptId, chapterId, marks, questionType'
+        message: 'Missing required fields: conceptId, chapterId, subjectId, batchId, marks, questionType, difficulty'
       });
     }
 
-    if (![1, 2, 3, 4, 5].includes(marks)) {
+    if (!questionText?.english || !answerText?.english) {
+      return res.status(400).json({
+        success: false,
+        message: 'questionText.english and answerText.english are required'
+      });
+    }
+
+    if (![1, 2, 3, 4, 5].includes(Number(marks))) {
       return res.status(400).json({
         success: false,
         message: 'Marks must be 1, 2, 3, 4, or 5'
       });
     }
 
+    const marksNum = Number(marks);
     const question = new SLSQuestion({
       conceptId,
       chapterId,
@@ -41,7 +49,7 @@ exports.createQuestion = async (req, res) => {
       batchId,
       questionText,
       answerText,
-      marks,
+      marks: marksNum,
       questionType,
       difficulty,
       boardFrequency,
@@ -54,7 +62,7 @@ exports.createQuestion = async (req, res) => {
     await question.save();
 
     // Update ConceptMarks
-    await updateConceptMarksQuestionCount(conceptId, marks, 1);
+    await updateConceptMarksQuestionCount(conceptId, marksNum, 1, { chapterId, batchId });
 
     res.status(201).json({
       success: true,
@@ -119,7 +127,19 @@ exports.getQuestions = async (req, res) => {
 exports.updateQuestion = async (req, res) => {
   try {
     const { id } = req.params;
-    const updates = req.body;
+
+    // Whitelist updatable fields — model is strict:'throw', so unknown keys
+    // would otherwise crash; this also blocks mass-assignment of internal fields.
+    const ALLOWED = [
+      'conceptId', 'chapterId', 'subjectId', 'batchId',
+      'questionText', 'answerText', 'marks', 'questionType',
+      'difficulty', 'boardFrequency', 'questionDiagrams', 'answerDiagrams', 'status'
+    ];
+    const updates = {};
+    for (const key of ALLOWED) {
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    }
+    if (updates.marks !== undefined) updates.marks = Number(updates.marks);
 
     const question = await SLSQuestion.findByIdAndUpdate(
       id,
@@ -166,7 +186,10 @@ exports.deleteQuestion = async (req, res) => {
     }
 
     // Update ConceptMarks
-    await updateConceptMarksQuestionCount(question.conceptId, question.marks, -1);
+    await updateConceptMarksQuestionCount(question.conceptId, question.marks, -1, {
+      chapterId: question.chapterId,
+      batchId: question.batchId
+    });
 
     res.status(200).json({
       success: true,
@@ -229,10 +252,10 @@ exports.generatePaper = async (req, res) => {
       paperTitle
     } = req.body;
 
-    if (!chapterId || !totalMarks) {
+    if (!chapterId || !totalMarks || !subjectId || !batchId) {
       return res.status(400).json({
         success: false,
-        message: 'Missing required fields: chapterId, totalMarks'
+        message: 'Missing required fields: chapterId, subjectId, batchId, totalMarks'
       });
     }
 
@@ -249,30 +272,29 @@ exports.generatePaper = async (req, res) => {
       });
     }
 
-    // Calculate marks distribution
+    // Calculate marks distribution (guaranteed to sum to totalMarks)
     const distribution = calculateMarksDistribution(totalMarks);
     const selectedQuestions = [];
+    const selectedIds = [];
     let currentMarks = 0;
 
-    // For each marks value in distribution, select questions
+    // For each marks value in distribution, select questions chapter-wide
+    // (any concept) so a single concept lacking a question doesn't fail the slot.
     for (const [marks, count] of Object.entries(distribution)) {
       const marksNum = parseInt(marks);
 
       for (let i = 0; i < count; i++) {
-        // Select random concept weighted by conceptWeight
-        const concept = selectWeightedConcept(concepts);
-
-        // Get unused question of this marks from this concept
         const question = await SLSQuestion.findOne({
-          conceptId: concept.conceptId,
+          chapterId,
           marks: marksNum,
           status: 'published',
-          _id: { $nin: selectedQuestions.map(q => q.questionId) }
+          _id: { $nin: selectedIds }
         })
         .sort({ usageCount: 1 }) // Prefer less used questions
         .lean();
 
         if (question) {
+          selectedIds.push(question._id);
           selectedQuestions.push({
             questionId: question._id,
             marks: marksNum,
@@ -288,11 +310,11 @@ exports.generatePaper = async (req, res) => {
       }
     }
 
-    // Verify marks match
+    // Verify marks match — if short, it's an inventory problem, report clearly
     if (currentMarks !== totalMarks) {
       return res.status(400).json({
         success: false,
-        message: `Could not generate paper with exact ${totalMarks} marks. Generated: ${currentMarks}`
+        message: `Not enough published questions to reach ${totalMarks} marks (built ${currentMarks}). Add more questions for this chapter and try again.`
       });
     }
 
@@ -482,12 +504,16 @@ exports.publishPaper = async (req, res) => {
 exports.submitAnswers = async (req, res) => {
   try {
     const { paperId } = req.params;
-    const { studentId, studentCode, answers } = req.body;
+    const { answers } = req.body;
 
-    if (!paperId || !studentId || !answers) {
+    // Identity comes from the authenticated session — never trust the body.
+    const studentId = req.user?.id;
+    const studentCode = req.userDoc?.student_code || '';
+
+    if (!paperId || !studentId || !Array.isArray(answers)) {
       return res.status(400).json({
         success: false,
-        message: 'Missing required fields'
+        message: 'Missing required fields: answers (array)'
       });
     }
 
@@ -496,6 +522,13 @@ exports.submitAnswers = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: 'Paper not found'
+      });
+    }
+
+    if (paper.status !== 'published') {
+      return res.status(403).json({
+        success: false,
+        message: 'This paper is not available'
       });
     }
 
@@ -540,7 +573,12 @@ exports.getStudentAttempts = async (req, res) => {
     const { studentId, paperId, status, page = 1, limit = 20 } = req.query;
 
     const filter = {};
-    if (studentId) filter.studentId = studentId;
+    // Students may only ever see their OWN attempts; admins can filter freely.
+    if (req.user?.role === 'student') {
+      filter.studentId = req.user.id;
+    } else if (studentId) {
+      filter.studentId = studentId;
+    }
     if (paperId) filter.paperId = paperId;
     if (status) filter.status = status;
 
@@ -582,6 +620,14 @@ exports.getAttemptDetails = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: 'Attempt not found'
+      });
+    }
+
+    // Students may only view their own attempt
+    if (req.user?.role === 'student' && attempt.studentId !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied'
       });
     }
 
@@ -629,39 +675,48 @@ exports.evaluateAttempt = async (req, res) => {
       });
     }
 
-    // Update answers with marks
+    if (!Array.isArray(answers)) {
+      return res.status(400).json({
+        success: false,
+        message: 'answers array is required'
+      });
+    }
+
+    // Update answers with marks — mutate the Mongoose subdocuments in place.
+    // (Spreading a subdoc loses its data fields and breaks the save.)
     let totalMarksAwarded = 0;
     let correctCount = 0;
     let partialCount = 0;
 
-    const updatedAnswers = attempt.answers.map(existingAnswer => {
+    attempt.answers.forEach(existingAnswer => {
       const evaluatedAnswer = answers.find(a => a.questionId === existingAnswer.questionId.toString());
+      if (!evaluatedAnswer) return;
 
-      if (evaluatedAnswer) {
-        const marksAwarded = evaluatedAnswer.marksAwarded || 0;
-        totalMarksAwarded += marksAwarded;
+      const maxMarks = existingAnswer.maxMarks || 0;
+      // Clamp awarded marks to [0, maxMarks]
+      let marksAwarded = Number(evaluatedAnswer.marksAwarded) || 0;
+      marksAwarded = Math.max(0, Math.min(marksAwarded, maxMarks));
+      totalMarksAwarded += marksAwarded;
 
-        if (marksAwarded === existingAnswer.maxMarks) correctCount++;
-        else if (marksAwarded > 0) partialCount++;
+      const isFull = maxMarks > 0 && marksAwarded === maxMarks;
+      if (isFull) correctCount++;
+      else if (marksAwarded > 0) partialCount++;
 
-        return {
-          ...existingAnswer,
-          marksAwarded,
-          feedback: evaluatedAnswer.feedback || '',
-          isCorrect: marksAwarded === existingAnswer.maxMarks,
-          evaluatedAt: new Date(),
-          evaluatedBy: req.user?.id || 'system'
-        };
-      }
-      return existingAnswer;
+      existingAnswer.marksAwarded = marksAwarded;
+      existingAnswer.feedback = evaluatedAnswer.feedback || '';
+      existingAnswer.isCorrect = isFull;
+      existingAnswer.evaluatedAt = new Date();
+      existingAnswer.evaluatedBy = req.user?.id || 'system';
     });
 
-    // Calculate percentage and grade
-    const percentage = Math.round((totalMarksAwarded / attempt.totalMarks) * 100);
+    // Calculate percentage and grade (guard divide-by-zero)
+    const percentage = attempt.totalMarks > 0
+      ? Math.round((totalMarksAwarded / attempt.totalMarks) * 100)
+      : 0;
     const grade = calculateGrade(percentage);
 
     // Get question details for performance analysis
-    const questionIds = updatedAnswers.map(a => a.questionId);
+    const questionIds = attempt.answers.map(a => a.questionId);
     const questions = await SLSQuestion.find({ _id: { $in: questionIds } }).lean();
     const questionsMap = {};
     questions.forEach(q => {
@@ -669,9 +724,8 @@ exports.evaluateAttempt = async (req, res) => {
     });
 
     // Identify weak and strong areas
-    const { weakAreas, strongAreas } = analyzePerformance(updatedAnswers, questionsMap);
+    const { weakAreas, strongAreas } = analyzePerformance(attempt.answers, questionsMap);
 
-    attempt.answers = updatedAnswers;
     attempt.totalMarksObtained = totalMarksAwarded;
     attempt.percentage = percentage;
     attempt.grade = grade;
@@ -706,47 +760,46 @@ exports.evaluateAttempt = async (req, res) => {
  */
 
 function calculateMarksDistribution(totalMarks) {
-  // Smart distribution algorithm
-  // For 20 marks: {1: 4, 2: 4, 3: 2, 5: 1} = 4+8+6+5 = 23 (too high)
-  // Better: {1: 2, 2: 3, 3: 2, 5: 1} = 2+6+6+5 = 19
-  // Or: {1: 0, 2: 4, 3: 2, 5: 1} = 8+6+5 = 19
-  // Better: {1: 1, 2: 3, 3: 3, 5: 1} = 1+6+9+5 = 21 (close)
-  // Best: {1: 2, 2: 2, 3: 3, 5: 1} = 2+4+9+5 = 20 ✓
+  // Build a mixed distribution that ALWAYS sums exactly to totalMarks.
+  // Roughly 40% from 5-mark, then 3-mark, then 2-mark, and 1-mark absorbs
+  // any remainder so the total is exact for any positive integer total.
+  const total = Math.max(0, parseInt(totalMarks) || 0);
+  const dist = { 1: 0, 2: 0, 3: 0, 5: 0 };
+  let remaining = total;
 
-  const distributions = {
-    10: { 1: 2, 2: 2, 3: 1 },
-    15: { 1: 1, 2: 2, 3: 3, 5: 0 },
-    20: { 1: 2, 2: 2, 3: 3, 5: 1 },
-    25: { 1: 0, 2: 3, 3: 2, 5: 2 },
-    30: { 1: 0, 2: 0, 3: 4, 5: 2 }
-  };
+  dist[5] = Math.floor((remaining * 0.4) / 5);
+  remaining -= dist[5] * 5;
 
-  return distributions[totalMarks] || { 1: 2, 2: 2, 3: 2, 5: 1 };
+  dist[3] = Math.floor((remaining * 0.5) / 3);
+  remaining -= dist[3] * 3;
+
+  dist[2] = Math.floor(remaining / 2);
+  remaining -= dist[2] * 2;
+
+  dist[1] = remaining; // exact remainder → guarantees sum === total
+
+  return dist;
 }
 
-function selectWeightedConcept(concepts) {
-  // Weight-based random selection
-  const totalWeight = concepts.reduce((sum, c) => sum + (c.conceptWeight || 1), 0);
-  let random = Math.random() * totalWeight;
-
-  for (const concept of concepts) {
-    random -= (concept.conceptWeight || 1);
-    if (random <= 0) return concept;
-  }
-
-  return concepts[0];
-}
-
-async function updateConceptMarksQuestionCount(conceptId, marks, delta) {
+async function updateConceptMarksQuestionCount(conceptId, marks, delta, context = {}) {
   const concept = await ConceptMarks.findOne({ conceptId });
 
   if (concept) {
-    concept.questionsByMarks[marks] = (concept.questionsByMarks[marks] || 0) + delta;
+    const current = concept.questionsByMarks?.[marks] || 0;
+    concept.questionsByMarks[marks] = Math.max(0, current + delta);
+    concept.markModified('questionsByMarks'); // nested map change isn't auto-tracked
+    if (delta > 0 && !concept.assignedMarks.includes(marks)) {
+      concept.assignedMarks.push(marks); // keep assignedMarks in sync
+    }
     concept.updated_at = new Date();
     await concept.save();
   } else if (delta > 0) {
+    // chapterId & batchId are required on ConceptMarks — must pass them
+    if (!context.chapterId || !context.batchId) return;
     await ConceptMarks.create({
       conceptId,
+      chapterId: context.chapterId,
+      batchId: context.batchId,
       assignedMarks: [marks],
       questionsByMarks: { [marks]: 1 }
     });
@@ -782,6 +835,7 @@ function analyzePerformance(answers, questionsMap = {}) {
   const strongAreas = [];
 
   for (const [type, perf] of Object.entries(typePerformance)) {
+    if (perf.total <= 0) continue; // avoid NaN
     const percentage = (perf.awarded / perf.total) * 100;
     if (percentage < 60) {
       weakAreas.push({ type, category: type, performancePercentage: percentage });
