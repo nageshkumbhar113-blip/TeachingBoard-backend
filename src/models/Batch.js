@@ -30,7 +30,13 @@ const batchSchema = new mongoose.Schema(
     // Pricing
     pricing_type: { type: String, enum: ['free', 'paid'], default: 'paid' },
 
-    // Paid Batch Fields
+    // Subscription pricing (Jio/Hotstar style — student picks monthly or yearly)
+    monthly_price: { type: Number, default: 0, min: 0 },
+    yearly_price:  { type: Number, default: 0, min: 0 },
+    // Free trial granted on first subscribe (days). 0 = no trial.
+    trial_days:    { type: Number, default: 1, min: 0 },
+
+    // Legacy single-price fields (kept for backward compatibility)
     base_price: { type: Number, default: 0, min: 0 },
     discount: { type: discountSchema, default: null },
     discounted_price: { type: Number, default: 0, min: 0 },

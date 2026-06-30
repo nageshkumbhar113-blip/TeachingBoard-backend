@@ -22,6 +22,7 @@ const appVersionRoutes = require("./routes/appVersionRoutes");
 const { adminWordRouter, vocabRouter, studentWordRouter } = require("./routes/wordRoutes");
 const { adminRouter: wordTestAdminRouter, studentRouter: wordTestStudentRouter } = require("./routes/wordTestRoutes");
 const feeRoutes                         = require("./routes/feeRoutes");
+const { router: paymentRoutes, webhook: paymentWebhook } = require("./routes/paymentRoutes");
 const { adminRouter: noteAdminRouter, studentRouter: noteStudentRouter } = require("./routes/noteRoutes");
 const { adminRouter: slsAdminRouter, studentRouter: slsStudentRouter, slsRouter } = require("./routes/slsRoutes");
 const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
@@ -62,7 +63,11 @@ app.use(cors({
 // ── Body parsing ────────────────────────────────────────────
 // Higher limit for PDF note uploads only (base64 of 10MB PDF ≈ 13.5MB JSON)
 app.use('/api/admin/notes/upload', express.json({ limit: '15mb' }));
-app.use(express.json({ limit: "2mb" }));
+// Capture the raw body so the Razorpay webhook can verify its signature.
+app.use(express.json({
+  limit: "2mb",
+  verify: (req, _res, buf) => { req.rawBody = buf; },
+}));
 app.use(express.urlencoded({ extended: false }));
 
 // ── No-cache for service worker and env config ───────────────
@@ -137,6 +142,8 @@ app.use("/api/vocab",            vocabLimiter, vocabRouter);
 app.use("/api/student",          vocabLimiter, studentWordRouter);
 app.use("/api/word-tests",       vocabLimiter, wordTestStudentRouter);
 app.use("/api/fee",              feeRoutes);
+app.post("/api/payment/webhook", paymentWebhook); // raw-body signature verify inside
+app.use("/api/payment",          paymentRoutes);
 app.use("/api/admin/notes",     noteAdminRouter);
 app.use("/api/notes",           noteStudentRouter);
 app.use("/api/admin/sls",       slsAdminRouter);
