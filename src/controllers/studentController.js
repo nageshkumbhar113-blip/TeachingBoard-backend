@@ -192,23 +192,36 @@ exports.updateStudent = asyncHandler(async (req, res) => {
       'user_id assigned_students'
     ).lean();
 
-    for (const teacher of teachers) {
-      const codes = (teacher.assigned_students || []).filter(Boolean);
-      if (!codes.length) continue;
-      const peers = await User.find(
-        { role: 'student', student_code: { $in: codes } },
-        'expiry_date'
+    if (teachers.length) {
+      // Fetch every peer's expiry in ONE query (no per-teacher N+1),
+      // then bulk-update all teachers.
+      const allPeerCodes = [...new Set(
+        teachers.flatMap(t => (t.assigned_students || []).filter(Boolean))
+      )];
+      const peerDocs = await User.find(
+        { role: 'student', student_code: { $in: allPeerCodes } },
+        'student_code expiry_date'
       ).lean();
+      const expiryByCode = new Map();
+      for (const p of peerDocs) expiryByCode.set(p.student_code, p.expiry_date);
 
-      const newExpiry = peers.some(s => !s.expiry_date)
-        ? null
-        : peers.reduce((max, s) =>
-            (!max || s.expiry_date > max) ? s.expiry_date : max, null);
-
-      await User.updateOne(
-        { user_id: teacher.user_id },
-        { $set: { expiry_date: newExpiry } }
-      );
+      const ops = [];
+      for (const teacher of teachers) {
+        const codes = (teacher.assigned_students || []).filter(Boolean);
+        if (!codes.length) continue;
+        // only codes that matched an existing student — mirrors the original $in result
+        const peerExpiries = codes.filter(c => expiryByCode.has(c)).map(c => expiryByCode.get(c));
+        const newExpiry = peerExpiries.some(e => !e)
+          ? null
+          : peerExpiries.reduce((max, e) => (!max || e > max) ? e : max, null);
+        ops.push({
+          updateOne: {
+            filter: { user_id: teacher.user_id },
+            update: { $set: { expiry_date: newExpiry } },
+          },
+        });
+      }
+      if (ops.length) await User.bulkWrite(ops);
     }
   }
 

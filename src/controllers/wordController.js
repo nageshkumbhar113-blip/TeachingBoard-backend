@@ -665,13 +665,17 @@ exports.getTeacherVocabScores = asyncHandler(async (req, res) => {
     avg_spelling: s.spelling_possible ? Math.round((s.spelling_total / s.spelling_possible) * 100) : 0,
   }));
 
-  // Add students who have no attempts
-  for (const code of assignedCodes) {
-    if (!studentMap[code]) {
-      const user = await User.findOne({ student_code: code }).select('name').lean();
+  // Add students who have no attempts (batch-fetch names in ONE query — no N+1)
+  const missingCodes = assignedCodes.filter(code => !studentMap[code]);
+  if (missingCodes.length) {
+    const missingUsers = await User.find({ student_code: { $in: missingCodes } })
+      .select('student_code name').lean();
+    const nameByCode = {};
+    for (const u of missingUsers) nameByCode[u.student_code] = u.name || '';
+    for (const code of missingCodes) {
       data.push({
         student_code: code,
-        student_name: user?.name || '',
+        student_name: nameByCode[code] || '',
         tests_completed: 0,
         tests_available: totalTests,
         avg_listen: 0, avg_meaning: 0, avg_picture: 0, avg_spelling: 0,
