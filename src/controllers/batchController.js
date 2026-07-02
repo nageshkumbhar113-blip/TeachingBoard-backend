@@ -71,6 +71,11 @@ exports.getBatches = asyncHandler(async (req, res) => {
       icon: doc.icon || '📚',
       subjects,
       chaptersFlat: subjects.flatMap(s => s.chapters.map(ch => ({ subject: s.name, name: ch }))),
+      // Pricing — so Classes and Pricing tabs share one batch list; a batch
+      // with no pricing configured yet just reports 0/0 (shown as "Unpriced").
+      monthly_price: doc.monthly_price || 0,
+      yearly_price: doc.yearly_price || 0,
+      trial_days: doc.trial_days != null ? doc.trial_days : 1,
     });
   }
 
@@ -79,7 +84,10 @@ exports.getBatches = asyncHandler(async (req, res) => {
     const batchName = row._id;
     if (!batchName) continue;
     if (!map.has(batchName)) {
-      map.set(batchName, { name: batchName, icon: '📚', subjects: [], chaptersFlat: [] });
+      map.set(batchName, {
+        name: batchName, icon: '📚', subjects: [], chaptersFlat: [],
+        monthly_price: 0, yearly_price: 0, trial_days: 1,
+      });
     }
     const entry = map.get(batchName);
     const existingSubjectNames = new Set(entry.subjects.map(s => s.name));
@@ -106,6 +114,9 @@ exports.getBatches = asyncHandler(async (req, res) => {
     icon: b.icon,
     subjects: b.subjects.map(s => s.name),
     chapters: b.subjects.flatMap(s => s.chapters.map(ch => ({ subject: s.name, name: ch }))),
+    monthly_price: b.monthly_price || 0,
+    yearly_price: b.yearly_price || 0,
+    trial_days: b.trial_days != null ? b.trial_days : 1,
   }));
 
   batches.sort((a, b) => a.name.localeCompare(b.name));
@@ -353,15 +364,15 @@ exports.updateBatchPricing = asyncHandler(async (req, res) => {
     updateData.description = String(req.body.description).trim();
   }
 
+  // Upsert: a batch shown in the Pricing tab may only exist as a
+  // question-derived "virtual" entry (no real Batch document yet, e.g.
+  // "Live Server") — setting its price should create the document instead
+  // of 404ing, since the whole point is "add pricing to Classes batches".
   const batch = await Batch.findOneAndUpdate(
     { name },
-    { $set: updateData },
-    { new: true, lean: true }
+    { $set: updateData, $setOnInsert: { name, icon: '📚' } },
+    { new: true, lean: true, upsert: true }
   );
-
-  if (!batch) {
-    throw new AppError(`Batch "${name}" not found`, 404);
-  }
 
   res.json({
     success: true,
