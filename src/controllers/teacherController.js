@@ -108,6 +108,30 @@ exports.deleteTeacher = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Teacher deleted' });
 });
 
+// Students not present in ANY teacher's assigned_students list — for the
+// admin "Assign students" checklist on the Teachers screen.
+exports.getUnassignedStudents = asyncHandler(async (req, res) => {
+  const teachers = await User.find({ role: 'teacher' }, 'assigned_students').lean();
+  const assignedCodes = new Set(teachers.flatMap(t => t.assigned_students || []));
+
+  const students = await User.find({ role: 'student' })
+    .select('user_id name student_code mobile status')
+    .sort({ name: 1 })
+    .lean();
+
+  const unassigned = students
+    .filter(s => s.student_code && !assignedCodes.has(s.student_code))
+    .map(s => ({
+      id: s.user_id,
+      name: s.name,
+      student_code: s.student_code,
+      mobile: s.mobile || '',
+      status: s.status || 'active',
+    }));
+
+  res.json({ success: true, count: unassigned.length, data: unassigned });
+});
+
 // ── Teacher: own student progress ────────────────────────────────────────────
 
 exports.getMyStudents = asyncHandler(async (req, res) => {

@@ -5,6 +5,7 @@ const {
   createTeacher,
   updateTeacher,
   deleteTeacher,
+  getUnassignedStudents,
   getMyStudents,
   getStudentAttempts,
   updateDeviceToken,
@@ -22,10 +23,11 @@ const { getTeacherVocabScores } = require('../controllers/wordController');
 
 // ── Admin CRUD: mounted at /api/teachers ──────────────────────────────────────
 const adminRouter = express.Router();
-adminRouter.get('/',       requireAdmin, getTeachers);
-adminRouter.post('/',      requireAdmin, createTeacher);
-adminRouter.patch('/:id',  requireAdmin, updateTeacher);
-adminRouter.delete('/:id', requireAdmin, deleteTeacher);
+adminRouter.get('/',                     requireAdmin, getTeachers);
+adminRouter.get('/unassigned-students',  requireAdmin, getUnassignedStudents);
+adminRouter.post('/',                    requireAdmin, createTeacher);
+adminRouter.patch('/:id',                requireAdmin, updateTeacher);
+adminRouter.delete('/:id',               requireAdmin, deleteTeacher);
 
 // ── Teacher dashboard: mounted at /api/teacher ───────────────────────────────
 const teacherRouter = express.Router();
