@@ -4,6 +4,7 @@ const {
   createConcept,
   getConcept,
   getChapterConcepts,
+  getPublishedChapters,
   updateConcept,
   deleteConcept,
   publishConcept,
@@ -35,6 +36,7 @@ adminRouter.post('/:conceptId/translate',  requireAdmin, autoTranslateContent);
 
 const studentRouter = express.Router();
 
+studentRouter.get('/chapters',                     requireStudent, getPublishedChapters);
 studentRouter.get('/chapters/:chapterId/concepts', requireStudent, getChapterConcepts);
 studentRouter.get('/search',                       requireStudent, searchConcepts);
 studentRouter.get('/:conceptId/view',              requireStudent, getConcept);

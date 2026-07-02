@@ -176,6 +176,39 @@ exports.getChapterConcepts = asyncHandler(async (req, res) => {
 });
 
 // ════════════════════════════════════
+// LIST PUBLISHED CHAPTERS (student notes browser — distinct chapters
+// that have at least one published concept)
+// ════════════════════════════════════
+
+exports.getPublishedChapters = asyncHandler(async (req, res) => {
+  const chapters = await Concept.aggregate([
+    { $match: { status: 'published' } },
+    {
+      $group: {
+        _id: '$chapterId',
+        standard: { $first: '$aiContext.standard' },
+        subject: { $first: '$aiContext.subject' },
+        chapter: { $first: '$aiContext.chapter' },
+        conceptCount: { $sum: 1 }
+      }
+    },
+    {
+      $project: {
+        _id: 0,
+        chapterId: '$_id',
+        standard: 1,
+        subject: 1,
+        chapter: 1,
+        conceptCount: 1
+      }
+    },
+    { $sort: { standard: 1, subject: 1, chapter: 1 } }
+  ]);
+
+  res.json({ success: true, data: chapters });
+});
+
+// ════════════════════════════════════
 // UPDATE CONCEPT
 // ════════════════════════════════════
 
