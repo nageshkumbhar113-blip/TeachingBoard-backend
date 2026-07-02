@@ -105,6 +105,10 @@ exports.login = asyncHandler(async (req, res) => {
   }
 
   // ── Parent login ─────────────────────────────────
+  // No separate parent account needed — a student's own code+PIN also logs
+  // them into the Parent view (single child = themselves). A genuine,
+  // independently-created Parent account (role:'parent', multi-child) still
+  // works too, for backward compatibility with any that already exist.
   if (role === 'parent') {
     const parentCode = String(req.body.parent_code || '').trim().toUpperCase();
     const pin = String(req.body.pin || '').trim();
@@ -112,9 +116,17 @@ exports.login = asyncHandler(async (req, res) => {
     if (!parentCode) return res.status(400).json({ success: false, message: 'parent_code is required' });
     if (!pin)        return res.status(400).json({ success: false, message: 'pin is required' });
 
-    const parent = await User.findOne({ parent_code: parentCode, role: 'parent' });
+    let parent = await User.findOne({ parent_code: parentCode, role: 'parent' });
+    let viaStudent = false;
+
     if (!parent || !parent.verifyPin(pin)) {
-      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+      const student = await User.findOne({ student_code: parentCode, role: 'student' });
+      if (student && student.verifyPin(pin)) {
+        parent = student;
+        viaStudent = true;
+      } else {
+        return res.status(401).json({ success: false, message: 'Invalid credentials' });
+      }
     }
 
     parent.last_login_at = new Date();
@@ -127,9 +139,18 @@ exports.login = asyncHandler(async (req, res) => {
         id: parent.user_id,
         name: parent.name,
         role: 'parent',
-        parent_code: parent.parent_code || '',
+        parent_code: viaStudent ? parent.student_code : (parent.parent_code || ''),
       }),
-      user: serializeParent(parent),
+      user: viaStudent
+        ? {
+            id: parent.user_id,
+            name: parent.name,
+            role: 'parent',
+            parent_code: parent.student_code,
+            mobile: parent.mobile || '',
+            children: [parent.student_code],
+          }
+        : serializeParent(parent),
     });
   }
 
@@ -210,6 +231,26 @@ exports.me = asyncHandler(async (req, res) => {
   const userDoc = await User.findOne({ user_id: req.user.id });
   if (!userDoc) {
     return res.status(404).json({ success: false, message: 'User not found' });
+  }
+
+  // A "parent" session may be backed by a Student document (student's own
+  // code+PIN used to log in as parent) — dispatch on the JWT's role claim,
+  // not the underlying document's own role, or a student-identity parent
+  // session would incorrectly get student-shaped /me data.
+  if (req.user.role === 'parent') {
+    return res.json({
+      success: true,
+      user: {
+        id: userDoc.user_id,
+        name: userDoc.name,
+        role: 'parent',
+        parent_code: userDoc.role === 'student' ? (userDoc.student_code || '') : (userDoc.parent_code || ''),
+        mobile: userDoc.mobile || '',
+        children: userDoc.role === 'student'
+          ? (userDoc.student_code ? [userDoc.student_code] : [])
+          : (Array.isArray(userDoc.children) ? userDoc.children : []),
+      },
+    });
   }
 
   if (userDoc.role === 'student') {

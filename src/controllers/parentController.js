@@ -15,6 +15,16 @@ function normalizeStudentCodes(value) {
   return [...new Set(value.map(item => normalizeCode(item)).filter(Boolean))];
 }
 
+// A "parent" session may be backed by a real Parent document (children:
+// [...multiple codes]) or by a Student document used via its own code+PIN
+// (single child = themselves). Resolve either shape to a flat code list.
+function _resolveChildCodes(parentDoc) {
+  if (parentDoc.role === 'student') {
+    return parentDoc.student_code ? [normalizeCode(parentDoc.student_code)] : [];
+  }
+  return Array.isArray(parentDoc.children) ? parentDoc.children.map(normalizeCode) : [];
+}
+
 function serializeParent(p) {
   return {
     id: p.user_id,
@@ -116,9 +126,7 @@ exports.getMyChildren = asyncHandler(async (req, res) => {
   const parentDoc = req.userDoc || await User.findOne({ user_id: req.user.id }).lean();
   if (!parentDoc) throw new AppError('Parent not found', 404);
 
-  const childCodes = Array.isArray(parentDoc.children)
-    ? parentDoc.children.filter(Boolean)
-    : [];
+  const childCodes = _resolveChildCodes(parentDoc);
 
   if (!childCodes.length) {
     return res.json({ success: true, data: [] });
@@ -168,9 +176,7 @@ exports.getChildAttempts = asyncHandler(async (req, res) => {
   const studentCode = normalizeCode(req.params.code);
   if (!studentCode) throw new AppError('student_code is required', 400);
 
-  const childCodes = Array.isArray(parentDoc.children)
-    ? parentDoc.children.map(c => normalizeCode(c))
-    : [];
+  const childCodes = _resolveChildCodes(parentDoc);
   if (!childCodes.includes(studentCode)) {
     throw new AppError('Student is not your child', 403);
   }
@@ -196,9 +202,7 @@ exports.getChildFee = asyncHandler(async (req, res) => {
   const studentCode = normalizeCode(req.params.code);
   if (!studentCode) throw new AppError('student_code is required', 400);
 
-  const childCodes = Array.isArray(parentDoc.children)
-    ? parentDoc.children.map(c => normalizeCode(c))
-    : [];
+  const childCodes = _resolveChildCodes(parentDoc);
   if (!childCodes.includes(studentCode))
     throw new AppError('Student is not your child', 403);
 
