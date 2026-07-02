@@ -19,7 +19,8 @@ exports.createConcept = asyncHandler(async (req, res) => {
     revisionBox,
     examTags,
     difficulty,
-    keywords
+    keywords,
+    aiContext
   } = req.body;
 
   if (!chapterId || !title?.english) {
@@ -103,10 +104,11 @@ exports.createConcept = asyncHandler(async (req, res) => {
       revisionMode: { content: 'revision', showAttachments: false, showFormulas: true, showRevisionBox: true }
     },
     aiContext: {
-      board: 'CBSE',
-      standard: 10,
-      medium: 'english',
-      subject: '',
+      board: aiContext?.board || 'CBSE',
+      standard: aiContext?.standard ?? null,
+      medium: aiContext?.medium || 'english',
+      subject: aiContext?.subject || '',
+      chapter: aiContext?.chapter || '',
       difficulty: difficulty || 'easy',
       keywords: keywords || []
     },

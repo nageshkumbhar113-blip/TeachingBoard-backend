@@ -22,6 +22,7 @@ const slsController = require('../controllers/slsController');
 const adminRouter = express.Router();
 
 adminRouter.post('/',                      requireAdmin, createConcept);
+adminRouter.get('/chapters/:chapterId/concepts', requireAdmin, getChapterConcepts);
 adminRouter.get('/:conceptId',             requireAdmin, getConcept);
 adminRouter.patch('/:conceptId',           requireAdmin, updateConcept);
 adminRouter.delete('/:conceptId',          requireAdmin, deleteConcept);
