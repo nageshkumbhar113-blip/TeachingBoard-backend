@@ -25,6 +25,7 @@ const batchSchema = new mongoose.Schema(
   {
     name:     { type: String, required: true, unique: true, trim: true },
     icon:     { type: String, default: '📚', trim: true },
+    cover_image: { type: String, default: '', trim: true }, // 16:9 (1200x675) showcase image
     subjects: { type: [subjectSchema], default: [] },
 
     // Pricing

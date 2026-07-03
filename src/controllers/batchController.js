@@ -12,6 +12,7 @@ const FeeConfig          = require('../models/FeeConfig');
 const FeeRecord          = require('../models/FeeRecord');
 const Note               = require('../models/Note');
 const Lesson             = require('../models/Lesson');
+const Quiz               = require('../models/Quiz');
 
 /**
  * GET /api/batches
@@ -220,8 +221,14 @@ exports.deleteBatch = asyncHandler(async (req, res) => {
     feeConfigIds.length ? FeeRecord.deleteMany({ fee_config_id: { $in: feeConfigIds } }) : Promise.resolve(),
     Note.deleteMany({ batch: name }),
     Lesson.deleteMany({ batch: name }),
-    // Questions are shared content — just unlink from batch rather than deleting
+    // Questions and Quizzes are shared content — just unlink from batch
+    // rather than deleting. Quiz.batch was previously left untouched here,
+    // which meant any quiz still tagged to the deleted batch would make
+    // getBatches()'s question/quiz-derived aggregation resurrect a "ghost"
+    // entry for it (and the admin app's local syncHierarchyFromExisting()
+    // would do the same from its cached copy on next login).
     Question.updateMany({ batch: name }, { $set: { batch: '' } }),
+    Quiz.updateMany({ batch: name }, { $set: { batch: '' } }),
   ]);
 
   res.json({ success: true, message: 'Batch deleted' });
@@ -233,9 +240,10 @@ exports.deleteBatch = asyncHandler(async (req, res) => {
  * Body: { name: newName, icon? }
  */
 exports.renameBatch = asyncHandler(async (req, res) => {
-  const oldName = decodeURIComponent(req.params.name || '').trim();
-  const newName = String(req.body.name || '').trim();
-  const icon    = req.body.icon !== undefined ? String(req.body.icon).trim() : undefined;
+  const oldName     = decodeURIComponent(req.params.name || '').trim();
+  const newName     = String(req.body.name || '').trim();
+  const icon        = req.body.icon !== undefined ? String(req.body.icon).trim() : undefined;
+  const coverImage  = req.body.cover_image !== undefined ? String(req.body.cover_image).trim() : undefined;
 
   if (!oldName) throw new AppError('old name is required', 400);
   if (!newName) throw new AppError('new name is required', 400);
@@ -247,6 +255,7 @@ exports.renameBatch = asyncHandler(async (req, res) => {
 
   const updateFields = { name: newName };
   if (icon !== undefined) updateFields.icon = icon || '📚';
+  if (coverImage !== undefined) updateFields.cover_image = coverImage;
 
   await Promise.all([
     Batch.updateOne({ name: oldName }, { $set: updateFields }),
@@ -421,12 +430,13 @@ exports.getBatchPricing = asyncHandler(async (req, res) => {
  */
 exports.getAllBatchesPricing = asyncHandler(async (req, res) => {
   const batches = await Batch.find({ is_active: true })
-    .select('name icon pricing_type monthly_price yearly_price trial_days description')
+    .select('name icon cover_image pricing_type monthly_price yearly_price trial_days description')
     .lean();
 
   const data = batches.map(b => ({
     name: b.name,
     icon: b.icon,
+    cover_image: b.cover_image || '',
     pricing_type: b.pricing_type || 'paid',
     monthly_price: b.monthly_price || 0,
     yearly_price: b.yearly_price || 0,

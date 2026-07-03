@@ -162,6 +162,51 @@ exports.startTrial = asyncHandler(async (req, res) => {
   });
 });
 
+// ── Verify payment synchronously from the Checkout success handler ───────────
+// Body: { student_code, pin, razorpay_order_id, razorpay_payment_id, razorpay_signature }
+// This does not replace the webhook (kept as an idempotent backup) — it gives
+// an immediate activation path that does not depend on Razorpay's webhook
+// delivery reaching this server (webhook URL misconfiguration, retries, etc.
+// would otherwise leave a paying student stuck in "pending").
+
+exports.verifyPayment = asyncHandler(async (req, res) => {
+  const student = await authStudentByPin(req.body.student_code, req.body.pin);
+
+  const orderId    = String(req.body.razorpay_order_id   || '').trim();
+  const paymentId  = String(req.body.razorpay_payment_id || '').trim();
+  const signature  = String(req.body.razorpay_signature  || '').trim();
+  if (!orderId || !paymentId || !signature) {
+    throw new AppError('razorpay_order_id, razorpay_payment_id and razorpay_signature are required', 400);
+  }
+
+  if (!razorpay.verifyPaymentSignature(orderId, paymentId, signature)) {
+    throw new AppError('Payment verification failed', 400);
+  }
+
+  const sub = await StudentSubscription.findOne({ razorpay_order_id: orderId, student_user_id: student.user_id });
+  if (!sub) throw new AppError('Order not found', 404);
+
+  if (sub.payment_verified) {
+    return res.json({ success: true, message: 'Already verified', student: { status: student.status } });
+  }
+
+  const base = (student.expiry_date && student.expiry_date > new Date())
+    ? student.expiry_date
+    : new Date();
+  const expiry = StudentSubscription.computeExpiry(sub.period, base);
+
+  sub.razorpay_payment_id = paymentId;
+  sub.payment_verified = true;
+  sub.status = 'active';
+  sub.start_date = new Date();
+  sub.expiry_date = expiry;
+  await sub.save();
+
+  await activateStudentForBatch(student, sub.batch, expiry);
+
+  res.json({ success: true, message: 'Payment verified', student: { status: student.status, expiry_date: student.expiry_date } });
+});
+
 // ── Razorpay webhook (public; verified by signature on RAW body) ──────────────
 
 exports.webhook = asyncHandler(async (req, res) => {
