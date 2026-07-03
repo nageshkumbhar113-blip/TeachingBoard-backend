@@ -405,8 +405,26 @@ exports.getBatchPricing = asyncHandler(async (req, res) => {
   if (!name) throw new AppError('batch name is required', 400);
 
   const batch = await Batch.findOne({ name }).lean();
+
+  // Batches derived only from Questions/Quizzes (no real Batch doc yet, e.g.
+  // freshly used in a chapter but never priced) previously 404'd here,
+  // which silently killed the admin's "Setup Pricing" button — the fetch
+  // failed and the modal never opened. Return sane unpriced defaults
+  // instead; submitting the form upserts the real Batch doc.
   if (!batch) {
-    throw new AppError(`Batch "${name}" not found`, 404);
+    return res.json({
+      success: true,
+      data: {
+        name,
+        icon: '📚',
+        pricing_type: 'paid',
+        monthly_price: 0,
+        yearly_price: 0,
+        trial_days: 1,
+        description: '',
+        is_active: true,
+      },
+    });
   }
 
   res.json({
