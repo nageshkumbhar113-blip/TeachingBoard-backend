@@ -223,7 +223,17 @@ const conceptSchema = new mongoose.Schema(
 );
 
 conceptSchema.index({ chapterId: 1, order: 1 });
-conceptSchema.index({ 'title.english': 'text', 'title.marathi': 'text' });
+// language_override: our own `language` field (english/marathi/bilingual) is
+// NOT a MongoDB text-search stemmer name, but MongoDB's text index reserves
+// the field name "language" by default to pick per-document search language.
+// Inserting language:'marathi' (or 'bilingual') then fails at the database
+// level with "language override unsupported: marathi" -- nothing to do with
+// our own validation. Point MongoDB at an unused field name instead so it
+// never touches our schema's `language` field.
+conceptSchema.index(
+  { 'title.english': 'text', 'title.marathi': 'text' },
+  { language_override: 'textSearchLanguage' }
+);
 conceptSchema.index({ status: 1, chapterId: 1 });
 conceptSchema.index({ examTags: 1 });
 
