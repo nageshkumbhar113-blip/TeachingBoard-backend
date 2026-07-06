@@ -169,14 +169,9 @@ const conceptSchema = new mongoose.Schema(
     },
     attachments: [attachmentSchema],
     relatedConceptIds: [String],
+    // Free-text tags the admin types in (no fixed list) — e.g. "NMMS", "Board Exam".
     examTags: {
-      type: [{
-        type: String,
-        enum: [
-          'board_exam', 'important', 'repeated',
-          'numerical', 'theory', 'diagram', 'viva', 'mcq'
-        ]
-      }],
+      type: [{ type: String, trim: true }],
       default: []
     },
     studyModes: studyModesSchema,
