@@ -1,7 +1,10 @@
 const { mongoose } = require('../config/db');
 
 const chapterSchema = new mongoose.Schema(
-  { name: { type: String, required: true, trim: true } },
+  {
+    name:  { type: String, required: true, trim: true },
+    order: { type: Number, default: 0 },
+  },
   { _id: false }
 );
 

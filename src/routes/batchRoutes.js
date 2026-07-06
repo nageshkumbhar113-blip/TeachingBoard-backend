@@ -10,6 +10,8 @@ const {
   deleteSubject,
   addChapter,
   deleteChapter,
+  reorderChapters,
+  getSubjectChapters,
   updateBatchPricing,
   getBatchPricing,
   getAllBatchesPricing,
@@ -24,7 +26,9 @@ router.get('/:name/pricing',                                           getBatchP
 router.put('/:name/pricing',                                           requireAdmin, updateBatchPricing);
 router.post('/:name/subjects',                                         requireAdmin, addSubject);
 router.delete('/:name/subjects/:subject',                              requireAdmin, deleteSubject);
+router.get('/:name/subjects/:subject/chapters',                        getSubjectChapters);
 router.post('/:name/subjects/:subject/chapters',                       requireAdmin, addChapter);
+router.put('/:name/subjects/:subject/chapters/reorder',                requireAdmin, reorderChapters);
 router.delete('/:name/subjects/:subject/chapters/:chapter',            requireAdmin, deleteChapter);
 
 module.exports = router;

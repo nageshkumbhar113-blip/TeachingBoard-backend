@@ -328,12 +328,58 @@ exports.addChapter = asyncHandler(async (req, res) => {
   const chapter = String(req.body.chapter || '').trim();
   if (!name || !subject || !chapter) throw new AppError('batch, subject, and chapter are required', 400);
 
-  await Batch.findOneAndUpdate(
-    { name, 'subjects.name': subject },
-    { $addToSet: { 'subjects.$.chapters': { name: chapter } } },
-    { upsert: false }
-  );
+  const batch = await Batch.findOne({ name, 'subjects.name': subject });
+  if (!batch) return res.json({ success: true });
+  const subjectDoc = batch.subjects.find(s => s.name === subject);
+  if (subjectDoc.chapters.some(c => c.name === chapter)) return res.json({ success: true });
+
+  subjectDoc.chapters.push({ name: chapter, order: subjectDoc.chapters.length });
+  await batch.save();
   res.json({ success: true });
+});
+
+/**
+ * PUT /api/batches/:name/subjects/:subject/chapters/reorder
+ * Persist a new chapter display order.
+ * Body: { order: [chapterName1, chapterName2, ...] }
+ */
+exports.reorderChapters = asyncHandler(async (req, res) => {
+  const name    = decodeURIComponent(req.params.name    || '').trim();
+  const subject = decodeURIComponent(req.params.subject || '').trim();
+  const order   = Array.isArray(req.body.order) ? req.body.order : [];
+  if (!name || !subject) throw new AppError('batch and subject are required', 400);
+  if (!order.length) throw new AppError('order (array of chapter names) is required', 400);
+
+  const batch = await Batch.findOne({ name, 'subjects.name': subject });
+  if (!batch) return res.json({ success: true });
+  const subjectDoc = batch.subjects.find(s => s.name === subject);
+
+  order.forEach((chapterName, idx) => {
+    const ch = subjectDoc.chapters.find(c => c.name === chapterName);
+    if (ch) ch.order = idx;
+  });
+  await batch.save();
+  res.json({ success: true });
+});
+
+/**
+ * GET /api/batches/:name/subjects/:subject/chapters
+ * Public — returns chapter names in display order, so any client
+ * (including students, who never call the admin-only GET /batches)
+ * can sort a locally-derived chapter list to match the admin's chosen order.
+ */
+exports.getSubjectChapters = asyncHandler(async (req, res) => {
+  const name    = decodeURIComponent(req.params.name    || '').trim();
+  const subject = decodeURIComponent(req.params.subject || '').trim();
+  if (!name || !subject) throw new AppError('batch and subject are required', 400);
+
+  const batch = await Batch.findOne({ name, 'subjects.name': subject }).lean();
+  const subjectDoc = batch?.subjects.find(s => s.name === subject);
+  const chapters = (subjectDoc?.chapters || [])
+    .map(c => ({ name: c.name, order: c.order || 0 }))
+    .sort((a, b) => a.order - b.order);
+
+  res.json({ success: true, data: chapters });
 });
 
 /**
