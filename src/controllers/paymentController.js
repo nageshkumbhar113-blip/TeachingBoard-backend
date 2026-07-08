@@ -319,6 +319,12 @@ exports.getPendingPayments = asyncHandler(async (req, res) => {
     .lean();
   const studentMap = new Map(students.map(s => [s.user_id, s]));
 
+  // A student who backs out and retries the same batch (common — they
+  // reopen the plan screen, pick a plan, bail again) writes a NEW 'created'
+  // row each time via createOrder, since orders are never reused/updated.
+  // Collapse those into one follow-up entry per student+batch, keeping the
+  // most recent attempt (abandoned is already sorted created_at desc).
+  const seen = new Set();
   const data = abandoned
     .map(sub => {
       const student = studentMap.get(sub.student_user_id);
@@ -326,6 +332,9 @@ exports.getPendingPayments = asyncHandler(async (req, res) => {
       // Already has access to this batch (this attempt or a later retry
       // succeeded) — nothing to follow up on.
       if ((student.assigned_batches || []).includes(sub.batch)) return null;
+      const dedupeKey = `${sub.student_user_id}|${sub.batch}`;
+      if (seen.has(dedupeKey)) return null;
+      seen.add(dedupeKey);
       return {
         student_code: student.student_code,
         name: student.name,
