@@ -254,7 +254,8 @@ exports.selfRegister = asyncHandler(async (req, res) => {
   if (!school_name)                   throw new AppError('School name is required', 400);
   if (!pin || !/^\d{4}$/.test(pin))   throw new AppError('PIN must be 4 digits', 400);
   if (isWeakPin(pin))                 throw new AppError('PIN is too weak (avoid 0000, 1234, repeating patterns)', 400);
-  if (mobile && !isValidMobile(mobile)) throw new AppError('Invalid mobile number', 400);
+  if (!mobile)                        throw new AppError('Mobile number is required', 400);
+  if (!isValidMobile(mobile))         throw new AppError('Invalid mobile number', 400);
 
   // Auto-generate unique student_code from name
   const prefix = name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) || 'STU';

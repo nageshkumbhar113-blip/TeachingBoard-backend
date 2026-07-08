@@ -295,3 +295,74 @@ exports.getStatus = asyncHandler(async (req, res) => {
     })),
   });
 });
+
+// ── Admin: students who started a paid checkout but never completed it ───────
+// A Razorpay order is written as status:'created' the moment the student
+// picks a plan; it only flips to 'active' after verifyPayment/webhook. Any
+// 'created' row still sitting there after a grace period is a real drop-off
+// — a lead who showed buying intent for a specific paid plan, worth calling.
+exports.getPendingPayments = asyncHandler(async (req, res) => {
+  const GRACE_MS = 15 * 60 * 1000; // ignore attempts from the last 15 min — likely still mid-checkout
+  const cutoff = new Date(Date.now() - GRACE_MS);
+
+  const abandoned = await StudentSubscription.find({
+    status: 'created',
+    period: { $in: ['monthly', 'yearly'] },
+    created_at: { $lte: cutoff },
+  }).sort({ created_at: -1 }).limit(200).lean();
+
+  if (!abandoned.length) return res.json({ success: true, data: [] });
+
+  const userIds = [...new Set(abandoned.map(s => s.student_user_id))];
+  const students = await User.find({ user_id: { $in: userIds } })
+    .select('user_id name mobile student_code status assigned_batches')
+    .lean();
+  const studentMap = new Map(students.map(s => [s.user_id, s]));
+
+  const data = abandoned
+    .map(sub => {
+      const student = studentMap.get(sub.student_user_id);
+      if (!student) return null;
+      // Already has access to this batch (this attempt or a later retry
+      // succeeded) — nothing to follow up on.
+      if ((student.assigned_batches || []).includes(sub.batch)) return null;
+      return {
+        student_code: student.student_code,
+        name: student.name,
+        mobile: student.mobile,
+        batch: sub.batch,
+        period: sub.period,
+        amount: sub.amount,
+        started_at: sub.created_at,
+      };
+    })
+    .filter(Boolean);
+
+  res.json({ success: true, data });
+});
+
+// ── Admin: revenue summary (total / today / this month) ──────────────────────
+// Sums the `amount` of every verified payment. created_at is used as the
+// revenue date — Razorpay orders are captured within minutes of creation in
+// this flow, so it's an accurate enough proxy without a separate paid_at field.
+exports.getRevenueSummary = asyncHandler(async (req, res) => {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const sum = async match => {
+    const rows = await StudentSubscription.aggregate([
+      { $match: match },
+      { $group: { _id: null, total: { $sum: '$amount' } } },
+    ]);
+    return rows[0]?.total || 0;
+  };
+
+  const [total, today, month] = await Promise.all([
+    sum({ payment_verified: true }),
+    sum({ payment_verified: true, created_at: { $gte: startOfToday } }),
+    sum({ payment_verified: true, created_at: { $gte: startOfMonth } }),
+  ]);
+
+  res.json({ success: true, data: { total, today, month } });
+});

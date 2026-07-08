@@ -1,5 +1,6 @@
 const express = require('express');
 const { createRateLimiter } = require('../middleware/rateLimiter');
+const { requireAdmin } = require('../middleware/auth');
 const {
   getConfig,
   createOrder,
@@ -7,9 +8,14 @@ const {
   webhook,
   getStatus,
   verifyPayment,
+  getPendingPayments,
+  getRevenueSummary,
 } = require('../controllers/paymentController');
 
 const router = express.Router();
+
+router.get('/admin/pending', requireAdmin, getPendingPayments);
+router.get('/admin/revenue', requireAdmin, getRevenueSummary);
 
 // Public endpoints are authenticated by student_code + PIN inside the
 // controller (login is blocked for pending/expired accounts, which is exactly
