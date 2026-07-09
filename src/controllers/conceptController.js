@@ -4,6 +4,27 @@ const ConceptVersion = require('../models/ConceptVersion');
 const StudentProgress = require('../models/StudentProgress');
 const asyncHandler = require('../utils/asyncHandler');
 
+// A concept's chapterId is built by the admin app as
+// `${batch}::${subject}::${chapter}` (normalized lowercase/hyphenated) —
+// see admin-app/conceptManager.js's _makeChapterId(). It's the only field
+// that actually identifies which batch a concept belongs to (aiContext.
+// standard is just a display number parsed from the batch name, and
+// different batches can share the same standard, e.g. two different
+// "8th ..." batches — it must never be used for access control).
+function _normalizeForChapterId(s) {
+  return String(s || '').trim().toLowerCase().replace(/\s+/g, '-');
+}
+function _chapterIdBatch(chapterId) {
+  return String(chapterId || '').split('::')[0] || '';
+}
+// Returns null for admins (no restriction — they manage every batch) or a
+// Set of normalized batch names a student is allowed to see concepts for.
+function _studentAllowedBatchSet(req) {
+  if (req.user?.role !== 'student') return null;
+  const assigned = Array.isArray(req.userDoc?.assigned_batches) ? req.userDoc.assigned_batches : [];
+  return new Set(assigned.map(_normalizeForChapterId));
+}
+
 // ════════════════════════════════════
 // CREATE CONCEPT
 // ════════════════════════════════════
@@ -146,6 +167,11 @@ exports.getConcept = asyncHandler(async (req, res) => {
     });
   }
 
+  const allowedBatches = _studentAllowedBatchSet(req);
+  if (allowedBatches && !allowedBatches.has(_chapterIdBatch(concept.chapterId))) {
+    return res.status(403).json({ success: false, message: 'Not available for your batch' });
+  }
+
   res.json({
     success: true,
     data: concept
@@ -159,6 +185,11 @@ exports.getConcept = asyncHandler(async (req, res) => {
 exports.getChapterConcepts = asyncHandler(async (req, res) => {
   const { chapterId } = req.params;
   const { status = 'published' } = req.query;
+
+  const allowedBatches = _studentAllowedBatchSet(req);
+  if (allowedBatches && !allowedBatches.has(_chapterIdBatch(chapterId))) {
+    return res.status(403).json({ success: false, message: 'Not available for your batch' });
+  }
 
   const query = { chapterId };
   if (status) query.status = status;
@@ -207,7 +238,12 @@ exports.getPublishedChapters = asyncHandler(async (req, res) => {
     { $sort: { standard: 1, subject: 1, chapter: 1 } }
   ]);
 
-  res.json({ success: true, data: chapters });
+  const allowedBatches = _studentAllowedBatchSet(req);
+  const visible = allowedBatches
+    ? chapters.filter(ch => allowedBatches.has(_chapterIdBatch(ch.chapterId)))
+    : chapters;
+
+  res.json({ success: true, data: visible });
 });
 
 // ════════════════════════════════════
@@ -407,6 +443,15 @@ exports.searchConcepts = asyncHandler(async (req, res) => {
     });
   }
 
+  const allowedBatches = _studentAllowedBatchSet(req);
+  const requestedLimit = parseInt(limit);
+  // Batch filtering happens after the text-search ranking/limit below, so
+  // oversample when a student is filtering — otherwise a search that's
+  // dominated by other batches' matches could return fewer than `limit`
+  // results (or zero) even though enough same-batch matches exist further
+  // down the ranked list.
+  const fetchLimit = allowedBatches ? Math.min(requestedLimit * 5, 200) : requestedLimit;
+
   const results = await Concept.find(
     {
       $text: { $search: q },
@@ -415,14 +460,18 @@ exports.searchConcepts = asyncHandler(async (req, res) => {
     { score: { $meta: 'textScore' } }
   )
     .sort({ score: { $meta: 'textScore' } })
-    .limit(parseInt(limit))
-    .select('title difficulty examTags')
+    .limit(fetchLimit)
+    .select('title difficulty examTags chapterId')
     .lean();
+
+  const filtered = allowedBatches
+    ? results.filter(c => allowedBatches.has(_chapterIdBatch(c.chapterId))).slice(0, requestedLimit)
+    : results;
 
   res.json({
     success: true,
-    data: results,
-    count: results.length
+    data: filtered,
+    count: filtered.length
   });
 });
 
