@@ -412,6 +412,30 @@ exports.submitAttempt = asyncHandler(async (req, res) => {
   const studentCode = req.user?.student_code || '';
   if (!studentCode) throw new AppError('Student identity missing', 401);
 
+  // One attempt per test (getTestStudent already surfaces `my_attempt` to
+  // the frontend so it can show "already attempted" instead of the player —
+  // but nothing here enforced that server-side, so a resubmission (retry,
+  // race, or a client bug) silently created a second attempt document and
+  // skewed class-analytics averages, which sum every attempt).
+  const existing = await WordTestAttempt.findOne(
+    { test_id: test.test_id, student_code: studentCode },
+    { attempt_id: 1, score: 1, total: 1, passed: 1 }
+  ).lean();
+  if (existing) {
+    // Same response shape as a fresh submit, so any caller (retry, race,
+    // client bug) handles this identically to a normal success response.
+    return res.json({
+      success: true,
+      attempt_id:      existing.attempt_id,
+      score:            existing.score,
+      total:            existing.total,
+      passed:           existing.passed,
+      percent:          existing.total > 0 ? Math.round(existing.score / existing.total * 100) : 0,
+      correct_answers:  Object.fromEntries(test.questions.map(q => [q.question_id, q.correct_id])),
+      already_submitted: true,
+    });
+  }
+
   // Build lookup: question_id → correct_id (server-side, not trusting client)
   const correctMap = Object.fromEntries(
     test.questions.map(q => [q.question_id, { correct_id: q.correct_id, type: q.option_type }])

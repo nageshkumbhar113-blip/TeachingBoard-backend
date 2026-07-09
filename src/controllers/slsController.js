@@ -532,6 +532,24 @@ exports.submitAnswers = async (req, res) => {
       });
     }
 
+    // getStudentAttempts lists every past attempt (repeat practice is
+    // legitimate), so this can't block resubmission outright — but a
+    // network retry of the exact same submit within a few seconds is not a
+    // real repeat attempt, just a duplicate write. This is the largest
+    // per-document attempt type in the app (embeds full answers/diagrams),
+    // so a duplicate here costs the most storage of any attempt model.
+    const DUPLICATE_WINDOW_MS = 15_000;
+    const recentDuplicate = await StudentPaperAttempt.findOne({
+      paperId, studentId,
+      created_at: { $gte: new Date(Date.now() - DUPLICATE_WINDOW_MS) },
+    }).sort({ created_at: -1 });
+    if (recentDuplicate) {
+      return res.status(200).json({
+        success: true, message: 'Answers submitted successfully',
+        data: recentDuplicate, already_submitted: true,
+      });
+    }
+
     // Create attempt
     const attempt = new StudentPaperAttempt({
       paperId,

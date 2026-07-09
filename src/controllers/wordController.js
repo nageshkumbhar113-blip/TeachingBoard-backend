@@ -430,6 +430,24 @@ exports.submitAttempt = asyncHandler(async (req, res) => {
   const totalScore = scoreListen + scoreMeaning + scorePicture + scoreSpelling;
   const passed     = totalScore / totalPossible >= PASS_PCT;
 
+  // Retakes are legitimate here (the student's test list shows the latest
+  // attempt per test_num), so this can't block resubmission outright like
+  // Word Test does — but a network retry of the exact same submit within a
+  // few seconds is not a real retake, just a duplicate write skewing
+  // teacher-facing averages. Collapse those.
+  const DUPLICATE_WINDOW_MS = 15_000;
+  const recentDuplicate = await VocabAttempt.findOne({
+    student_code: studentCode, batch, subject, test_num: testNum,
+    submitted_at: { $gte: new Date(Date.now() - DUPLICATE_WINDOW_MS) },
+  }).sort({ submitted_at: -1 }).lean();
+  if (recentDuplicate) {
+    return res.status(200).json({
+      success: true, passed: recentDuplicate.passed,
+      total_score: recentDuplicate.total_score, total_possible: recentDuplicate.total_possible,
+      data: recentDuplicate, already_submitted: true,
+    });
+  }
+
   const attempt = await VocabAttempt.create({
     attempt_id:     randomUUID(),
     student_code:   studentCode,

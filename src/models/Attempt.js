@@ -38,7 +38,8 @@ const attemptSchema = new mongoose.Schema(
     batch: {
       type: String,
       required: true,
-      trim: true
+      trim: true,
+      index: true
     },
     student_name: {
       type: String,

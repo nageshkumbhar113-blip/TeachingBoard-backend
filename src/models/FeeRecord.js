@@ -12,7 +12,7 @@ const paymentSchema = new Schema({
 const feeRecordSchema = new Schema({
   fee_record_id: { type: String, required: true, unique: true, index: true, default: () => randomUUID() },
   fee_config_id: { type: String, required: true, index: true },
-  student_code:  { type: String, required: true, trim: true },
+  student_code:  { type: String, required: true, trim: true, index: true },
   student_name:  { type: String, required: true, trim: true },
   batch:         { type: String, required: true, trim: true },
   total_amount:  { type: Number, required: true, min: 0 },

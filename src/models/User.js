@@ -51,6 +51,10 @@ const userSchema = new mongoose.Schema(
   }
 );
 
+// Admin student/teacher lists filter by role then sort by created_at —
+// compound index covers both the filter and the sort in one pass.
+userSchema.index({ role: 1, created_at: -1 });
+
 userSchema.statics.hashPin = function(pin) {
   const secret = process.env.JWT_SECRET || process.env.AUTH_SECRET;
   return _pinHash(pin, secret);

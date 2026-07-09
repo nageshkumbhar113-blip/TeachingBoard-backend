@@ -33,5 +33,6 @@ const wordTestAttemptSchema = new mongoose.Schema({
 }, { collection: 'word_test_attempts', versionKey: false });
 
 wordTestAttemptSchema.index({ test_id: 1, student_code: 1 });
+wordTestAttemptSchema.index({ batch: 1, subject: 1 }); // classAnalytics filters by batch+subject
 
 module.exports = mongoose.model('WordTestAttempt', wordTestAttemptSchema);
