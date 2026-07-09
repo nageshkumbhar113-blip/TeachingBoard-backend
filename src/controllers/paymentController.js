@@ -4,6 +4,7 @@ const StudentSubscription = require('../models/StudentSubscription');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const razorpay = require('../utils/razorpay');
+const { sendToUser } = require('../utils/fcm');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -422,4 +423,53 @@ exports.getRevenueSummary = asyncHandler(async (req, res) => {
   ]);
 
   res.json({ success: true, data: { total, today, month } });
+});
+
+// ── CRON: Subscription expiry reminders (called by cron-job.org daily) ───────
+// Same auth pattern as feeController.processReminders — a daily hit from an
+// external scheduler, guarded by a shared secret. Fires once per student per
+// expiry_date (expiry_notified_for tracks the last one notified), so it's
+// safe to run daily across the whole D-8..D-0 window without re-spamming —
+// but fires again after a renewal produces a new expiry_date.
+exports.processExpiryReminders = asyncHandler(async (req, res) => {
+  const secret   = String(req.headers['x-cron-secret'] || '').trim();
+  const expected = String(process.env.CRON_SECRET || '').trim();
+  if (!expected || secret !== expected) {
+    return res.status(401).json({ success: false, message: 'Unauthorized' });
+  }
+
+  const now = new Date();
+  const windowEnd = new Date(now);
+  windowEnd.setDate(windowEnd.getDate() + 8);
+
+  const students = await User.find({
+    role: 'student',
+    status: 'active',
+    expiry_date: { $gte: now, $lte: windowEnd },
+    device_token: { $exists: true, $nin: [null, ''] },
+  }).lean();
+
+  let notified = 0;
+  for (const student of students) {
+    const already = student.expiry_notified_for &&
+      new Date(student.expiry_notified_for).getTime() === new Date(student.expiry_date).getTime();
+    if (already) continue;
+
+    const daysLeft = Math.max(0, Math.ceil((new Date(student.expiry_date) - now) / 86400000));
+    const title = '⏰ Subscription लवकरच संपणार आहे';
+    const body  = daysLeft > 0
+      ? `${student.name} ची subscription ${daysLeft} दिवसात संपेल. वेळेत renew करा, अन्यथा access बंद होईल.`
+      : `${student.name} ची subscription आज संपते. वेळेत renew करा.`;
+
+    await sendToUser(student.device_token, title, body, {
+      type: 'subscription_expiry',
+      student_code: student.student_code,
+      days_left: String(daysLeft),
+    }).catch(err => console.warn('Expiry FCM error:', err.message));
+
+    await User.updateOne({ user_id: student.user_id }, { $set: { expiry_notified_for: student.expiry_date } });
+    notified++;
+  }
+
+  res.json({ success: true, notified_count: notified, checked: students.length });
 });

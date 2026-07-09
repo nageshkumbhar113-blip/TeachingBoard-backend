@@ -23,6 +23,10 @@ const userSchema = new mongoose.Schema(
     status:           { type: String, enum: ['pending', 'active', 'blocked'], default: 'active', index: true },
     assigned_batches: { type: [String], default: [] },
     expiry_date:      { type: Date, default: null, index: true },
+    // Tracks which expiry_date the D-8 reminder cron already notified for —
+    // prevents renotifying daily across the whole 8-day window, while still
+    // firing again if the student renews and gets a new expiry_date.
+    expiry_notified_for: { type: Date, default: null },
     approved_at:      { type: Date, default: null },
     approved_by:      { type: String, default: '' },
     request_source:   { type: String, enum: ['admin', 'self'], default: 'admin' },

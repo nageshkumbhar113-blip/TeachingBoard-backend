@@ -45,12 +45,27 @@ const studentSubscriptionSchema = new mongoose.Schema(
 studentSubscriptionSchema.index({ student_code: 1, status: 1 });
 studentSubscriptionSchema.index({ student_user_id: 1, batch: 1 });
 
+// The academic year ends April 30 — students get promoted to the next class
+// each year, so a subscription (monthly or yearly) should never grant access
+// past that boundary even if its rolling period would otherwise extend
+// further. Returns the nearest upcoming April 30 on/after `from`.
+function _nextAprilThirty(from) {
+  const year = from.getFullYear();
+  const aprilThirtyThisYear = new Date(year, 3, 30, 23, 59, 59, 999); // month 3 = April
+  return from <= aprilThirtyThisYear ? aprilThirtyThisYear : new Date(year + 1, 3, 30, 23, 59, 59, 999);
+}
+
 // Compute expiry from a start date + period.
 studentSubscriptionSchema.statics.computeExpiry = function (period, from = new Date(), trialDays = 1) {
   const d = new Date(from);
   if (period === 'trial')   d.setDate(d.getDate() + (Number(trialDays) || 1));
   if (period === 'monthly') d.setDate(d.getDate() + 30);
   if (period === 'yearly')  d.setDate(d.getDate() + 365);
+
+  if (period === 'monthly' || period === 'yearly') {
+    const cap = _nextAprilThirty(from);
+    if (d > cap) return cap;
+  }
   return d;
 };
 
