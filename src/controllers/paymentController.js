@@ -207,6 +207,54 @@ exports.verifyPayment = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Payment verified', student: { status: student.status, expiry_date: student.expiry_date } });
 });
 
+// ── Verify payment WITHOUT a PIN (external-browser checkout flow) ────────────
+// Body: { razorpay_order_id, razorpay_payment_id, razorpay_signature }
+// The student's PIN can't safely travel to an external browser tab (would
+// show up in URLs/browser history), so this endpoint relies purely on
+// Razorpay's signature as proof — the same trust model the webhook already
+// uses below. order_id ties the payment back to exactly one student via the
+// StudentSubscription row created at order time; nothing else identifies
+// "who" here, which is fine since only Razorpay can produce a valid signature
+// for a given order_id + payment_id pair.
+exports.verifyPaymentPublic = asyncHandler(async (req, res) => {
+  const orderId   = String(req.body.razorpay_order_id   || '').trim();
+  const paymentId = String(req.body.razorpay_payment_id || '').trim();
+  const signature = String(req.body.razorpay_signature  || '').trim();
+  if (!orderId || !paymentId || !signature) {
+    throw new AppError('razorpay_order_id, razorpay_payment_id and razorpay_signature are required', 400);
+  }
+
+  if (!razorpay.verifyPaymentSignature(orderId, paymentId, signature)) {
+    throw new AppError('Payment verification failed', 400);
+  }
+
+  const sub = await StudentSubscription.findOne({ razorpay_order_id: orderId });
+  if (!sub) throw new AppError('Order not found', 404);
+
+  if (sub.payment_verified) {
+    return res.json({ success: true, message: 'Already verified' });
+  }
+
+  const student = await User.findOne({ user_id: sub.student_user_id, role: 'student' });
+  if (!student) throw new AppError('Student not found', 404);
+
+  const base = (student.expiry_date && student.expiry_date > new Date())
+    ? student.expiry_date
+    : new Date();
+  const expiry = StudentSubscription.computeExpiry(sub.period, base);
+
+  sub.razorpay_payment_id = paymentId;
+  sub.payment_verified = true;
+  sub.status = 'active';
+  sub.start_date = new Date();
+  sub.expiry_date = expiry;
+  await sub.save();
+
+  await activateStudentForBatch(student, sub.batch, expiry);
+
+  res.json({ success: true, message: 'Payment verified' });
+});
+
 // ── Razorpay webhook (public; verified by signature on RAW body) ──────────────
 
 exports.webhook = asyncHandler(async (req, res) => {

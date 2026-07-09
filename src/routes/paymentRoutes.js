@@ -8,6 +8,7 @@ const {
   webhook,
   getStatus,
   verifyPayment,
+  verifyPaymentPublic,
   getPendingPayments,
   getRevenueSummary,
 } = require('../controllers/paymentController');
@@ -31,6 +32,7 @@ router.post('/order',  payLimiter, createOrder);
 router.post('/trial',  payLimiter, startTrial);
 router.post('/status', payLimiter, getStatus);
 router.post('/verify',  payLimiter, verifyPayment);
+router.post('/verify-public', payLimiter, verifyPaymentPublic);
 
 // NOTE: /webhook is mounted separately in app.js (needs the raw body for
 // signature verification) and must NOT go through this JSON router.
