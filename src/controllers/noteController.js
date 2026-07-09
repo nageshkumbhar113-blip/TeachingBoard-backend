@@ -107,8 +107,20 @@ exports.deleteNote = asyncHandler(async (req, res) => {
 // Returns metadata only — cloudinary_url NEVER included
 exports.listNotesStudent = asyncHandler(async (req, res) => {
   const filter = { status: 'active' };
-  if (req.query.batch)   filter.batch   = _iregex(req.query.batch);
   if (req.query.subject) filter.subject = _iregex(req.query.subject);
+
+  // Batch gate: never trust a client-supplied batch, and never return notes
+  // for batches the student isn't assigned to — omitting `batch` used to
+  // return every batch's note metadata (titles/subjects/counts).
+  const assignedBatches = Array.isArray(req.userDoc?.assigned_batches)
+    ? req.userDoc.assigned_batches.map(b => String(b || '').trim()).filter(Boolean)
+    : [];
+  if (assignedBatches.length > 0) {
+    // $in needs literal RegExp instances, not _iregex()'s {$regex:...} query-operator shape.
+    filter.batch = { $in: assignedBatches.map(b => new RegExp('^' + b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i')) };
+  } else if (req.query.batch) {
+    filter.batch = _iregex(req.query.batch);
+  }
 
   const notes = await Note.find(filter)
     .sort({ created_at: -1 })

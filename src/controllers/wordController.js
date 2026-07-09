@@ -19,6 +19,18 @@ cloudinary.config({
 const WORDS_PER_TEST = 20;
 const PASS_PCT       = 0.60;
 
+// Mirrors the check addStudentWord already used correctly — throws if a
+// student requests/writes to a batch they aren't assigned to. Several read
+// endpoints below used to trust req.query.batch/req.body.batch outright.
+function _assertOwnBatch(studentDoc, batch) {
+  const assignedBatches = Array.isArray(studentDoc?.assigned_batches)
+    ? studentDoc.assigned_batches.map(b => String(b || '').trim())
+    : [];
+  if (assignedBatches.length && !assignedBatches.includes(batch)) {
+    throw new AppError('You are not enrolled in this batch', 403);
+  }
+}
+
 function escapeRegex(str) {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -279,6 +291,7 @@ exports.autoFillWord = asyncHandler(async (req, res) => {
 exports.getVocabSubjects = asyncHandler(async (req, res) => {
   const batch = String(req.query.batch || '').trim();
   if (!batch) throw new AppError('batch is required', 400);
+  _assertOwnBatch(req.userDoc, batch);
   const subjects = await Word.distinct('subject', { batch, subject: { $nin: ['', null] } });
   res.json({ success: true, subjects: subjects.sort() });
 });
@@ -288,6 +301,7 @@ exports.getTestList = asyncHandler(async (req, res) => {
   const studentDoc  = req.userDoc;
   const batch       = String(req.query.batch   || studentDoc?.assigned_batches?.[0] || '').trim();
   const subject     = String(req.query.subject || '').trim();
+  _assertOwnBatch(studentDoc, batch);
 
   if (!batch)   throw new AppError('batch is required', 400);
   if (!subject) throw new AppError('subject is required', 400);
@@ -342,6 +356,7 @@ exports.getTest = asyncHandler(async (req, res) => {
   if (!testNum || testNum < 1) throw new AppError('Invalid test number', 400);
   if (!batch)   throw new AppError('batch is required', 400);
   if (!subject) throw new AppError('subject is required', 400);
+  _assertOwnBatch(req.userDoc, batch);
 
   const wFrom = (testNum - 1) * WORDS_PER_TEST + 1;
   const wTo   = testNum * WORDS_PER_TEST;
@@ -415,6 +430,7 @@ exports.submitAttempt = asyncHandler(async (req, res) => {
   if (!batch)   throw new AppError('batch is required', 400);
   if (!subject) throw new AppError('subject is required', 400);
   if (!testNum || testNum < 1) throw new AppError('test_num is required', 400);
+  _assertOwnBatch(studentDoc, batch);
 
   // Scores per section (0..N)
   const scoreListen   = Math.max(0, parseInt(req.body.score_listen)   || 0);
@@ -514,6 +530,7 @@ exports.getDictionary = asyncHandler(async (req, res) => {
 
   if (!batch)   throw new AppError('batch is required', 400);
   if (!subject) throw new AppError('subject is required', 400);
+  _assertOwnBatch(req.userDoc, batch);
 
   const filter = { batch, subject };
   if (q) {

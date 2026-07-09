@@ -388,8 +388,20 @@ exports.getPapers = async (req, res) => {
 
     const filter = {};
     if (chapterId) filter.chapterId = chapterId;
-    if (batchId) filter.batchId = batchId;
     if (status) filter.status = status;
+
+    // Admins (and the internal callers of this shared function) see
+    // whatever batchId they ask for, or everything if they don't specify
+    // one. Students previously got the same untrusted behavior — omitting
+    // batchId returned every batch's published papers, and supplying
+    // another batch's name/id worked too. Force students to their own
+    // assigned_batches regardless of what they send.
+    if (req.user?.role === 'student') {
+      const assigned = Array.isArray(req.userDoc?.assigned_batches) ? req.userDoc.assigned_batches : [];
+      filter.batchId = { $in: assigned };
+    } else if (batchId) {
+      filter.batchId = batchId;
+    }
 
     const skip = (page - 1) * limit;
 
@@ -430,6 +442,13 @@ exports.getPaperWithQuestions = async (req, res) => {
         success: false,
         message: 'Paper not found'
       });
+    }
+
+    if (req.user?.role === 'student') {
+      const assigned = Array.isArray(req.userDoc?.assigned_batches) ? req.userDoc.assigned_batches : [];
+      if (!assigned.includes(paper.batchId)) {
+        return res.status(403).json({ success: false, message: 'Not available for your batch' });
+      }
     }
 
     // Get all questions for this paper
@@ -530,6 +549,11 @@ exports.submitAnswers = async (req, res) => {
         success: false,
         message: 'This paper is not available'
       });
+    }
+
+    const assignedBatches = Array.isArray(req.userDoc?.assigned_batches) ? req.userDoc.assigned_batches : [];
+    if (!assignedBatches.includes(paper.batchId)) {
+      return res.status(403).json({ success: false, message: 'Not available for your batch' });
     }
 
     // getStudentAttempts lists every past attempt (repeat practice is

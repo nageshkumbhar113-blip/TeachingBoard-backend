@@ -20,6 +20,18 @@ const SKILL_MAP = {
   listen_type_word:    'spelling',
 };
 
+// listStudentTests already checks this correctly — getTestStudent and
+// submitAttempt (below) used to only check status:'published', with no
+// check that the test's batch matches the requesting student's
+// assigned_batches, letting a student view/submit any batch's test given
+// its test_id.
+function _assertOwnBatch(studentDoc, batch) {
+  const assigned = Array.isArray(studentDoc?.assigned_batches) ? studentDoc.assigned_batches : [];
+  if (assigned.length > 0 && !assigned.includes(batch)) {
+    throw new AppError('Access denied for this batch', 403);
+  }
+}
+
 // ══════════════════════════════════════════════════════════════════
 // ADMIN — Stats (called before creating a test)
 // GET /api/admin/word-tests/stats?batch=LKG&subject=Animals
@@ -373,6 +385,7 @@ exports.getTestStudent = asyncHandler(async (req, res) => {
     status:  'published',
   }).lean();
   if (!test) throw new AppError('Test not found', 404);
+  _assertOwnBatch(req.userDoc, test.batch);
 
   // Strip correct_id and is_correct from options before sending to student
   const safeQuestions = test.questions.map(q => ({
@@ -405,6 +418,7 @@ exports.submitAttempt = asyncHandler(async (req, res) => {
     status:  'published',
   }).lean();
   if (!test) throw new AppError('Test not found', 404);
+  _assertOwnBatch(req.userDoc, test.batch);
 
   const { answers } = req.body;
   if (!Array.isArray(answers)) throw new AppError('answers array required', 400);

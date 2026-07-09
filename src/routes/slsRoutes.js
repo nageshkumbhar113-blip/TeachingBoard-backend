@@ -72,7 +72,9 @@ slsRouter.post('/student/papers/:paperId/submit',     requireStudent, slsControl
 slsRouter.get('/student/attempts',                    requireStudent, slsController.getStudentAttempts);
 slsRouter.get('/student/attempts/:id',                requireStudent, slsController.getAttemptDetails);
 
-// ───── PUBLIC: Published Papers
-slsRouter.get('/papers/published',                    slsController.getPapers);
+// Was fully unauthenticated (no client in this codebase actually calls it —
+// checked) letting anyone enumerate every batch's published papers with no
+// login at all. Locked to the same auth as the equivalent /student/papers.
+slsRouter.get('/papers/published',                    requireStudent, slsController.getPapers);
 
 module.exports = { adminRouter, studentRouter, slsRouter };
