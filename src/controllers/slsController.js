@@ -14,16 +14,18 @@ const Concept = require('../models/Concept');
 exports.createQuestion = async (req, res) => {
   try {
     const {
-      conceptId, chapterId, subjectId, batchId,
+      conceptId, exerciseNo, chapterId, subjectId, batchId,
       questionText, answerText, marks, questionType,
       difficulty, boardFrequency, questionDiagrams, answerDiagrams, status
     } = req.body;
 
-    // Validate required fields (must match SLSQuestion model's required paths)
-    if (!conceptId || !chapterId || !subjectId || !batchId || !marks || !questionType || !difficulty) {
+    // conceptId is no longer required — Exercise questions are scoped by
+    // chapter + exerciseNo (textbook-style "1.1", "1.2"), independent of
+    // any specific Concept/Note.
+    if (!chapterId || !subjectId || !batchId || !marks || !questionType || !difficulty) {
       return res.status(400).json({
         success: false,
-        message: 'Missing required fields: conceptId, chapterId, subjectId, batchId, marks, questionType, difficulty'
+        message: 'Missing required fields: chapterId, subjectId, batchId, marks, questionType, difficulty'
       });
     }
 
@@ -43,7 +45,8 @@ exports.createQuestion = async (req, res) => {
 
     const marksNum = Number(marks);
     const question = new SLSQuestion({
-      conceptId,
+      conceptId: conceptId || '',
+      exerciseNo: exerciseNo || '',
       chapterId,
       subjectId,
       batchId,
@@ -61,8 +64,10 @@ exports.createQuestion = async (req, res) => {
 
     await question.save();
 
-    // Update ConceptMarks
-    await updateConceptMarksQuestionCount(conceptId, marksNum, 1, { chapterId, batchId });
+    // Update ConceptMarks — only meaningful when actually tied to a concept.
+    if (conceptId) {
+      await updateConceptMarksQuestionCount(conceptId, marksNum, 1, { chapterId, batchId });
+    }
 
     res.status(201).json({
       success: true,
@@ -81,13 +86,14 @@ exports.createQuestion = async (req, res) => {
 exports.getQuestions = async (req, res) => {
   try {
     const {
-      conceptId, chapterId, batchId, marks, questionType,
+      conceptId, exerciseNo, chapterId, batchId, marks, questionType,
       difficulty, boardFrequency, status = 'published', q,
       page = 1, limit = 20
     } = req.query;
 
     const filter = {};
     if (conceptId) filter.conceptId = conceptId;
+    if (exerciseNo) filter.exerciseNo = exerciseNo;
     if (chapterId) filter.chapterId = chapterId;
     if (batchId) filter.batchId = batchId;
     if (marks) filter.marks = parseInt(marks);
@@ -130,6 +136,38 @@ exports.getQuestions = async (req, res) => {
       success: false,
       message: error.message
     });
+  }
+};
+
+// Get Exercise Questions (Student) — read-only, published-only, batch-isolated.
+// Mirrors the batch-isolation pattern already applied to getPapers etc: the
+// requester's own assigned_batches always wins, a client-supplied batchId is
+// ignored/validated against it rather than trusted.
+exports.getStudentExerciseQuestions = async (req, res) => {
+  try {
+    const { chapterId, exerciseNo } = req.query;
+    if (!chapterId) {
+      return res.status(400).json({ success: false, message: 'chapterId is required' });
+    }
+
+    const assigned = Array.isArray(req.userDoc?.assigned_batches) ? req.userDoc.assigned_batches : [];
+    // chapterId already embeds the batch (batch::subject::chapter), but this
+    // is defense-in-depth, not the only safeguard — same reasoning as the
+    // rest of this app's isolation fixes.
+    const chapterBatch = String(chapterId).split('::')[0];
+    const allowed = assigned.some(b => String(b).trim().toLowerCase().replace(/\s+/g, '-') === chapterBatch);
+    if (assigned.length && !allowed) {
+      return res.status(403).json({ success: false, message: 'Not available for your batch' });
+    }
+
+    const filter = { chapterId, status: 'published' };
+    if (exerciseNo) filter.exerciseNo = exerciseNo;
+
+    const questions = await SLSQuestion.find(filter).sort({ exerciseNo: 1, created_at: 1 });
+
+    res.status(200).json({ success: true, data: questions });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 

@@ -70,6 +70,9 @@ slsRouter.post('/admin/papers/:id/publish',           requireTeacherOrAdmin, sls
 slsRouter.patch('/admin/attempts/:id/evaluate',       requireAdmin, slsController.evaluateAttempt);
 slsRouter.get('/admin/attempts',                      requireAdmin, slsController.getStudentAttempts);
 
+// ───── STUDENT: Exercise questions (read-only, published-only, batch-isolated)
+slsRouter.get('/student/exercise-questions',          requireStudent, slsController.getStudentExerciseQuestions);
+
 // ───── STUDENT: Paper Taking
 slsRouter.get('/student/papers',                      requireStudent, slsController.getPapers);
 slsRouter.get('/student/papers/:id',                  requireStudent, slsController.getPaperWithQuestions);

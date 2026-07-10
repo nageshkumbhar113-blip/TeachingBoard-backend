@@ -40,10 +40,19 @@ const answerDiagramSchema = new mongoose.Schema(
 const slsQuestionSchema = new mongoose.Schema(
   {
     // Basic Info
+    // Exercise questions are scoped by chapter + exerciseNo (textbook-style
+    // "1.1", "1.2" numbering), not by a specific Concept/Note — a question
+    // bank entry doesn't have to be tied to any single lesson. conceptId is
+    // kept optional for any legacy concept-tied entries.
     conceptId: {
       type: String,
-      required: true,
+      default: '',
       index: true,
+      trim: true
+    },
+    exerciseNo: {
+      type: String,
+      default: '',
       trim: true
     },
     chapterId: {
@@ -216,5 +225,8 @@ slsQuestionSchema.index({ status: 1, chapterId: 1 });
 // Paper Builder's exact query shape (chapter + marks value + published-only),
 // sorted least-used-first — covers filter and sort in one index.
 slsQuestionSchema.index({ chapterId: 1, marks: 1, status: 1, usageCount: 1 });
+// Exercise Manager's exact query shape: list distinct exercise numbers /
+// questions for a chapter, or a specific chapter+exerciseNo group.
+slsQuestionSchema.index({ chapterId: 1, exerciseNo: 1, status: 1 });
 
 module.exports = mongoose.models.SLSQuestion || mongoose.model('SLSQuestion', slsQuestionSchema);
