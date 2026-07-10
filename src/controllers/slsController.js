@@ -16,7 +16,7 @@ exports.createQuestion = async (req, res) => {
     const {
       conceptId, chapterId, subjectId, batchId,
       questionText, answerText, marks, questionType,
-      difficulty, boardFrequency, questionDiagrams, answerDiagrams
+      difficulty, boardFrequency, questionDiagrams, answerDiagrams, status
     } = req.body;
 
     // Validate required fields (must match SLSQuestion model's required paths)
@@ -55,7 +55,7 @@ exports.createQuestion = async (req, res) => {
       boardFrequency,
       questionDiagrams: questionDiagrams || [],
       answerDiagrams: answerDiagrams || [],
-      status: 'draft',
+      status: ['draft', 'published', 'archived'].includes(status) ? status : 'draft',
       createdBy: req.user?.id || 'system'
     });
 
