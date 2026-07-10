@@ -213,5 +213,8 @@ slsQuestionSchema.index({ batchId: 1, status: 1 });
 slsQuestionSchema.index({ questionType: 1, boardFrequency: 1 });
 slsQuestionSchema.index({ usageCount: 1, marks: 1 });
 slsQuestionSchema.index({ status: 1, chapterId: 1 });
+// Paper Builder's exact query shape (chapter + marks value + published-only),
+// sorted least-used-first — covers filter and sort in one index.
+slsQuestionSchema.index({ chapterId: 1, marks: 1, status: 1, usageCount: 1 });
 
 module.exports = mongoose.models.SLSQuestion || mongoose.model('SLSQuestion', slsQuestionSchema);
