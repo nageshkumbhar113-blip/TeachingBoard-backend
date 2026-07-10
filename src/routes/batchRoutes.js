@@ -1,6 +1,6 @@
 const express = require('express');
 const router  = express.Router();
-const { requireAdmin } = require('../middleware/auth');
+const { requireAdmin, requireTeacherOrAdmin } = require('../middleware/auth');
 const {
   getBatches,
   createBatch,
@@ -17,7 +17,9 @@ const {
   getAllBatchesPricing,
 } = require('../controllers/batchController');
 
-router.get('/',                                                        requireAdmin, getBatches);
+// Read-only, no pricing/sensitive fields — safe for teachers to browse
+// batch/subject/chapter names for Paper Builder.
+router.get('/',                                                        requireTeacherOrAdmin, getBatches);
 router.get('/pricing/all',                                             getAllBatchesPricing);
 router.post('/',                                                       requireAdmin, createBatch);
 router.put('/:name',                                                   requireAdmin, renameBatch);
