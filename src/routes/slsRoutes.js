@@ -1,5 +1,5 @@
 const express = require('express');
-const { requireAdmin, requireStudent } = require('../middleware/auth');
+const { requireAdmin, requireStudent, requireTeacherOrAdmin } = require('../middleware/auth');
 const {
   createConcept,
   getConcept,
@@ -48,18 +48,23 @@ studentRouter.get('/:conceptId/view',              requireStudent, getConcept);
 
 const slsRouter = express.Router();
 
-// ───── ADMIN: Question Management
+// ───── ADMIN: Question Management (create/edit/delete/publish stay admin-only;
+// GET is requireTeacherOrAdmin — teachers need read access to browse/search
+// the bank while building a paper, but cannot mutate questions)
 slsRouter.post('/admin/questions',                    requireAdmin, slsController.createQuestion);
-slsRouter.get('/admin/questions',                     requireAdmin, slsController.getQuestions);
+slsRouter.get('/admin/questions',                     requireTeacherOrAdmin, slsController.getQuestions);
 slsRouter.patch('/admin/questions/:id',               requireAdmin, slsController.updateQuestion);
 slsRouter.delete('/admin/questions/:id',              requireAdmin, slsController.deleteQuestion);
 slsRouter.post('/admin/questions/:id/publish',        requireAdmin, slsController.publishQuestion);
 
-// ───── ADMIN: Paper Generation & Management
-slsRouter.post('/admin/papers/generate',              requireAdmin, slsController.generatePaper);
-slsRouter.get('/admin/papers',                        requireAdmin, slsController.getPapers);
-slsRouter.get('/admin/papers/:id',                    requireAdmin, slsController.getPaperWithQuestions);
-slsRouter.post('/admin/papers/:id/publish',           requireAdmin, slsController.publishPaper);
+// ───── ADMIN + TEACHER: Paper Generation & Management (teachers may only
+// build/view/publish papers from the existing question bank, per explicit
+// scope request — question CRUD above stays admin-only)
+slsRouter.post('/admin/papers/generate',              requireTeacherOrAdmin, slsController.generatePaper);
+slsRouter.post('/admin/papers',                       requireTeacherOrAdmin, slsController.createPaperManual);
+slsRouter.get('/admin/papers',                        requireTeacherOrAdmin, slsController.getPapers);
+slsRouter.get('/admin/papers/:id',                    requireTeacherOrAdmin, slsController.getPaperWithQuestions);
+slsRouter.post('/admin/papers/:id/publish',           requireTeacherOrAdmin, slsController.publishPaper);
 
 // ───── ADMIN: Evaluation & Marking
 slsRouter.patch('/admin/attempts/:id/evaluate',       requireAdmin, slsController.evaluateAttempt);

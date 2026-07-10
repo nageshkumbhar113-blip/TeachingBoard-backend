@@ -82,7 +82,7 @@ exports.getQuestions = async (req, res) => {
   try {
     const {
       conceptId, chapterId, batchId, marks, questionType,
-      difficulty, boardFrequency, status = 'published',
+      difficulty, boardFrequency, status = 'published', q,
       page = 1, limit = 20
     } = req.query;
 
@@ -95,13 +95,23 @@ exports.getQuestions = async (req, res) => {
     if (difficulty) filter.difficulty = difficulty;
     if (boardFrequency) filter.boardFrequency = boardFrequency;
     if (status) filter.status = status;
+    if (q && q.trim()) {
+      const re = new RegExp(q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      filter.$or = [
+        { 'questionText.english': re },
+        { 'questionText.marathi': re },
+        { 'answerText.english': re },
+        { 'answerText.marathi': re }
+      ];
+    }
 
     const skip = (page - 1) * limit;
 
+    const sortBy = req.query.sort === 'usageCount' ? { usageCount: 1 } : { created_at: -1 };
     const questions = await SLSQuestion.find(filter)
       .skip(skip)
       .limit(parseInt(limit))
-      .sort({ created_at: -1 });
+      .sort(sortBy);
 
     const total = await SLSQuestion.countDocuments(filter);
 
@@ -371,6 +381,104 @@ exports.generatePaper = async (req, res) => {
     res.status(201).json({
       success: true,
       message: 'Paper generated successfully',
+      data: paper
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// Create Paper Manually (teacher/admin hand-picks questions, no auto-distribution)
+exports.createPaperManual = async (req, res) => {
+  try {
+    const { batchId, chapterId, subjectId, paperTitle, questions } = req.body;
+
+    if (!batchId || !chapterId || !subjectId || !Array.isArray(questions) || questions.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: batchId, chapterId, subjectId, questions[]'
+      });
+    }
+
+    const ids = questions.map(q => q.questionId);
+    const found = await SLSQuestion.find({ _id: { $in: ids } }).lean();
+    const foundMap = new Map(found.map(q => [q._id.toString(), q]));
+
+    const selectedQuestions = [];
+    let totalMarks = 0;
+    let order = 0;
+    for (const item of questions) {
+      const src = foundMap.get(String(item.questionId));
+      if (!src) {
+        return res.status(400).json({ success: false, message: `Question ${item.questionId} not found` });
+      }
+      // Defense-in-depth: manually-picked questions must belong to the same
+      // batch/chapter as the paper, mirroring the isolation guarantees the
+      // rest of this app enforces (a client could otherwise hand-pick a
+      // questionId from a different batch's chapter).
+      if (src.batchId !== batchId || src.chapterId !== chapterId) {
+        return res.status(400).json({ success: false, message: `Question ${item.questionId} does not belong to this batch/chapter` });
+      }
+      order += 1;
+      selectedQuestions.push({
+        questionId: src._id,
+        marks: src.marks,
+        difficulty: src.difficulty,
+        questionType: src.questionType,
+        displayOrder: order,
+        totalAttempts: 0,
+        correctAttempts: 0,
+        averageScore: 0
+      });
+      totalMarks += src.marks;
+    }
+
+    const lastPaper = await PracticePaper.findOne({ chapterId })
+      .sort({ paperNumber: -1 })
+      .lean();
+    const paperNumber = (lastPaper?.paperNumber || 0) + 1;
+
+    const marksTally = {};
+    for (const sq of selectedQuestions) marksTally[sq.marks] = (marksTally[sq.marks] || 0) + 1;
+
+    const paper = new PracticePaper({
+      chapterId,
+      batchId,
+      subjectId,
+      paperNumber,
+      paperTitle: paperTitle || `Practice Paper ${paperNumber}`,
+      totalMarks,
+      totalQuestions: selectedQuestions.length,
+      questions: selectedQuestions,
+      marksBreakdown: Object.entries(marksTally).map(([marks, count]) => ({
+        marks: parseInt(marks),
+        count,
+        totalMarksForThisValue: parseInt(marks) * count
+      })),
+      status: 'draft',
+      createdBy: req.user?.id || 'system',
+      generatedAt: new Date()
+    });
+
+    await paper.save();
+
+    // Same usage-tracking bookkeeping generatePaper() does.
+    for (const sq of selectedQuestions) {
+      await SLSQuestion.findByIdAndUpdate(
+        sq.questionId,
+        {
+          $inc: { usageCount: 1 },
+          $push: { usedInPapers: { paperId: paper._id, usedDate: new Date() } }
+        }
+      );
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Paper created successfully',
       data: paper
     });
   } catch (error) {
