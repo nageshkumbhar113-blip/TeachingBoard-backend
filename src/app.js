@@ -80,16 +80,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// ── TEMP DIAGNOSTIC LOGGING — remove after investigating what keeps the
-// free-tier instance awake 24/7 despite low real student traffic. Logs
-// only method/path/IP/UA for /api calls, no bodies, no tokens. ─────────
-app.use('/api', (req, res, next) => {
-  const ip = req.headers['x-forwarded-for'] || req.ip || '';
-  const ua = String(req.headers['user-agent'] || '').slice(0, 70);
-  console.log(`[REQLOG] ${req.method} ${req.path} ip=${ip} ua="${ua}"`);
-  next();
-});
-
 // ── Static frontend ─────────────────────────────────────────
 // Try repo root first (works locally and on most hosts).
 // FRONTEND_ROOT env var allows override when rootDir limits parent access (e.g. Render).
