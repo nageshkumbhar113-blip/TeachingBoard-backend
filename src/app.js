@@ -11,6 +11,7 @@ const cors    = require("cors");
 
 const authRoutes     = require("./routes/authRoutes");
 const quizRoutes     = require("./routes/quizRoutes");
+const quizPatternRoutes = require("./routes/quizPatternRoutes");
 const attemptRoutes  = require("./routes/attemptRoutes");
 const lessonRoutes   = require("./routes/lessonRoutes");
 const questionRoutes = require("./routes/questionRoutes");
@@ -128,6 +129,7 @@ const vocabLimiter = createRateLimiter({
 // ── API routes ───────────────────────────────────────────────
 app.use("/api/auth",      authLimiter, authRoutes);
 app.use("/api/quizzes",   quizRoutes);
+app.use("/api/quiz-patterns", quizPatternRoutes);
 app.use("/api/attempts",  attemptRoutes);
 app.use("/api/lessons",   lessonRoutes);
 app.use("/api/questions", questionRoutes);
