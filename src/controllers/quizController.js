@@ -172,14 +172,19 @@ exports.generateQuestions = asyncHandler(async (req, res) => {
         ? section.exclude_q_ids.map(id => String(id).trim()).filter(Boolean)
         : [];
 
-      if (!batch || !subject || !chapter) {
-        throw new AppError(`sections[${index}] requires source_batch, subject and chapter`, 400);
+      if (!batch || !subject) {
+        throw new AppError(`sections[${index}] requires source_batch and subject`, 400);
       }
       if (count <= 0) {
         throw new AppError(`sections[${index}].count must be a positive number`, 400);
       }
 
-      const match = { batch, subject, chapter, type: "mcq" };
+      // chapter is optional — omitted means subject-wide (all chapters of
+      // this subject), which is the normal case for scholarship/NMMS-style
+      // random sections. When present, scopes to just that chapter (kept
+      // for callers that still want chapter-level random pick).
+      const match = { batch, subject, type: "mcq" };
+      if (chapter) match.chapter = chapter;
       if (difficulty) match.difficulty = difficulty;
       if (excludeQIds.length) match.q_id = { $nin: excludeQIds };
 
