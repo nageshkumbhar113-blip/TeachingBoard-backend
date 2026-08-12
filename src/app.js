@@ -25,6 +25,7 @@ const feeRoutes                         = require("./routes/feeRoutes");
 const { router: paymentRoutes, webhook: paymentWebhook } = require("./routes/paymentRoutes");
 const { adminRouter: noteAdminRouter, studentRouter: noteStudentRouter } = require("./routes/noteRoutes");
 const { adminRouter: slsAdminRouter, studentRouter: slsStudentRouter, slsRouter } = require("./routes/slsRoutes");
+const { teacherRouter: youtubeTeacherRouter, adminRouter: youtubeTeacherAdminRouter } = require("./routes/youtubeTeacherRoutes");
 const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
 const { createRateLimiter }             = require("./middleware/rateLimiter");
 
@@ -149,6 +150,11 @@ app.use("/api/notes",           noteStudentRouter);
 app.use("/api/admin/sls",       slsAdminRouter);
 app.use("/api/sls",             slsStudentRouter);
 app.use("/api/sls",             slsRouter);
+// Register/login rate-limiting is applied inside youtubeTeacherRoutes.js
+// itself (only on those two routes) — the rest of the router (dashboard,
+// video CRUD) shouldn't share that tight 30-req/15min budget.
+app.use("/api/youtube-teacher", youtubeTeacherRouter);
+app.use("/api/admin",           youtubeTeacherAdminRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
