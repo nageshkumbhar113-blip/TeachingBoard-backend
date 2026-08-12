@@ -1,12 +1,10 @@
 const Quiz = require("../models/Quiz");
-const Question = require("../models/Question");
 const asyncHandler = require("../utils/asyncHandler");
 const AppError = require("../utils/AppError");
 const { QUIZ_STATUSES, buildQuizDocument, serializeQuiz } = require("../utils/quizPayload");
 
 const MAX_SECTION_COUNT = 200;
 const MAX_SECTIONS_PER_REQUEST = 20;
-const VALID_DIFFICULTIES = new Set(["easy", "medium", "hard"]);
 
 // Same "populated options / resolvable answer" rule normalizeQuestions
 // enforces at publish time — filtered out here so a bad bank question never
@@ -164,10 +162,6 @@ exports.generateQuestions = asyncHandler(async (req, res) => {
       const subject = String(section?.subject || "").trim();
       const chapter = String(section?.chapter || "").trim();
       const count = Math.min(Math.max(parseInt(section?.count, 10) || 0, 0), MAX_SECTION_COUNT);
-      const difficulty =
-        section?.difficulty && VALID_DIFFICULTIES.has(String(section.difficulty).toLowerCase())
-          ? String(section.difficulty).toLowerCase()
-          : null;
       const excludeQIds = Array.isArray(section?.exclude_q_ids)
         ? section.exclude_q_ids.map(id => String(id).trim()).filter(Boolean)
         : [];
@@ -179,23 +173,35 @@ exports.generateQuestions = asyncHandler(async (req, res) => {
         throw new AppError(`sections[${index}].count must be a positive number`, 400);
       }
 
-      // chapter is optional — omitted means subject-wide (all chapters of
-      // this subject), which is the normal case for scholarship/NMMS-style
-      // random sections. When present, scopes to just that chapter (kept
-      // for callers that still want chapter-level random pick).
-      const match = { batch, subject, type: "mcq" };
-      if (chapter) match.chapter = chapter;
-      if (difficulty) match.difficulty = difficulty;
-      if (excludeQIds.length) match.q_id = { $nin: excludeQIds };
+      // Source: questions already embedded in existing PUBLISHED quizzes for
+      // this batch+subject — not the mostly-empty standalone Question bank.
+      // Teachers already author real content by building chapter tests; this
+      // reuses that content instead of asking them to build a second bank.
+      // chapter omitted = subject-wide (all chapters of this subject), the
+      // normal case for scholarship/NMMS-style papers.
+      const matchQuiz = { status: "published", batch, subject };
+      if (chapter) matchQuiz.chapter = chapter;
+
+      const basePipeline = [
+        { $match: matchQuiz },
+        { $unwind: "$questions" },
+        { $replaceRoot: { newRoot: "$questions" } },
+        ...(excludeQIds.length ? [{ $match: { q_id: { $nin: excludeQIds } } }] : []),
+        // Dedupe — the same bank question can end up embedded in more than
+        // one quiz; `available`/the picked set should count it once.
+        { $group: { _id: "$q_id", doc: { $first: "$$ROOT" } } },
+        { $replaceRoot: { newRoot: "$doc" } }
+      ];
 
       // Over-sample so filtering out unpublishable questions after the
       // fact still leaves close to `count` results.
       const sampleSize = Math.min(count * 3, MAX_SECTION_COUNT * 3);
 
-      const [sampled, available] = await Promise.all([
-        Question.aggregate([{ $match: match }, { $sample: { size: sampleSize } }]),
-        Question.countDocuments(match)
+      const [sampled, availableAgg] = await Promise.all([
+        Quiz.aggregate([...basePipeline, { $sample: { size: sampleSize } }]),
+        Quiz.aggregate([...basePipeline, { $count: "total" }])
       ]);
+      const available = availableAgg[0]?.total || 0;
 
       const questions = sampled.filter(isPublishable).slice(0, count);
 
@@ -211,8 +217,7 @@ exports.generateQuestions = asyncHandler(async (req, res) => {
           answer: q.answer,
           image: q.image || null,
           option_images: q.option_images || {},
-          difficulty: q.difficulty,
-          type: q.type
+          type: "mcq"
         }))
       };
     })

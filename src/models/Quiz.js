@@ -170,4 +170,11 @@ const quizSchema = new mongoose.Schema(
   }
 );
 
+// Matches the $match shape used by the random-question-pick endpoint
+// (POST /api/quizzes/generate-questions), which sources questions from
+// existing published quizzes' embedded questions[] rather than the
+// separate (usually much sparser) Question bank. (batch,subject) prefix
+// also serves the subject-wide — chapter omitted — case.
+quizSchema.index({ status: 1, batch: 1, subject: 1, chapter: 1 });
+
 module.exports = mongoose.models.Quiz || mongoose.model("Quiz", quizSchema);
