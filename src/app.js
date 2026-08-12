@@ -101,6 +101,7 @@ app.get("/student", (req, res) => {
 });
 app.get("/admin", (req, res) => res.redirect(302, "/admin-app/admin.html"));
 app.get("/get-app", (req, res) => res.redirect(302, "/get-app.html"));
+app.get("/teachers", (req, res) => res.redirect(302, "/teacher-portal/index.html"));
 
 // ── Explicit HTML fallbacks (in case static path misses on Render) ──
 function _sendFrontend(rel) {
