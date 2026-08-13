@@ -19,6 +19,17 @@ function isPublishable(question) {
   return populatedKeys.includes(answer);
 }
 
+// Fisher-Yates — guarantees a properly interleaved order regardless of how
+// the aggregation pipeline happened to stream results in.
+function _shuffleArray(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 function isAdminRequest(req) {
   return req.user?.role === "admin";
 }
@@ -203,7 +214,13 @@ exports.generateQuestions = asyncHandler(async (req, res) => {
       ]);
       const available = availableAgg[0]?.total || 0;
 
-      const questions = sampled.filter(isPublishable).slice(0, count);
+      // $sample right after a $group stage (needed above to dedupe q_id)
+      // reliably randomizes *which* docs get picked, but in practice the
+      // *order* they come back in still tends to cluster by source quiz —
+      // i.e. by chapter, since a subject-wide pick draws from several
+      // chapter-specific quizzes in turn. Explicit shuffle guarantees a
+      // properly interleaved order regardless of that pipeline quirk.
+      const questions = _shuffleArray(sampled.filter(isPublishable)).slice(0, count);
 
       return {
         key,
