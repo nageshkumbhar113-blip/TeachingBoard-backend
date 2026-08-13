@@ -145,7 +145,7 @@ const quizSchema = new mongoose.Schema(
     },
     paper_mode: {
       type: String,
-      enum: ["manual", "random", "mixed"]
+      enum: ["manual", "random", "chapter_random", "mixed"]
     },
     created_at: {
       type: Date,

@@ -244,7 +244,7 @@ function buildQuizDocument(payload, existingQuiz = null) {
   const positiveMarks = normalizeMarksValue(payload.positive_marks, "positive_marks");
   const negativeMarks = normalizeMarksValue(payload.negative_marks, "negative_marks");
   const paperMode =
-    payload.paper_mode && ["manual", "random", "mixed"].includes(payload.paper_mode)
+    payload.paper_mode && ["manual", "random", "chapter_random", "mixed"].includes(payload.paper_mode)
       ? payload.paper_mode
       : undefined;
 
