@@ -83,6 +83,17 @@ function normalizeQuestionOptions(question, index) {
   throw new AppError(`${fieldName} must be an object or array`, 400);
 }
 
+function normalizeMarksValue(value, fieldName) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) {
+    throw new AppError(`${fieldName} must be a non-negative number`, 400);
+  }
+  return num;
+}
+
 function normalizeQuestions(questions) {
   if (!Array.isArray(questions) || questions.length === 0) {
     throw new AppError("questions must be a non-empty array", 400);
@@ -120,6 +131,9 @@ function normalizeQuestions(questions) {
       throw new AppError(`questions[${index}].answer must point to a populated option`, 400);
     }
 
+    const marks = normalizeMarksValue(question.marks, `questions[${index}].marks`);
+    const negativeMarks = normalizeMarksValue(question.negative_marks, `questions[${index}].negative_marks`);
+
     return {
       q_id: normalizeString(question.q_id, `questions[${index}].q_id`, { required: false }) || `q_${randomUUID()}`,
       question: normalizeString(question.question, `questions[${index}].question`),
@@ -129,9 +143,79 @@ function normalizeQuestions(questions) {
       image:
         question.image === undefined || question.image === null || question.image === ""
           ? null
-          : normalizeString(question.image, `questions[${index}].image`)
+          : normalizeString(question.image, `questions[${index}].image`),
+      // Omit entirely when absent so legacy submissions round-trip byte-identical.
+      ...(marks !== undefined ? { marks } : {}),
+      ...(negativeMarks !== undefined ? { negative_marks: negativeMarks } : {})
     };
   });
+}
+
+function normalizeSections(sections, questions) {
+  if (!Array.isArray(sections) || sections.length === 0) {
+    return undefined;
+  }
+
+  const validQIds = new Set((questions || []).map(q => q.q_id));
+
+  const normalized = sections
+    .map((section, index) => {
+      if (!section || typeof section !== "object" || Array.isArray(section)) {
+        throw new AppError(`sections[${index}] must be an object`, 400);
+      }
+
+      const questionIds = Array.isArray(section.question_ids)
+        ? section.question_ids.map(id => normalizeString(id, `sections[${index}].question_ids[]`))
+        : [];
+
+      questionIds.forEach(qId => {
+        if (!validQIds.has(qId)) {
+          throw new AppError(
+            `sections[${index}].question_ids references q_id "${qId}" which is not present in questions[]`,
+            400
+          );
+        }
+      });
+
+      if (questionIds.length === 0) {
+        return null; // drop empty sections
+      }
+
+      const type = normalizeString(section.type || "mcq", `sections[${index}].type`, { required: false }) || "mcq";
+      if (type !== "mcq") {
+        throw new AppError(`sections[${index}].type must be "mcq"`, 400);
+      }
+
+      const mode = section.mode === "random" ? "random" : "manual";
+
+      return {
+        id: normalizeString(section.id, `sections[${index}].id`, { required: false }) || `sec_${randomUUID()}`,
+        label: normalizeString(section.label, `sections[${index}].label`, { required: false }),
+        type,
+        question_ids: questionIds,
+        source_batch: normalizeString(section.source_batch, `sections[${index}].source_batch`, { required: false }),
+        subject: normalizeString(section.subject, `sections[${index}].subject`, { required: false }),
+        chapter: normalizeString(section.chapter, `sections[${index}].chapter`, { required: false }),
+        mode,
+        ...(section.count !== undefined && section.count !== null && section.count !== ""
+          ? { count: Number(section.count) }
+          : {}),
+        ...(() => {
+          const pm = normalizeMarksValue(section.positive_marks, `sections[${index}].positive_marks`);
+          return pm !== undefined ? { positive_marks: pm } : {};
+        })(),
+        ...(() => {
+          const nm = normalizeMarksValue(section.negative_marks, `sections[${index}].negative_marks`);
+          return nm !== undefined ? { negative_marks: nm } : {};
+        })(),
+        ...(section.timer !== undefined && section.timer !== null && section.timer !== ""
+          ? { timer: Number(section.timer) }
+          : {})
+      };
+    })
+    .filter(Boolean);
+
+  return normalized.length > 0 ? normalized : undefined;
 }
 
 function buildQuizDocument(payload, existingQuiz = null) {
@@ -155,6 +239,14 @@ function buildQuizDocument(payload, existingQuiz = null) {
   }
 
   const createdAt = existingQuiz?.created_at || new Date();
+  const questions = normalizeQuestions(payload.questions);
+  const sections = normalizeSections(payload.sections, questions);
+  const positiveMarks = normalizeMarksValue(payload.positive_marks, "positive_marks");
+  const negativeMarks = normalizeMarksValue(payload.negative_marks, "negative_marks");
+  const paperMode =
+    payload.paper_mode && ["manual", "random", "mixed"].includes(payload.paper_mode)
+      ? payload.paper_mode
+      : undefined;
 
   return {
     quiz_id:
@@ -167,10 +259,16 @@ function buildQuizDocument(payload, existingQuiz = null) {
     timer_mode: normalizeString(payload.timer_mode || "none", "timer_mode"),
     timer_value: timerValue,
     shuffle: Boolean(payload.shuffle),
-    questions: normalizeQuestions(payload.questions),
+    questions,
     created_at: createdAt,
     updated_at: new Date(),
-    version: existingQuiz ? existingQuiz.version + 1 : 1
+    version: existingQuiz ? existingQuiz.version + 1 : 1,
+    // Omitted entirely when absent — legacy publish payloads produce a
+    // document with no `sections`/`positive_marks`/... keys at all.
+    ...(sections ? { sections } : {}),
+    ...(positiveMarks !== undefined ? { positive_marks: positiveMarks } : {}),
+    ...(negativeMarks !== undefined ? { negative_marks: negativeMarks } : {}),
+    ...(paperMode ? { paper_mode: paperMode } : {})
   };
 }
 
@@ -181,7 +279,11 @@ function sanitizeQuestions(questions, includeAnswers) {
     options: question.options,
     image: question.image || null,
     option_images: question.option_images || {},
-    ...(includeAnswers ? { answer: question.answer } : {})
+    ...(includeAnswers ? { answer: question.answer } : {}),
+    ...(question.marks !== undefined && question.marks !== null ? { marks: question.marks } : {}),
+    ...(question.negative_marks !== undefined && question.negative_marks !== null
+      ? { negative_marks: question.negative_marks }
+      : {})
   }));
 }
 
@@ -201,7 +303,17 @@ function serializeQuiz(quiz, { includeAnswers = false } = {}) {
     questions: sanitizeQuestions(source.questions || [], includeAnswers),
     created_at: source.created_at,
     updated_at: source.updated_at,
-    version: source.version
+    version: source.version,
+    // Only emitted when the source document actually has them — a legacy
+    // quiz's serialized JSON must stay character-for-character identical.
+    ...(source.sections ? { sections: source.sections } : {}),
+    ...(source.positive_marks !== undefined && source.positive_marks !== null
+      ? { positive_marks: source.positive_marks }
+      : {}),
+    ...(source.negative_marks !== undefined && source.negative_marks !== null
+      ? { negative_marks: source.negative_marks }
+      : {}),
+    ...(source.paper_mode ? { paper_mode: source.paper_mode } : {})
   };
 }
 

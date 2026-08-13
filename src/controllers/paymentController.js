@@ -278,6 +278,25 @@ exports.webhook = asyncHandler(async (req, res) => {
       return res.status(200).json({ success: true, message: 'Ignored (no order/payment id)' });
     }
 
+    // YouTube Teacher Partner subscriptions share this one webhook (no new
+    // Render service) — distinguished by order.notes.type, set at order-create
+    // time in youtubeTeacherPaymentController.createSubscriptionOrder.
+    if (paymentEntity?.notes?.type === 'youtube_teacher_subscription') {
+      const YoutubeTeacherSubscription = require('../models/YoutubeTeacherSubscription');
+      const ytSub = await YoutubeTeacherSubscription.findOne({ razorpay_order_id: orderId });
+      if (!ytSub) return res.status(200).json({ success: true, message: 'Ignored (unknown order)' });
+      if (ytSub.payment_verified) return res.status(200).json({ success: true, message: 'Already processed' });
+
+      ytSub.razorpay_payment_id = paymentId;
+      ytSub.payment_verified = true;
+      ytSub.status = 'active';
+      ytSub.start_date = new Date();
+      ytSub.expiry_date = YoutubeTeacherSubscription.computeExpiry(ytSub.plan_type, new Date());
+      await ytSub.save();
+
+      return res.status(200).json({ success: true, message: 'Payment processed' });
+    }
+
     const sub = await StudentSubscription.findOne({ razorpay_order_id: orderId });
     if (!sub) {
       return res.status(200).json({ success: true, message: 'Ignored (unknown order)' });

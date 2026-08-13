@@ -13,6 +13,8 @@ const FeeRecord          = require('../models/FeeRecord');
 const Note               = require('../models/Note');
 const Lesson             = require('../models/Lesson');
 const Quiz               = require('../models/Quiz');
+const YoutubeTeacherVideo        = require('../models/YoutubeTeacherVideo');
+const YoutubeTeacherTeachingArea = require('../models/YoutubeTeacherTeachingArea');
 
 /**
  * GET /api/batches
@@ -275,6 +277,8 @@ exports.renameBatch = asyncHandler(async (req, res) => {
       Note.updateMany({ batch: oldName }, { $set: { batch: newName } }),
       Lesson.updateMany({ batch: oldName }, { $set: { batch: newName } }),
       Question.updateMany({ batch: oldName }, { $set: { batch: newName } }),
+      YoutubeTeacherVideo.updateMany({ batch_name: oldName }, { $set: { batch_name: newName } }),
+      YoutubeTeacherTeachingArea.updateMany({ batch_name: oldName }, { $set: { batch_name: newName } }),
     ] : []),
   ]);
 

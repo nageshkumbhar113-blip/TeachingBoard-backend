@@ -11,6 +11,7 @@ const cors    = require("cors");
 
 const authRoutes     = require("./routes/authRoutes");
 const quizRoutes     = require("./routes/quizRoutes");
+const quizPatternRoutes = require("./routes/quizPatternRoutes");
 const attemptRoutes  = require("./routes/attemptRoutes");
 const lessonRoutes   = require("./routes/lessonRoutes");
 const questionRoutes = require("./routes/questionRoutes");
@@ -25,6 +26,7 @@ const feeRoutes                         = require("./routes/feeRoutes");
 const { router: paymentRoutes, webhook: paymentWebhook } = require("./routes/paymentRoutes");
 const { adminRouter: noteAdminRouter, studentRouter: noteStudentRouter } = require("./routes/noteRoutes");
 const { adminRouter: slsAdminRouter, studentRouter: slsStudentRouter, slsRouter } = require("./routes/slsRoutes");
+const { teacherRouter: youtubeTeacherRouter, adminRouter: youtubeTeacherAdminRouter } = require("./routes/youtubeTeacherRoutes");
 const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
 const { createRateLimiter }             = require("./middleware/rateLimiter");
 
@@ -100,6 +102,7 @@ app.get("/student", (req, res) => {
 });
 app.get("/admin", (req, res) => res.redirect(302, "/admin-app/admin.html"));
 app.get("/get-app", (req, res) => res.redirect(302, "/get-app.html"));
+app.get("/teachers", (req, res) => res.redirect(302, "/teacher-portal/index.html"));
 
 // ── Explicit HTML fallbacks (in case static path misses on Render) ──
 function _sendFrontend(rel) {
@@ -126,6 +129,7 @@ const vocabLimiter = createRateLimiter({
 // ── API routes ───────────────────────────────────────────────
 app.use("/api/auth",      authLimiter, authRoutes);
 app.use("/api/quizzes",   quizRoutes);
+app.use("/api/quiz-patterns", quizPatternRoutes);
 app.use("/api/attempts",  attemptRoutes);
 app.use("/api/lessons",   lessonRoutes);
 app.use("/api/questions", questionRoutes);
@@ -149,6 +153,11 @@ app.use("/api/notes",           noteStudentRouter);
 app.use("/api/admin/sls",       slsAdminRouter);
 app.use("/api/sls",             slsStudentRouter);
 app.use("/api/sls",             slsRouter);
+// Register/login rate-limiting is applied inside youtubeTeacherRoutes.js
+// itself (only on those two routes) — the rest of the router (dashboard,
+// video CRUD) shouldn't share that tight 30-req/15min budget.
+app.use("/api/youtube-teacher", youtubeTeacherRouter);
+app.use("/api/admin",           youtubeTeacherAdminRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

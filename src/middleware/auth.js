@@ -1,5 +1,6 @@
 const { decodeTokenFromHeader } = require('../utils/token');
 const User = require('../models/User');
+const YoutubeTeacherPartner = require('../models/YoutubeTeacherPartner');
 const { isExpiredDate, normalizeExpiryDate } = require('../utils/accountStatus');
 
 // 60-second in-memory cache — avoids DB hit on every API request.
@@ -28,16 +29,22 @@ async function _attachResolvedUser(req) {
   req.user = payload;
 
   const now = Date.now();
-  const hit = _userCache.get(payload.id);
+  const cacheKey = `${payload.role}:${payload.id}`;
+  const hit = _userCache.get(cacheKey);
   if (hit && (now - hit.at) < _CACHE_TTL) {
     req.userDoc = hit.doc;
     return payload;
   }
 
-  const userDoc = await User.findOne({ user_id: payload.id }).lean().catch(() => null);
+  // youtube_teacher is a separate identity collection (own registration,
+  // not the existing User model) — look it up by _id, not user_id.
+  const userDoc = payload.role === 'youtube_teacher'
+    ? await YoutubeTeacherPartner.findById(payload.id).lean().catch(() => null)
+    : await User.findOne({ user_id: payload.id }).lean().catch(() => null);
+
   if (userDoc) {
     req.userDoc = userDoc;
-    _userCache.set(payload.id, { doc: userDoc, at: now });
+    _userCache.set(cacheKey, { doc: userDoc, at: now });
     if (_userCache.size > 200) {
       for (const [k, v] of _userCache) {
         if (now - v.at > _CACHE_TTL) _userCache.delete(k);
@@ -109,6 +116,20 @@ async function requireTeacherOrAdmin(req, res, next) {
   next();
 }
 
+// YouTube Teacher Partner — external content-creator teacher, separate
+// identity from the in-app 'teacher' role above (see YoutubeTeacherPartner
+// model). req.user.id is the partner's Mongo _id (string).
+async function requireYoutubeTeacher(req, res, next) {
+  const payload = await _attachResolvedUser(req);
+  if (!payload || payload.role !== 'youtube_teacher') {
+    return res.status(401).json({ success: false, message: 'YouTube teacher login required' });
+  }
+  if (!req.userDoc || req.userDoc.status !== 'active') {
+    return res.status(403).json({ success: false, message: 'Account is not active', code: 'ACCOUNT_INACTIVE' });
+  }
+  next();
+}
+
 module.exports = {
   attachUserIfPresent,
   requireAuth,
@@ -117,4 +138,5 @@ module.exports = {
   requireTeacher,
   requireParent,
   requireTeacherOrAdmin,
+  requireYoutubeTeacher,
 };

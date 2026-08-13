@@ -3,6 +3,22 @@ const asyncHandler = require("../utils/asyncHandler");
 const AppError = require("../utils/AppError");
 const { QUIZ_STATUSES, buildQuizDocument, serializeQuiz } = require("../utils/quizPayload");
 
+const MAX_SECTION_COUNT = 200;
+const MAX_SECTIONS_PER_REQUEST = 20;
+
+// Same "populated options / resolvable answer" rule normalizeQuestions
+// enforces at publish time — filtered out here so a bad bank question never
+// makes it into a generated section only to 400 later at publish.
+function isPublishable(question) {
+  const options = question.options || {};
+  const populatedKeys = ["A", "B", "C", "D"].filter(
+    key => (options[key] && String(options[key]).trim()) || (question.option_images && question.option_images[key])
+  );
+  if (populatedKeys.length < 2) return false;
+  const answer = String(question.answer || "").trim().toUpperCase();
+  return populatedKeys.includes(answer);
+}
+
 function isAdminRequest(req) {
   return req.user?.role === "admin";
 }
@@ -128,6 +144,86 @@ exports.getQuizById = asyncHandler(async (req, res) => {
       includeAnswers: true
     })
   });
+});
+
+exports.generateQuestions = asyncHandler(async (req, res) => {
+  const sections = Array.isArray(req.body?.sections) ? req.body.sections : null;
+  if (!sections || sections.length === 0) {
+    throw new AppError("sections must be a non-empty array", 400);
+  }
+  if (sections.length > MAX_SECTIONS_PER_REQUEST) {
+    throw new AppError(`sections cannot exceed ${MAX_SECTIONS_PER_REQUEST}`, 400);
+  }
+
+  const results = await Promise.all(
+    sections.map(async (section, index) => {
+      const key = String(section?.key || "").trim() || `sec_${index}`;
+      const batch = String(section?.source_batch || "").trim();
+      const subject = String(section?.subject || "").trim();
+      const chapter = String(section?.chapter || "").trim();
+      const count = Math.min(Math.max(parseInt(section?.count, 10) || 0, 0), MAX_SECTION_COUNT);
+      const excludeQIds = Array.isArray(section?.exclude_q_ids)
+        ? section.exclude_q_ids.map(id => String(id).trim()).filter(Boolean)
+        : [];
+
+      if (!batch || !subject) {
+        throw new AppError(`sections[${index}] requires source_batch and subject`, 400);
+      }
+      if (count <= 0) {
+        throw new AppError(`sections[${index}].count must be a positive number`, 400);
+      }
+
+      // Source: questions already embedded in existing PUBLISHED quizzes for
+      // this batch+subject — not the mostly-empty standalone Question bank.
+      // Teachers already author real content by building chapter tests; this
+      // reuses that content instead of asking them to build a second bank.
+      // chapter omitted = subject-wide (all chapters of this subject), the
+      // normal case for scholarship/NMMS-style papers.
+      const matchQuiz = { status: "published", batch, subject };
+      if (chapter) matchQuiz.chapter = chapter;
+
+      const basePipeline = [
+        { $match: matchQuiz },
+        { $unwind: "$questions" },
+        { $replaceRoot: { newRoot: "$questions" } },
+        ...(excludeQIds.length ? [{ $match: { q_id: { $nin: excludeQIds } } }] : []),
+        // Dedupe — the same bank question can end up embedded in more than
+        // one quiz; `available`/the picked set should count it once.
+        { $group: { _id: "$q_id", doc: { $first: "$$ROOT" } } },
+        { $replaceRoot: { newRoot: "$doc" } }
+      ];
+
+      // Over-sample so filtering out unpublishable questions after the
+      // fact still leaves close to `count` results.
+      const sampleSize = Math.min(count * 3, MAX_SECTION_COUNT * 3);
+
+      const [sampled, availableAgg] = await Promise.all([
+        Quiz.aggregate([...basePipeline, { $sample: { size: sampleSize } }]),
+        Quiz.aggregate([...basePipeline, { $count: "total" }])
+      ]);
+      const available = availableAgg[0]?.total || 0;
+
+      const questions = sampled.filter(isPublishable).slice(0, count);
+
+      return {
+        key,
+        requested: count,
+        available,
+        returned: questions.length,
+        questions: questions.map(q => ({
+          q_id: q.q_id,
+          question: q.question,
+          options: q.options,
+          answer: q.answer,
+          image: q.image || null,
+          option_images: q.option_images || {},
+          type: "mcq"
+        }))
+      };
+    })
+  );
+
+  res.json({ success: true, data: results });
 });
 
 exports.deleteQuiz = asyncHandler(async (req, res) => {
