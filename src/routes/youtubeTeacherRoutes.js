@@ -41,6 +41,10 @@ teacherRouter.post('/subscription/start-trial', requireYoutubeTeacher, payCtrl.s
 teacherRouter.get('/subscription',              requireYoutubeTeacher, payCtrl.getMySubscription);
 teacherRouter.get('/payment-history',           requireYoutubeTeacher, payCtrl.getPaymentHistory);
 
+// Public — no auth. Read-only prices for the Landing page (shown before
+// registration/login exists) and the in-dashboard plan picker.
+teacherRouter.get('/plan-config', payCtrl.getPlanConfig);
+
 // video-open is intentionally NOT auth-gated by youtube_teacher OR student —
 // it's called by the student app's embedded player, guarded by requireStudent
 // below (kept with the other student-facing routes for clarity).
@@ -67,5 +71,8 @@ adminRouter.post('/youtube-teacher-videos/:id/reject',    requireAdmin, adminCtr
 
 adminRouter.get('/youtube-teacher-video-gaps',     requireAdmin, adminCtrl.videoGaps);
 adminRouter.get('/youtube-teacher-subscriptions',  requireAdmin, adminCtrl.listSubscriptions);
+
+adminRouter.get('/youtube-teacher-plan-config', requireAdmin, adminCtrl.getPlanConfig);
+adminRouter.put('/youtube-teacher-plan-config', requireAdmin, adminCtrl.updatePlanConfig);
 
 module.exports = { teacherRouter, adminRouter };

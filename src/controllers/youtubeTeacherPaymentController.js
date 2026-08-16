@@ -1,14 +1,21 @@
 const YoutubeTeacherPartner      = require('../models/YoutubeTeacherPartner');
 const YoutubeTeacherSubscription = require('../models/YoutubeTeacherSubscription');
+const YoutubeTeacherPlanConfig   = require('../models/YoutubeTeacherPlanConfig');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const razorpay = require('../utils/razorpay');
 
-// Server-side plan prices — never trust the client for amount. Matches the
-// figures shown in the Landing/Registration design mockup.
-const PLAN_PRICE_PAISE = { monthly: 49900, yearly: 399900 };
-const PREMIUM_ADDON_PAISE = { monthly: 19900, yearly: 19900 * 12 };
-const TRIAL_DAYS = 3;
+// Server-side plan prices — never trust the client for amount. Admin-
+// editable (Admin → YouTube Teachers → Plan Pricing), see
+// YoutubeTeacherPlanConfig — this is just a thin rupees-to-paise reader.
+async function _planPricePaise(planType, config) {
+  const cfg = config || await YoutubeTeacherPlanConfig.getOrCreate();
+  return { monthly: cfg.monthly_price, yearly: cfg.yearly_price }[planType] * 100;
+}
+async function _premiumAddonPaise(planType, config) {
+  const cfg = config || await YoutubeTeacherPlanConfig.getOrCreate();
+  return { monthly: cfg.premium_addon_monthly, yearly: cfg.premium_addon_yearly }[planType] * 100;
+}
 
 // POST /api/youtube-teacher/subscription/create  { plan_type, is_premium }
 exports.createSubscriptionOrder = asyncHandler(async (req, res) => {
@@ -19,7 +26,8 @@ exports.createSubscriptionOrder = asyncHandler(async (req, res) => {
   const partner = await YoutubeTeacherPartner.findById(req.user.id);
   if (!partner) throw new AppError('Account not found', 404);
 
-  const amountPaise = PLAN_PRICE_PAISE[planType] + (isPremium ? PREMIUM_ADDON_PAISE[planType] : 0);
+  const config = await YoutubeTeacherPlanConfig.getOrCreate();
+  const amountPaise = await _planPricePaise(planType, config) + (isPremium ? await _premiumAddonPaise(planType, config) : 0);
 
   const order = await razorpay.createOrder({
     amount: amountPaise,
@@ -110,6 +118,7 @@ exports.startTrial = asyncHandler(async (req, res) => {
   const existing = await YoutubeTeacherSubscription.findOne({ youtube_teacher_id: req.user.id, plan_type: 'trial' });
   if (existing) throw new AppError('Trial already used', 400);
 
+  const config = await YoutubeTeacherPlanConfig.getOrCreate();
   const sub = await YoutubeTeacherSubscription.create({
     youtube_teacher_id: req.user.id,
     plan_type: 'trial',
@@ -118,7 +127,25 @@ exports.startTrial = asyncHandler(async (req, res) => {
     status: 'active',
     payment_verified: true,
     start_date: new Date(),
-    expiry_date: YoutubeTeacherSubscription.computeExpiry('trial', new Date(), TRIAL_DAYS),
+    expiry_date: YoutubeTeacherSubscription.computeExpiry('trial', new Date(), config.trial_days),
   });
   res.status(201).json({ success: true, data: { expiry_date: sub.expiry_date } });
+});
+
+// GET /api/youtube-teacher/plan-config — PUBLIC, no auth. Read-only prices
+// for the Landing page (shown before registration) and the in-dashboard
+// plan picker. Never trust these on the server side for an actual charge —
+// createSubscriptionOrder above re-reads the config itself.
+exports.getPlanConfig = asyncHandler(async (_req, res) => {
+  const cfg = await YoutubeTeacherPlanConfig.getOrCreate();
+  res.json({
+    success: true,
+    data: {
+      monthly_price: cfg.monthly_price,
+      yearly_price: cfg.yearly_price,
+      premium_addon_monthly: cfg.premium_addon_monthly,
+      premium_addon_yearly: cfg.premium_addon_yearly,
+      trial_days: cfg.trial_days,
+    },
+  });
 });

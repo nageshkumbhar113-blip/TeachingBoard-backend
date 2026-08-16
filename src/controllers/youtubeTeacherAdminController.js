@@ -2,6 +2,7 @@ const YoutubeTeacherPartner       = require('../models/YoutubeTeacherPartner');
 const YoutubeTeacherTeachingArea  = require('../models/YoutubeTeacherTeachingArea');
 const YoutubeTeacherVideo         = require('../models/YoutubeTeacherVideo');
 const YoutubeTeacherSubscription  = require('../models/YoutubeTeacherSubscription');
+const YoutubeTeacherPlanConfig    = require('../models/YoutubeTeacherPlanConfig');
 const Batch       = require('../models/Batch');
 const SLSQuestion = require('../models/SLSQuestion');
 const asyncHandler = require('../utils/asyncHandler');
@@ -148,6 +149,56 @@ exports.videoGaps = asyncHandler(async (req, res) => {
     }
   }
   res.json({ success: true, data: gaps });
+});
+
+// ── Plan Pricing (singleton config, admin-editable) ──────────────────────────
+
+// GET /api/admin/youtube-teacher-plan-config
+exports.getPlanConfig = asyncHandler(async (_req, res) => {
+  const cfg = await YoutubeTeacherPlanConfig.getOrCreate();
+  res.json({
+    success: true,
+    data: {
+      monthly_price: cfg.monthly_price,
+      yearly_price: cfg.yearly_price,
+      premium_addon_monthly: cfg.premium_addon_monthly,
+      premium_addon_yearly: cfg.premium_addon_yearly,
+      trial_days: cfg.trial_days,
+    },
+  });
+});
+
+// PUT /api/admin/youtube-teacher-plan-config
+// { monthly_price, yearly_price, premium_addon_monthly, premium_addon_yearly, trial_days }
+// All in rupees (same convention as Batch pricing) — only takes effect for
+// NEW orders/trials going forward; already-active subscriptions are
+// untouched (their `amount`/`expiry_date` were locked in at purchase time).
+exports.updatePlanConfig = asyncHandler(async (req, res) => {
+  const fields = ['monthly_price', 'yearly_price', 'premium_addon_monthly', 'premium_addon_yearly', 'trial_days'];
+  const updates = {};
+  for (const f of fields) {
+    if (req.body[f] === undefined) continue;
+    const n = Number(req.body[f]);
+    if (!Number.isFinite(n) || n < 0) throw new AppError(`${f} must be a number >= 0`, 400);
+    updates[f] = n;
+  }
+  if (!Object.keys(updates).length) throw new AppError('No valid fields to update', 400);
+
+  const cfg = await YoutubeTeacherPlanConfig.getOrCreate();
+  Object.assign(cfg, updates);
+  await cfg.save();
+
+  res.json({
+    success: true,
+    message: 'Plan pricing updated',
+    data: {
+      monthly_price: cfg.monthly_price,
+      yearly_price: cfg.yearly_price,
+      premium_addon_monthly: cfg.premium_addon_monthly,
+      premium_addon_yearly: cfg.premium_addon_yearly,
+      trial_days: cfg.trial_days,
+    },
+  });
 });
 
 // ── Subscriptions Overview ────────────────────────────────────────────────────
