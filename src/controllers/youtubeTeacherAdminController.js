@@ -65,7 +65,9 @@ exports.listVideos = asyncHandler(async (req, res) => {
     data: videos.map(v => ({
       id: String(v._id),
       teacher_name: nameMap.get(String(v.youtube_teacher_id)) || '(deleted)',
-      batch_name: v.batch_name, subject_name: v.subject_name, chapter_name: v.chapter_name, exercise_no: v.exercise_no,
+      content_type: v.content_type || 'exercise',
+      batch_name: v.batch_name, subject_name: v.subject_name, chapter_name: v.chapter_name,
+      exercise_no: v.exercise_no || '', concept_title: v.concept_title || '',
       part_label: v.part_label || '',
       live_video_id: v.live_video_id || '',
       pending_video_id: v.pending_video_id || '',

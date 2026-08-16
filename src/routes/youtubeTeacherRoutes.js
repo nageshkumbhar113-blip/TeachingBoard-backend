@@ -23,6 +23,8 @@ teacherRouter.put('/profile',  requireYoutubeTeacher, ctrl.updateProfile);
 
 teacherRouter.get('/batch-tree', requireYoutubeTeacher, ctrl.getBatchTree);
 teacherRouter.get('/exercises',  requireYoutubeTeacher, ctrl.getExercisesForChapter);
+teacherRouter.get('/concepts',   requireYoutubeTeacher, ctrl.getConceptsForChapter);
+teacherRouter.get('/content-overview', requireYoutubeTeacher, ctrl.getContentOverview);
 
 teacherRouter.get('/teaching-areas',       requireYoutubeTeacher, ctrl.listTeachingAreas);
 teacherRouter.post('/teaching-areas',      requireYoutubeTeacher, ctrl.addTeachingArea);
