@@ -15,6 +15,11 @@ const Lesson             = require('../models/Lesson');
 const Quiz               = require('../models/Quiz');
 const YoutubeTeacherVideo        = require('../models/YoutubeTeacherVideo');
 const YoutubeTeacherTeachingArea = require('../models/YoutubeTeacherTeachingArea');
+const SLSQuestion = require('../models/SLSQuestion');
+const Concept      = require('../models/Concept');
+// Same composite chapterId scheme as SLS concepts/exercises — reused here
+// (not reimplemented) so a subject/chapter rename can correctly remap it.
+const { makeChapterId } = require('./youtubeTeacherController');
 
 /**
  * GET /api/batches
@@ -309,6 +314,63 @@ exports.addSubject = asyncHandler(async (req, res) => {
 });
 
 /**
+ * PUT /api/batches/:name/subjects/:subject
+ * Rename a subject. Body: { name: newSubjectName }
+ * Cascades the subject-name string into every collection that stores it
+ * (same convention as renameBatch above), and — because this subject's
+ * chapters' chapterId (SLSQuestion/Concept) embeds the subject name —
+ * remaps chapterId for every chapter under it too, so existing Notes/
+ * Exercises don't get silently orphaned from the renamed subject.
+ */
+exports.renameSubject = asyncHandler(async (req, res) => {
+  const batchName  = decodeURIComponent(req.params.name || '').trim();
+  const oldSubject = decodeURIComponent(req.params.subject || '').trim();
+  const newSubject = String(req.body.name || '').trim();
+  if (!batchName || !oldSubject) throw new AppError('batch and subject are required', 400);
+  if (!newSubject) throw new AppError('new name is required', 400);
+
+  const batch = await Batch.findOne({ name: batchName, 'subjects.name': oldSubject });
+  if (!batch) throw new AppError('Subject not found', 404);
+
+  if (oldSubject !== newSubject && batch.subjects.some(s => s.name === newSubject)) {
+    throw new AppError(`Subject "${newSubject}" already exists in this batch`, 409);
+  }
+
+  const subjectDoc = batch.subjects.find(s => s.name === oldSubject);
+  const chapterNames = (subjectDoc.chapters || []).map(c => c.name);
+
+  await Batch.updateOne(
+    { name: batchName, 'subjects.name': oldSubject },
+    { $set: { 'subjects.$.name': newSubject } }
+  );
+
+  if (oldSubject !== newSubject) {
+    await Promise.all([
+      Question.updateMany({ batch: batchName, subject: oldSubject }, { $set: { subject: newSubject } }),
+      Note.updateMany({ batch: batchName, subject: oldSubject }, { $set: { subject: newSubject } }),
+      Lesson.updateMany({ batch: batchName, subject: oldSubject }, { $set: { subject: newSubject } }),
+      Word.updateMany({ batch: batchName, subject: oldSubject }, { $set: { subject: newSubject } }),
+      WordTest.updateMany({ batch: batchName, subject: oldSubject }, { $set: { subject: newSubject } }),
+      VocabSubjectConfig.updateMany({ batch: batchName, subject: oldSubject }, { $set: { subject: newSubject } }),
+      VocabAttempt.updateMany({ batch: batchName, subject: oldSubject }, { $set: { subject: newSubject } }),
+      WordTestAttempt.updateMany({ batch: batchName, subject: oldSubject }, { $set: { subject: newSubject } }),
+      YoutubeTeacherVideo.updateMany({ batch_name: batchName, subject_name: oldSubject }, { $set: { subject_name: newSubject } }),
+      YoutubeTeacherTeachingArea.updateMany({ batch_name: batchName, subject_name: oldSubject }, { $set: { subject_name: newSubject } }),
+      ...chapterNames.map(chName => {
+        const oldChapterId = makeChapterId(batchName, oldSubject, chName);
+        const newChapterId = makeChapterId(batchName, newSubject, chName);
+        return Promise.all([
+          SLSQuestion.updateMany({ chapterId: oldChapterId }, { $set: { chapterId: newChapterId } }),
+          Concept.updateMany({ chapterId: oldChapterId }, { $set: { chapterId: newChapterId } }),
+        ]);
+      }),
+    ]);
+  }
+
+  res.json({ success: true });
+});
+
+/**
  * DELETE /api/batches/:name/subjects/:subject
  * Remove a subject (and its chapters) from a batch.
  */
@@ -339,6 +401,51 @@ exports.addChapter = asyncHandler(async (req, res) => {
 
   subjectDoc.chapters.push({ name: chapter, order: subjectDoc.chapters.length });
   await batch.save();
+  res.json({ success: true });
+});
+
+/**
+ * PUT /api/batches/:name/subjects/:subject/chapters/:chapter
+ * Rename a chapter. Body: { name: newChapterName }
+ * Cascades the chapter-name string, and remaps the composite chapterId
+ * (SLSQuestion/Concept) so existing Notes/Exercises stay linked instead
+ * of silently orphaning under the old name.
+ */
+exports.renameChapter = asyncHandler(async (req, res) => {
+  const batchName  = decodeURIComponent(req.params.name || '').trim();
+  const subject    = decodeURIComponent(req.params.subject || '').trim();
+  const oldChapter = decodeURIComponent(req.params.chapter || '').trim();
+  const newChapter = String(req.body.name || '').trim();
+  if (!batchName || !subject || !oldChapter) throw new AppError('batch, subject and chapter are required', 400);
+  if (!newChapter) throw new AppError('new name is required', 400);
+
+  const batch = await Batch.findOne({ name: batchName, 'subjects.name': subject });
+  if (!batch) throw new AppError('Subject not found', 404);
+  const subjectDoc = batch.subjects.find(s => s.name === subject);
+  if (!subjectDoc.chapters.some(c => c.name === oldChapter)) throw new AppError('Chapter not found', 404);
+
+  if (oldChapter !== newChapter && subjectDoc.chapters.some(c => c.name === newChapter)) {
+    throw new AppError(`Chapter "${newChapter}" already exists in this subject`, 409);
+  }
+
+  await Batch.updateOne(
+    { name: batchName, 'subjects.name': subject },
+    { $set: { 'subjects.$[s].chapters.$[c].name': newChapter } },
+    { arrayFilters: [{ 's.name': subject }, { 'c.name': oldChapter }] }
+  );
+
+  if (oldChapter !== newChapter) {
+    const oldChapterId = makeChapterId(batchName, subject, oldChapter);
+    const newChapterId = makeChapterId(batchName, subject, newChapter);
+    await Promise.all([
+      Question.updateMany({ batch: batchName, subject, chapter: oldChapter }, { $set: { chapter: newChapter } }),
+      Note.updateMany({ batch: batchName, subject, chapter: oldChapter }, { $set: { chapter: newChapter } }),
+      YoutubeTeacherVideo.updateMany({ batch_name: batchName, subject_name: subject, chapter_name: oldChapter }, { $set: { chapter_name: newChapter } }),
+      SLSQuestion.updateMany({ chapterId: oldChapterId }, { $set: { chapterId: newChapterId } }),
+      Concept.updateMany({ chapterId: oldChapterId }, { $set: { chapterId: newChapterId } }),
+    ]);
+  }
+
   res.json({ success: true });
 });
 

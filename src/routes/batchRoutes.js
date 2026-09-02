@@ -7,8 +7,10 @@ const {
   deleteBatch,
   renameBatch,
   addSubject,
+  renameSubject,
   deleteSubject,
   addChapter,
+  renameChapter,
   deleteChapter,
   reorderChapters,
   getSubjectChapters,
@@ -27,10 +29,16 @@ router.delete('/:name',                                                requireAd
 router.get('/:name/pricing',                                           getBatchPricing);
 router.put('/:name/pricing',                                           requireAdmin, updateBatchPricing);
 router.post('/:name/subjects',                                         requireAdmin, addSubject);
+router.put('/:name/subjects/:subject',                                 requireAdmin, renameSubject);
 router.delete('/:name/subjects/:subject',                              requireAdmin, deleteSubject);
 router.get('/:name/subjects/:subject/chapters',                        getSubjectChapters);
 router.post('/:name/subjects/:subject/chapters',                       requireAdmin, addChapter);
+// Literal 'reorder' segment MUST be registered before the :chapter wildcard
+// PUT route below, or a request to .../chapters/reorder would incorrectly
+// match renameChapter with :chapter="reorder" (Express matches routes in
+// registration order, not literal-before-param).
 router.put('/:name/subjects/:subject/chapters/reorder',                requireAdmin, reorderChapters);
+router.put('/:name/subjects/:subject/chapters/:chapter',               requireAdmin, renameChapter);
 router.delete('/:name/subjects/:subject/chapters/:chapter',            requireAdmin, deleteChapter);
 
 module.exports = router;
