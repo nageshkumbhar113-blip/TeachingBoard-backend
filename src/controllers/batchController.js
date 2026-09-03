@@ -319,7 +319,33 @@ function _remapChapterIdsForBatch(oldBatchName, newBatchName, batchDoc) {
   return promises;
 }
 
-// POST /api/admin/batches/:name/repair-chapter-ids
+// GET /api/batches/orphaned-chapter-ids
+// Diagnostic companion to repair-chapter-ids below — finds every distinct
+// chapterId batch-prefix used by an existing Concept/SLSQuestion that does
+// NOT match any batch name in the current catalog, so a stale/orphaned
+// prefix (from a rename before the chapterId cascade fix existed) can be
+// found without having to already know/guess the old batch name.
+exports.listOrphanedChapterIds = asyncHandler(async (_req, res) => {
+  const norm = s => String(s || '').trim().toLowerCase().replace(/\s+/g, '-');
+  const [allBatches, conceptCounts, questionCounts] = await Promise.all([
+    Batch.find({}, 'name').lean(),
+    Concept.aggregate([{ $group: { _id: { $arrayElemAt: [{ $split: ['$chapterId', '::'] }, 0] }, count: { $sum: 1 } } }]),
+    SLSQuestion.aggregate([{ $group: { _id: { $arrayElemAt: [{ $split: ['$chapterId', '::'] }, 0] }, count: { $sum: 1 } } }]),
+  ]);
+  const validPrefixes = new Set(allBatches.map(b => norm(b.name)));
+
+  const orphaned = new Map(); // prefix -> { concepts, questions }
+  const get = prefix => {
+    if (!orphaned.has(prefix)) orphaned.set(prefix, { concepts: 0, questions: 0 });
+    return orphaned.get(prefix);
+  };
+  conceptCounts.forEach(row => { if (!validPrefixes.has(row._id)) get(row._id).concepts = row.count; });
+  questionCounts.forEach(row => { if (!validPrefixes.has(row._id)) get(row._id).questions = row.count; });
+
+  res.json({ success: true, orphaned: [...orphaned.entries()].map(([prefix, counts]) => ({ batch_prefix: prefix, ...counts })) });
+});
+
+// POST /api/batches/:name/repair-chapter-ids
 // Body: { old_batch_name }
 // One-time repair utility for batches renamed BEFORE the chapterId-cascade
 // fix above existed (or any other historical mismatch) — finds every

@@ -18,11 +18,13 @@ const {
   getBatchPricing,
   getAllBatchesPricing,
   repairBatchChapterIds,
+  listOrphanedChapterIds,
 } = require('../controllers/batchController');
 
 // Read-only, no pricing/sensitive fields — safe for teachers to browse
 // batch/subject/chapter names for Paper Builder.
 router.get('/',                                                        requireTeacherOrAdmin, getBatches);
+router.get('/orphaned-chapter-ids',                                    requireAdmin, listOrphanedChapterIds);
 router.get('/pricing/all',                                             getAllBatchesPricing);
 router.post('/',                                                       requireAdmin, createBatch);
 router.put('/:name',                                                   requireAdmin, renameBatch);
