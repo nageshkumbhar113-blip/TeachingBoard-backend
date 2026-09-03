@@ -1,8 +1,9 @@
 const express = require('express');
 const router  = express.Router();
-const { requireAdmin, requireTeacherOrAdmin } = require('../middleware/auth');
+const { requireAdmin, requireTeacherOrAdmin, requireStudent } = require('../middleware/auth');
 const {
   getBatches,
+  getStudentBatchHierarchy,
   createBatch,
   deleteBatch,
   renameBatch,
@@ -24,6 +25,9 @@ const {
 // Read-only, no pricing/sensitive fields — safe for teachers to browse
 // batch/subject/chapter names for Paper Builder.
 router.get('/',                                                        requireTeacherOrAdmin, getBatches);
+// Student-safe equivalent of the above — own assigned batches only, no
+// pricing. See getStudentBatchHierarchy's own doc-comment for the bug this fixes.
+router.get('/student/hierarchy',                                       requireStudent, getStudentBatchHierarchy);
 router.get('/orphaned-chapter-ids',                                    requireAdmin, listOrphanedChapterIds);
 router.get('/pricing/all',                                             getAllBatchesPricing);
 router.post('/',                                                       requireAdmin, createBatch);

@@ -22,12 +22,13 @@ const Concept      = require('../models/Concept');
 const { makeChapterId } = require('./youtubeTeacherController');
 
 /**
- * GET /api/batches
- * Returns batch→subject→chapter hierarchy merged from:
+ * Shared merge logic behind GET /api/batches and the student-scoped
+ * hierarchy endpoint below — factored out so both build the exact same
+ * batch→subject→chapter list from:
  *   1. Explicitly-created batch catalog (Batch model)
- *   2. Batches derived from question data
+ *   2. Batches derived from (legacy MCQ) question data
  */
-exports.getBatches = asyncHandler(async (req, res) => {
+async function _buildMergedBatches() {
   const [catalogDocs, rows] = await Promise.all([
     Batch.find().sort({ name: 1 }).lean(),
     Question.aggregate([
@@ -128,7 +129,46 @@ exports.getBatches = asyncHandler(async (req, res) => {
   }));
 
   batches.sort((a, b) => a.name.localeCompare(b.name));
+  return batches;
+}
+
+/**
+ * GET /api/batches
+ * Returns batch→subject→chapter hierarchy merged from:
+ *   1. Explicitly-created batch catalog (Batch model)
+ *   2. Batches derived from question data
+ */
+exports.getBatches = asyncHandler(async (req, res) => {
+  const batches = await _buildMergedBatches();
   res.json({ success: true, data: batches });
+});
+
+/**
+ * GET /api/batches/student/hierarchy
+ *
+ * Real bug fix (found live): the student app's local Subject/Chapter
+ * dropdowns (Exercise tab, Home hierarchy) were built ONLY from
+ * DB.syncHierarchyFromExisting() — a client-side repair pass that infers
+ * batch/subject/chapter purely from locally-cached legacy MCQ Question/Quiz
+ * data. A subject/chapter that only has Notes (Concept) or Exercise
+ * (SLSQuestion) content — never an MCQ quiz — never made it into that local
+ * table, so it silently never appeared in any dropdown ("Select Subject"
+ * renders empty even though the batch itself is picked). GET /batches
+ * already has the full, correct catalog, but it's teacher/admin-only and
+ * returns pricing for every batch — not appropriate to open to students
+ * as-is. This is the student-safe equivalent: same merged hierarchy,
+ * filtered to the student's own assigned_batches (same isolation pattern
+ * as getStudentExerciseQuestions etc.), pricing fields stripped.
+ */
+exports.getStudentBatchHierarchy = asyncHandler(async (req, res) => {
+  const batches = await _buildMergedBatches();
+  const assigned = Array.isArray(req.userDoc?.assigned_batches) ? req.userDoc.assigned_batches : [];
+  const norm = s => String(s || '').trim().toLowerCase();
+  const allowedNames = new Set(assigned.map(norm));
+  const scoped = batches
+    .filter(b => allowedNames.has(norm(b.name)))
+    .map(b => ({ name: b.name, icon: b.icon, subjects: b.subjects, chapters: b.chapters }));
+  res.json({ success: true, data: scoped });
 });
 
 /**
