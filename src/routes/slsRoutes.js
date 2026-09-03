@@ -72,6 +72,7 @@ slsRouter.get('/admin/attempts',                      requireAdmin, slsControlle
 
 // ───── STUDENT: Exercise questions (read-only, published-only, batch-isolated)
 slsRouter.get('/student/exercise-questions',          requireStudent, slsController.getStudentExerciseQuestions);
+slsRouter.get('/student/search-exercise-questions',   requireStudent, slsController.searchExerciseQuestions);
 
 // ───── STUDENT: Paper Taking
 slsRouter.get('/student/papers',                      requireStudent, slsController.getPapers);

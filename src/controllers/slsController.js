@@ -3,6 +3,10 @@ const PracticePaper = require('../models/PracticePaper');
 const StudentPaperAttempt = require('../models/StudentPaperAttempt');
 const ConceptMarks = require('../models/ConceptMarks');
 const Concept = require('../models/Concept');
+const Batch = require('../models/Batch');
+// Same composite chapterId scheme reused (not reimplemented) — see its own
+// doc-comment in youtubeTeacherController.js.
+const { makeChapterId } = require('./youtubeTeacherController');
 
 /**
  * ═══════════════════════════════════════════════════════════
@@ -166,6 +170,78 @@ exports.getStudentExerciseQuestions = async (req, res) => {
     const questions = await SLSQuestion.find(filter).sort({ exerciseNo: 1, created_at: 1 });
 
     res.status(200).json({ success: true, data: questions });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// GET /sls/student/search-exercise-questions?q=&limit=
+// Home-screen search — same text-index + batch-isolation shape as
+// conceptController.searchConcepts, scoped to exerciseNo != '' (actual
+// Exercise questions only, not the general MCQ question bank).
+exports.searchExerciseQuestions = async (req, res) => {
+  try {
+    const { q, limit = 20 } = req.query;
+    if (!q || q.trim().length < 2) {
+      return res.status(400).json({ success: false, message: 'Search query must be at least 2 characters' });
+    }
+
+    const isStudent = req.user?.role === 'student';
+    const assigned = isStudent && Array.isArray(req.userDoc?.assigned_batches)
+      ? req.userDoc.assigned_batches.map(b => String(b).trim())
+      : null;
+    const allowedSet = assigned ? new Set(assigned) : null;
+
+    const requestedLimit = parseInt(limit) || 20;
+    // Batch filtering happens after the text-search ranking/limit below
+    // (batchId isn't part of the text index), so oversample when a student
+    // is filtering — same reasoning as conceptController.searchConcepts.
+    const fetchLimit = allowedSet ? Math.min(requestedLimit * 5, 200) : requestedLimit;
+
+    const results = await SLSQuestion.find(
+      { $text: { $search: q }, status: 'published', exerciseNo: { $ne: '' } },
+      { score: { $meta: 'textScore' } }
+    )
+      .sort({ score: { $meta: 'textScore' } })
+      .limit(fetchLimit)
+      .select('questionText marks exerciseNo chapterId subjectId batchId')
+      .lean();
+
+    const filtered = (allowedSet ? results.filter(r => allowedSet.has(String(r.batchId).trim())) : results)
+      .slice(0, requestedLimit);
+
+    // chapterId is a normalized (lowercase-hyphenated) composite — it can't
+    // be reversed directly into the chapter's real display name, so look it
+    // up against the Batch catalog instead (batchId/subjectId on SLSQuestion
+    // ARE the real display names already — see exerciseManager.js's create
+    // payload). Same technique as batchController's rename cascade.
+    const pairs = [...new Set(filtered.map(r => `${r.batchId}::${r.subjectId}`))]
+      .map(key => { const i = key.indexOf('::'); return { batchId: key.slice(0, i), subjectId: key.slice(i + 2) }; });
+
+    const batchDocs = pairs.length
+      ? await Batch.find({ name: { $in: pairs.map(p => p.batchId) } }, 'name subjects.name subjects.chapters.name').lean()
+      : [];
+
+    const chapterNameByChapterId = new Map();
+    for (const { batchId, subjectId } of pairs) {
+      const batchDoc = batchDocs.find(b => b.name === batchId);
+      const subjectDoc = batchDoc?.subjects.find(s => s.name === subjectId);
+      for (const ch of (subjectDoc?.chapters || [])) {
+        chapterNameByChapterId.set(makeChapterId(batchId, subjectId, ch.name), ch.name);
+      }
+    }
+
+    const data = filtered.map(r => ({
+      id: String(r._id),
+      questionText: r.questionText,
+      marks: r.marks,
+      exerciseNo: r.exerciseNo,
+      batchName: r.batchId,
+      subjectName: r.subjectId,
+      chapterName: chapterNameByChapterId.get(r.chapterId) || '',
+    }));
+
+    res.status(200).json({ success: true, data, count: data.length });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

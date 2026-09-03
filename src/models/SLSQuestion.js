@@ -228,5 +228,9 @@ slsQuestionSchema.index({ chapterId: 1, marks: 1, status: 1, usageCount: 1 });
 // Exercise Manager's exact query shape: list distinct exercise numbers /
 // questions for a chapter, or a specific chapter+exerciseNo group.
 slsQuestionSchema.index({ chapterId: 1, exerciseNo: 1, status: 1 });
+// Home search ("find this Exercise question") — same text-index pattern as
+// Concept.js's title.english/title.marathi text index. Mongo allows only one
+// text index per collection; this is the first/only one on SLSQuestion.
+slsQuestionSchema.index({ 'questionText.english': 'text', 'questionText.marathi': 'text' });
 
 module.exports = mongoose.models.SLSQuestion || mongoose.model('SLSQuestion', slsQuestionSchema);
