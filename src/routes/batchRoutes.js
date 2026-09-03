@@ -17,6 +17,7 @@ const {
   updateBatchPricing,
   getBatchPricing,
   getAllBatchesPricing,
+  repairBatchChapterIds,
 } = require('../controllers/batchController');
 
 // Read-only, no pricing/sensitive fields — safe for teachers to browse
@@ -26,6 +27,9 @@ router.get('/pricing/all',                                             getAllBat
 router.post('/',                                                       requireAdmin, createBatch);
 router.put('/:name',                                                   requireAdmin, renameBatch);
 router.delete('/:name',                                                requireAdmin, deleteBatch);
+// One-time repair for batches renamed before the chapterId-cascade fix in
+// renameBatch existed — see repairBatchChapterIds's own doc-comment.
+router.post('/:name/repair-chapter-ids',                               requireAdmin, repairBatchChapterIds);
 router.get('/:name/pricing',                                           getBatchPricing);
 router.put('/:name/pricing',                                           requireAdmin, updateBatchPricing);
 router.post('/:name/subjects',                                         requireAdmin, addSubject);

@@ -260,6 +260,14 @@ exports.renameBatch = asyncHandler(async (req, res) => {
     if (conflict) throw new AppError(`Batch "${newName}" already exists`, 409);
   }
 
+  // Capture the batch's current subject/chapter structure BEFORE renaming —
+  // needed to remap Concept/SLSQuestion chapterId below. Real bug found
+  // live: chapterId embeds the batch name (see makeChapterId), and this
+  // rename never remapped it — every existing Note/Exercise under a
+  // renamed batch silently orphaned under the old chapterId even though
+  // this cascade updated everything else correctly.
+  const batchDocBefore = oldName !== newName ? await Batch.findOne({ name: oldName }).lean() : null;
+
   const updateFields = { name: newName };
   if (icon !== undefined) updateFields.icon = icon || '📚';
   if (coverImage !== undefined) updateFields.cover_image = coverImage;
@@ -284,11 +292,72 @@ exports.renameBatch = asyncHandler(async (req, res) => {
       Question.updateMany({ batch: oldName }, { $set: { batch: newName } }),
       YoutubeTeacherVideo.updateMany({ batch_name: oldName }, { $set: { batch_name: newName } }),
       YoutubeTeacherTeachingArea.updateMany({ batch_name: oldName }, { $set: { batch_name: newName } }),
+      ..._remapChapterIdsForBatch(oldName, newName, batchDocBefore),
     ] : []),
   ]);
 
   const updated = await Batch.findOne({ name: newName }).lean();
   res.json({ success: true, data: { name: updated.name, icon: updated.icon } });
+});
+
+// Concept/SLSQuestion chapterId embeds the batch name — a batch rename must
+// remap it for every existing subject+chapter, same technique as
+// renameSubject/renameChapter below. Returns an array of promises (spread
+// into the Promise.all above), not a single promise.
+function _remapChapterIdsForBatch(oldBatchName, newBatchName, batchDoc) {
+  const promises = [];
+  for (const subjectDoc of (batchDoc?.subjects || [])) {
+    for (const ch of (subjectDoc.chapters || [])) {
+      const oldChapterId = makeChapterId(oldBatchName, subjectDoc.name, ch.name);
+      const newChapterId = makeChapterId(newBatchName, subjectDoc.name, ch.name);
+      promises.push(
+        SLSQuestion.updateMany({ chapterId: oldChapterId }, { $set: { chapterId: newChapterId } }),
+        Concept.updateMany({ chapterId: oldChapterId }, { $set: { chapterId: newChapterId } })
+      );
+    }
+  }
+  return promises;
+}
+
+// POST /api/admin/batches/:name/repair-chapter-ids
+// Body: { old_batch_name }
+// One-time repair utility for batches renamed BEFORE the chapterId-cascade
+// fix above existed (or any other historical mismatch) — finds every
+// Concept/SLSQuestion whose chapterId still starts with the OLD batch's
+// normalized prefix and rewrites that prefix to the CURRENT batch name,
+// recovering content that got silently orphaned. Works regardless of
+// whether the affected chapter still exists in the Batch catalog today
+// (unlike the cascade above, which only knows about chapters present at
+// rename time) — a prefix rewrite, not a per-chapter lookup. Safe to
+// re-run: a no-op once nothing matches the old prefix anymore.
+exports.repairBatchChapterIds = asyncHandler(async (req, res) => {
+  const currentName = decodeURIComponent(req.params.name || '').trim();
+  const oldName = String(req.body.old_batch_name || '').trim();
+  if (!currentName) throw new AppError('batch name is required', 400);
+  if (!oldName) throw new AppError('old_batch_name is required', 400);
+
+  const norm = s => String(s || '').trim().toLowerCase().replace(/\s+/g, '-');
+  const oldPrefix = `${norm(oldName)}::`;
+  const newPrefix = `${norm(currentName)}::`;
+  if (oldPrefix === newPrefix) {
+    return res.json({ success: true, message: 'old_batch_name normalizes the same as the current name — nothing to repair', concepts_repaired: 0, questions_repaired: 0 });
+  }
+
+  const escaped = oldPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp('^' + escaped);
+
+  const [concepts, questions] = await Promise.all([
+    Concept.find({ chapterId: regex }, '_id chapterId').lean(),
+    SLSQuestion.find({ chapterId: regex }, '_id chapterId').lean(),
+  ]);
+  const rewrite = id => newPrefix + id.slice(oldPrefix.length);
+
+  await Promise.all([
+    ...concepts.map(c => Concept.updateOne({ _id: c._id }, { $set: { chapterId: rewrite(c.chapterId) } })),
+    ...questions.map(q => SLSQuestion.updateOne({ _id: q._id }, { $set: { chapterId: rewrite(q.chapterId) } })),
+  ]);
+
+  res.json({ success: true, concepts_repaired: concepts.length, questions_repaired: questions.length });
 });
 
 /**
