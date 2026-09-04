@@ -85,6 +85,11 @@ async function _buildMergedBatches() {
       monthly_price: doc.monthly_price || 0,
       yearly_price: doc.yearly_price || 0,
       trial_days: doc.trial_days != null ? doc.trial_days : 1,
+      // Descriptive-only (see Batch.js) — a batch that predates this or was
+      // never backfilled just reports empty strings, same as "Unpriced" above.
+      board: doc.board || '',
+      medium: doc.medium || '',
+      standard: doc.standard || '',
     });
   }
 
@@ -96,6 +101,7 @@ async function _buildMergedBatches() {
       map.set(batchName, {
         name: batchName, icon: '📚', subjects: [], chaptersFlat: [],
         monthly_price: 0, yearly_price: 0, trial_days: 1,
+        board: '', medium: '', standard: '',
       });
     }
     const entry = map.get(batchName);
@@ -126,6 +132,9 @@ async function _buildMergedBatches() {
     monthly_price: b.monthly_price || 0,
     yearly_price: b.yearly_price || 0,
     trial_days: b.trial_days != null ? b.trial_days : 1,
+    board: b.board || '',
+    medium: b.medium || '',
+    standard: b.standard || '',
   }));
 
   batches.sort((a, b) => a.name.localeCompare(b.name));
@@ -167,7 +176,7 @@ exports.getStudentBatchHierarchy = asyncHandler(async (req, res) => {
   const allowedNames = new Set(assigned.map(norm));
   const scoped = batches
     .filter(b => allowedNames.has(norm(b.name)))
-    .map(b => ({ name: b.name, icon: b.icon, subjects: b.subjects, chapters: b.chapters }));
+    .map(b => ({ name: b.name, icon: b.icon, subjects: b.subjects, chapters: b.chapters, board: b.board, medium: b.medium, standard: b.standard }));
   res.json({ success: true, data: scoped });
 });
 
@@ -214,9 +223,19 @@ exports.createBatch = asyncHandler(async (req, res) => {
   const hasPricing = req.body.monthly_price !== undefined || req.body.yearly_price !== undefined;
   const pricingFields = hasPricing ? buildPricingFields(req.body) : {};
   const description = req.body.description !== undefined ? String(req.body.description).trim() : undefined;
+  // Board/Medium/Class — see Batch.js's own comment. Optional, descriptive
+  // only; the admin's Board→Medium→Class picker sends the already-built
+  // final `name` above, these three ride along just for later searching/
+  // filtering (student subscribe picker, YouTube Teacher Teaching Areas).
+  const board    = req.body.board    !== undefined ? String(req.body.board).trim()    : undefined;
+  const medium   = req.body.medium   !== undefined ? String(req.body.medium).trim()   : undefined;
+  const standard = req.body.standard !== undefined ? String(req.body.standard).trim() : undefined;
 
   const insertDoc = { name, icon, subjects: [], ...pricingFields };
   if (description !== undefined) insertDoc.description = description;
+  if (board       !== undefined) insertDoc.board        = board;
+  if (medium      !== undefined) insertDoc.medium        = medium;
+  if (standard    !== undefined) insertDoc.standard      = standard;
 
   const batch = await Batch.findOneAndUpdate(
     { name },
@@ -233,6 +252,9 @@ exports.createBatch = asyncHandler(async (req, res) => {
       yearly_price: batch.yearly_price,
       trial_days: batch.trial_days,
       description: batch.description,
+      board: batch.board || '',
+      medium: batch.medium || '',
+      standard: batch.standard || '',
     },
   });
 });
@@ -283,14 +305,24 @@ exports.deleteBatch = asyncHandler(async (req, res) => {
 
 /**
  * PUT /api/batches/:name
- * Rename a batch and update all references atomically.
- * Body: { name: newName, icon? }
+ * Rename a batch and update all references atomically. Also doubles as the
+ * general "edit batch metadata" endpoint (icon/cover_image/board/medium/
+ * standard) — pass the SAME current name back to update those without
+ * renaming at all, which skips the whole cascade below entirely (see the
+ * `oldName !== newName` guards). This is the deliberately safe path for
+ * backfilling board/medium/standard on an EXISTING batch: send its name
+ * unchanged and nothing downstream (chapterId, assigned_batches, or any of
+ * the ~20 batch-scoped collections) is touched.
+ * Body: { name: newName, icon?, cover_image?, board?, medium?, standard? }
  */
 exports.renameBatch = asyncHandler(async (req, res) => {
   const oldName     = decodeURIComponent(req.params.name || '').trim();
   const newName     = String(req.body.name || '').trim();
   const icon        = req.body.icon !== undefined ? String(req.body.icon).trim() : undefined;
   const coverImage  = req.body.cover_image !== undefined ? String(req.body.cover_image).trim() : undefined;
+  const board       = req.body.board !== undefined ? String(req.body.board).trim() : undefined;
+  const medium      = req.body.medium !== undefined ? String(req.body.medium).trim() : undefined;
+  const standard    = req.body.standard !== undefined ? String(req.body.standard).trim() : undefined;
 
   if (!oldName) throw new AppError('old name is required', 400);
   if (!newName) throw new AppError('new name is required', 400);
@@ -311,6 +343,9 @@ exports.renameBatch = asyncHandler(async (req, res) => {
   const updateFields = { name: newName };
   if (icon !== undefined) updateFields.icon = icon || '📚';
   if (coverImage !== undefined) updateFields.cover_image = coverImage;
+  if (board !== undefined) updateFields.board = board;
+  if (medium !== undefined) updateFields.medium = medium;
+  if (standard !== undefined) updateFields.standard = standard;
 
   await Promise.all([
     Batch.updateOne({ name: oldName }, { $set: updateFields }),
@@ -337,7 +372,16 @@ exports.renameBatch = asyncHandler(async (req, res) => {
   ]);
 
   const updated = await Batch.findOne({ name: newName }).lean();
-  res.json({ success: true, data: { name: updated.name, icon: updated.icon } });
+  res.json({
+    success: true,
+    data: {
+      name: updated.name,
+      icon: updated.icon,
+      board: updated.board || '',
+      medium: updated.medium || '',
+      standard: updated.standard || '',
+    },
+  });
 });
 
 // Concept/SLSQuestion chapterId embeds the batch name — a batch rename must
@@ -740,7 +784,7 @@ exports.getBatchPricing = asyncHandler(async (req, res) => {
  */
 exports.getAllBatchesPricing = asyncHandler(async (req, res) => {
   const batches = await Batch.find({ is_active: true })
-    .select('name icon cover_image pricing_type monthly_price yearly_price trial_days description')
+    .select('name icon cover_image pricing_type monthly_price yearly_price trial_days description board medium standard')
     .lean();
 
   const data = batches.map(b => ({
@@ -752,6 +796,12 @@ exports.getAllBatchesPricing = asyncHandler(async (req, res) => {
     yearly_price: b.yearly_price || 0,
     trial_days: b.trial_days != null ? b.trial_days : 1,
     description: b.description || '',
+    // Descriptive only (see Batch.js) — powers the Board/Medium search
+    // filter on the student "Choose Plan" picker; empty for a batch never
+    // backfilled, which just behaves as before (unfiltered/always shown).
+    board: b.board || '',
+    medium: b.medium || '',
+    standard: b.standard || '',
   }));
 
   res.json({ success: true, data });

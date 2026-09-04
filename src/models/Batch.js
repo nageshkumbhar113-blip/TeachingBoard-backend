@@ -31,6 +31,17 @@ const batchSchema = new mongoose.Schema(
     cover_image: { type: String, default: '', trim: true }, // 16:9 (1200x675) showcase image
     subjects: { type: [subjectSchema], default: [] },
 
+    // Descriptive metadata only — `name` (above) stays the ONE identity key
+    // used everywhere (chapterId, assigned_batches, every batch-scoped
+    // collection). These are purely additive, optional, and never affect
+    // any lookup — added so Board/Medium/Class can be searched and
+    // filtered on (admin batch creation, student subscribe picker,
+    // YouTube Teacher "Teaching Areas") without touching that identity
+    // scheme or any of the ~20 collections keyed by it.
+    board:    { type: String, default: '', trim: true }, // e.g. "Maharashtra State Board"
+    medium:   { type: String, default: '', trim: true }, // e.g. "English", "Semi-English", "Marathi"
+    standard: { type: String, default: '', trim: true }, // e.g. "10th", "NMMS" — free text, not just a number (some batches are exam-prep, not a plain class)
+
     // Pricing
     pricing_type: { type: String, enum: ['free', 'paid'], default: 'paid' },
 

@@ -110,9 +110,14 @@ exports.updateProfile = asyncHandler(async (req, res) => {
 
 // GET /api/youtube-teacher/batch-tree
 exports.getBatchTree = asyncHandler(async (_req, res) => {
-  const batches = await Batch.find({ is_active: true }, 'name subjects.name subjects.chapters.name subjects.chapters.order').lean();
+  const batches = await Batch.find({ is_active: true }, 'name board medium standard subjects.name subjects.chapters.name subjects.chapters.order').lean();
   const data = batches.map(b => ({
     name: b.name,
+    // Descriptive only (see Batch.js) — powers the Board/Medium search
+    // filter on "My Teaching Areas"; empty for a batch never backfilled.
+    board: b.board || '',
+    medium: b.medium || '',
+    standard: b.standard || '',
     subjects: (b.subjects || []).map(s => ({
       name: s.name,
       chapters: (s.chapters || [])
