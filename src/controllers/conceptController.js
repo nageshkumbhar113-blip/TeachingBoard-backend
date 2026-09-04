@@ -2,6 +2,10 @@ const { randomUUID } = require('crypto');
 const Concept = require('../models/Concept');
 const ConceptVersion = require('../models/ConceptVersion');
 const StudentProgress = require('../models/StudentProgress');
+// Needed only by getStudentFullSync below (offline-sync bundle also
+// includes Exercise questions, which live in this separate model/collection —
+// not reimplementing SLSQuestion access, just reusing the model here too).
+const SLSQuestion = require('../models/SLSQuestion');
 const asyncHandler = require('../utils/asyncHandler');
 
 // A concept's chapterId is built by the admin app as
@@ -205,6 +209,52 @@ exports.getChapterConcepts = asyncHandler(async (req, res) => {
       concepts,
       total: concepts.length
     }
+  });
+});
+
+// ════════════════════════════════════
+// FULL OFFLINE SYNC (student) — real gap fixed live: the app previously
+// required each Note/Exercise to be opened individually while online to
+// cache its full content, and had nothing that primed the cache proactively.
+// This returns EVERY published Concept (full content) and EVERY published
+// SLSQuestion (Exercise question) for the student's own assigned batch(es)
+// — in ONE response, not one call per chapter — so the client can populate
+// its whole offline cache in a single round trip right after login, instead
+// of one request per item/chapter.
+// ════════════════════════════════════
+
+function _escapeRegexLiteral(s) {
+  return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+exports.getStudentFullSync = asyncHandler(async (req, res) => {
+  const allowedBatches = _studentAllowedBatchSet(req); // Set of normalized batch names, or null for admin
+  if (allowedBatches && !allowedBatches.size) {
+    return res.json({ success: true, data: { concepts: [], exerciseQuestions: [] } });
+  }
+
+  // null (admin) -> no filter, matches every batch (mirrors the rest of this
+  // file's isolation convention — admins aren't scoped, this endpoint just
+  // isn't meant for them in practice).
+  const chapterIdFilter = allowedBatches
+    ? { $in: [...allowedBatches].map(b => new RegExp('^' + _escapeRegexLiteral(b) + '::')) }
+    : undefined;
+
+  const conceptQuery = { status: 'published' };
+  const questionQuery = { status: 'published' };
+  if (chapterIdFilter) {
+    conceptQuery.chapterId = chapterIdFilter;
+    questionQuery.chapterId = chapterIdFilter;
+  }
+
+  const [concepts, exerciseQuestions] = await Promise.all([
+    Concept.find(conceptQuery).sort({ chapterId: 1, order: 1 }).lean(),
+    SLSQuestion.find(questionQuery).sort({ chapterId: 1, exerciseNo: 1, created_at: 1 }).lean(),
+  ]);
+
+  res.json({
+    success: true,
+    data: { concepts, exerciseQuestions },
   });
 });
 

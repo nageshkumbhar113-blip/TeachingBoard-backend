@@ -5,6 +5,7 @@ const {
   getConcept,
   getChapterConcepts,
   getPublishedChapters,
+  getStudentFullSync,
   updateConcept,
   deleteConcept,
   publishConcept,
@@ -40,6 +41,7 @@ const studentRouter = express.Router();
 studentRouter.get('/chapters',                     requireStudent, getPublishedChapters);
 studentRouter.get('/chapters/:chapterId/concepts', requireStudent, getChapterConcepts);
 studentRouter.get('/search',                       requireStudent, searchConcepts);
+studentRouter.get('/full-sync',                    requireStudent, getStudentFullSync);
 studentRouter.get('/:conceptId/view',              requireStudent, getConcept);
 
 // ════════════════════════════════════════════════════════════════════════════════
