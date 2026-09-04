@@ -117,7 +117,22 @@ exports.getQuestions = async (req, res) => {
 
     const skip = (page - 1) * limit;
 
-    const sortBy = req.query.sort === 'usageCount' ? { usageCount: 1 } : { created_at: -1 };
+    // Real bug found live: this endpoint defaulted to newest-first, which
+    // is right for browsing/searching the general question bank but wrong
+    // for an actual Exercise — its questions are an ORDERED sequence
+    // (Q1, Q2, Q3...), and Auto-fill's bulk paste creates them all within
+    // the same second, so newest-first showed them in reverse ("question
+    // sequence is wrong"). When exerciseNo is given (Exercise Manager's own
+    // list + Auto-fill's duplicate check — the only two callers that ever
+    // pass it), sort oldest-first instead, matching the natural reading
+    // order and the student-facing getStudentExerciseQuestions, which
+    // already sorted this way. General question-bank browsing (no
+    // exerciseNo) keeps newest-first, unchanged.
+    const sortBy = req.query.sort === 'usageCount'
+      ? { usageCount: 1 }
+      : exerciseNo
+        ? { created_at: 1 }
+        : { created_at: -1 };
     const questions = await SLSQuestion.find(filter)
       .skip(skip)
       .limit(parseInt(limit))
