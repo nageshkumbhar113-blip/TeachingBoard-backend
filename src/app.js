@@ -27,6 +27,7 @@ const { router: paymentRoutes, webhook: paymentWebhook } = require("./routes/pay
 const { adminRouter: noteAdminRouter, studentRouter: noteStudentRouter } = require("./routes/noteRoutes");
 const { adminRouter: slsAdminRouter, studentRouter: slsStudentRouter, slsRouter } = require("./routes/slsRoutes");
 const { teacherRouter: youtubeTeacherRouter, adminRouter: youtubeTeacherAdminRouter } = require("./routes/youtubeTeacherRoutes");
+const { adminRouter: bannerAdminRouter, studentRouter: bannerStudentRouter } = require("./routes/bannerRoutes");
 const { notFoundHandler, errorHandler } = require("./middleware/errorHandler");
 const { createRateLimiter }             = require("./middleware/rateLimiter");
 
@@ -158,6 +159,8 @@ app.use("/api/sls",             slsRouter);
 // video CRUD) shouldn't share that tight 30-req/15min budget.
 app.use("/api/youtube-teacher", youtubeTeacherRouter);
 app.use("/api/admin",           youtubeTeacherAdminRouter);
+app.use("/api/admin/banners",   bannerAdminRouter);
+app.use("/api/banners",         bannerStudentRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
