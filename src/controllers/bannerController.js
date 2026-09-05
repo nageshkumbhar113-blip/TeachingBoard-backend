@@ -1,4 +1,5 @@
-const Banner       = require('../models/Banner');
+const Banner              = require('../models/Banner');
+const DefaultBannerQuote  = require('../models/DefaultBannerQuote');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError     = require('../utils/AppError');
 
@@ -76,7 +77,64 @@ exports.deleteBanner = asyncHandler(async (req, res) => {
   res.json({ success: true });
 });
 
+// ── Admin: Default Quotes (shown only when a student has zero real Banners) ──
+
+// GET /api/admin/default-quotes
+exports.listDefaultQuotesAdmin = asyncHandler(async (req, res) => {
+  const quotes = await DefaultBannerQuote.find({}).sort({ order: 1, created_at: -1 }).lean();
+  res.json({ success: true, quotes });
+});
+
+// POST /api/admin/default-quotes
+// body: { text, order?, active? }
+exports.createDefaultQuote = asyncHandler(async (req, res) => {
+  const { text, order, active } = req.body;
+  if (!text || !String(text).trim()) throw new AppError('text is required', 400);
+
+  const quote = await DefaultBannerQuote.create({
+    text:       text.trim(),
+    order:      Number.isFinite(Number(order)) ? Number(order) : 0,
+    active:     active === undefined ? true : !!active,
+    created_by: req.user?.id || req.user?.name || 'admin',
+  });
+
+  res.status(201).json({ success: true, quote_id: quote.quote_id });
+});
+
+// PUT /api/admin/default-quotes/:id
+exports.updateDefaultQuote = asyncHandler(async (req, res) => {
+  const quote = await DefaultBannerQuote.findOne({ quote_id: req.params.id });
+  if (!quote) throw new AppError('Quote not found', 404);
+
+  const { text, order, active } = req.body;
+  if (text !== undefined) {
+    if (!String(text).trim()) throw new AppError('text cannot be empty', 400);
+    quote.text = text.trim();
+  }
+  if (order  !== undefined) quote.order  = Number.isFinite(Number(order)) ? Number(order) : quote.order;
+  if (active !== undefined) quote.active = !!active;
+
+  await quote.save();
+  res.json({ success: true, quote_id: quote.quote_id });
+});
+
+// DELETE /api/admin/default-quotes/:id
+exports.deleteDefaultQuote = asyncHandler(async (req, res) => {
+  const quote = await DefaultBannerQuote.findOne({ quote_id: req.params.id });
+  if (!quote) throw new AppError('Quote not found', 404);
+  await quote.deleteOne();
+  res.json({ success: true });
+});
+
 // ── Student ──────────────────────────────────────────────────────────────────
+
+// GET /api/banners/default-quotes — admin-configured fallback text, used by
+// the student app only when getBannersForStudent returns zero real banners.
+// No batch-gating needed (these are always global/text-only/non-clickable).
+exports.getDefaultQuotesForStudent = asyncHandler(async (req, res) => {
+  const quotes = await DefaultBannerQuote.find({ active: true }).sort({ order: 1, created_at: -1 }).lean();
+  res.json({ success: true, quotes: quotes.map(q => q.text) });
+});
 
 // GET /api/banners/for-student
 // Own assigned batch(es) + every 'all'-scope banner. Never trusts a
