@@ -98,7 +98,14 @@ exports.getQuestions = async (req, res) => {
     const filter = {};
     if (conceptId) filter.conceptId = conceptId;
     if (exerciseNo) filter.exerciseNo = exerciseNo;
-    if (chapterId) filter.chapterId = chapterId;
+    // Paper Builder's multi-chapter selection passes a comma-separated list;
+    // every other existing caller (Exercise Manager, Concept Manager, Books,
+    // student-side) still passes a single chapterId, which behaves exactly
+    // as before — a 1-element $in on a single string.
+    if (chapterId) {
+      const ids = String(chapterId).split(',').map(s => s.trim()).filter(Boolean);
+      filter.chapterId = ids.length > 1 ? { $in: ids } : ids[0];
+    }
     if (batchId) filter.batchId = batchId;
     if (marks) filter.marks = parseInt(marks);
     if (questionType) filter.questionType = questionType;
@@ -521,14 +528,24 @@ exports.generatePaper = async (req, res) => {
 };
 
 // Create Paper Manually (teacher/admin hand-picks questions, no auto-distribution)
+// Paper Builder's multi-select sends chapterIds[]/subjectIds[] alongside the
+// singular chapterId/subjectId (set to the first selected one) for backward
+// compatibility — every existing single-chapter caller only ever sent the
+// singular fields, and that path (chapterIds/subjectIds absent or a single
+// entry) behaves byte-for-byte as before: same isolation check, same
+// per-chapterId paperNumber sequence.
 exports.createPaperManual = async (req, res) => {
   try {
-    const { batchId, chapterId, subjectId, paperTitle, questions } = req.body;
+    const { batchId, chapterId, subjectId, chapterIds, subjectIds, paperTitle, questions } = req.body;
 
-    if (!batchId || !chapterId || !subjectId || !Array.isArray(questions) || questions.length === 0) {
+    const effectiveChapterIds = Array.isArray(chapterIds) && chapterIds.length ? chapterIds : (chapterId ? [chapterId] : []);
+    const effectiveSubjectIds = Array.isArray(subjectIds) && subjectIds.length ? subjectIds : (subjectId ? [subjectId] : []);
+    const isMulti = effectiveChapterIds.length > 1;
+
+    if (!batchId || !effectiveChapterIds.length || !effectiveSubjectIds.length || !Array.isArray(questions) || questions.length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'Missing required fields: batchId, chapterId, subjectId, questions[]'
+        message: 'Missing required fields: batchId, chapterId(s), subjectId(s), questions[]'
       });
     }
 
@@ -545,10 +562,10 @@ exports.createPaperManual = async (req, res) => {
         return res.status(400).json({ success: false, message: `Question ${item.questionId} not found` });
       }
       // Defense-in-depth: manually-picked questions must belong to the same
-      // batch/chapter as the paper, mirroring the isolation guarantees the
-      // rest of this app enforces (a client could otherwise hand-pick a
-      // questionId from a different batch's chapter).
-      if (src.batchId !== batchId || src.chapterId !== chapterId) {
+      // batch and to one of the paper's selected chapter(s), mirroring the
+      // isolation guarantees the rest of this app enforces (a client could
+      // otherwise hand-pick a questionId from an unselected batch/chapter).
+      if (src.batchId !== batchId || !effectiveChapterIds.includes(src.chapterId)) {
         return res.status(400).json({ success: false, message: `Question ${item.questionId} does not belong to this batch/chapter` });
       }
       order += 1;
@@ -565,18 +582,25 @@ exports.createPaperManual = async (req, res) => {
       totalMarks += src.marks;
     }
 
-    const lastPaper = await PracticePaper.findOne({ chapterId })
-      .sort({ paperNumber: -1 })
-      .lean();
+    // Paper numbering: a single-chapter paper (the common case, and every
+    // paper created before this feature) counts per-chapterId, unchanged.
+    // A genuinely multi-chapter paper counts per-batch instead — there's no
+    // single "the" chapter to key off, and per-batch keeps the number
+    // meaningful (still increases with each new paper in that batch).
+    const lastPaper = isMulti
+      ? await PracticePaper.findOne({ batchId }).sort({ paperNumber: -1 }).lean()
+      : await PracticePaper.findOne({ chapterId: effectiveChapterIds[0] }).sort({ paperNumber: -1 }).lean();
     const paperNumber = (lastPaper?.paperNumber || 0) + 1;
 
     const marksTally = {};
     for (const sq of selectedQuestions) marksTally[sq.marks] = (marksTally[sq.marks] || 0) + 1;
 
     const paper = new PracticePaper({
-      chapterId,
+      chapterId: effectiveChapterIds[0],
       batchId,
-      subjectId,
+      subjectId: effectiveSubjectIds[0],
+      chapterIds: isMulti ? effectiveChapterIds : [],
+      subjectIds: effectiveSubjectIds.length > 1 ? effectiveSubjectIds : [],
       paperNumber,
       paperTitle: paperTitle || `Practice Paper ${paperNumber}`,
       totalMarks,

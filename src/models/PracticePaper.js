@@ -49,6 +49,14 @@ const questionInPaperSchema = new mongoose.Schema(
 const practicePaperSchema = new mongoose.Schema(
   {
     // Basic Info
+    // Single chapter/subject a paper was originally scoped to — kept
+    // required for backward compatibility with every existing reader
+    // (paperNumber sequencing, PDF export, etc). For a multi-chapter/
+    // multi-subject paper (Paper Builder's multi-select), this is just the
+    // FIRST selected one; the full selected set lives in chapterIds/
+    // subjectIds below. A single-chapter paper (the common case, and every
+    // paper created before this feature) has chapterIds/subjectIds empty —
+    // always fall back to the singular field when the plural one is empty.
     chapterId: {
       type: String,
       required: true,
@@ -64,6 +72,16 @@ const practicePaperSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true
+    },
+    // Full multi-select set (Paper Builder) — empty [] for ordinary
+    // single-chapter/single-subject papers (see comment above chapterId).
+    chapterIds: {
+      type: [String],
+      default: []
+    },
+    subjectIds: {
+      type: [String],
+      default: []
     },
 
     // Paper Details
