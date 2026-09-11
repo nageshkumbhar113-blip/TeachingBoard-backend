@@ -48,6 +48,11 @@ const userSchema = new mongoose.Schema(
 
     // Shared: FCM device token for push notifications
     device_token: { type: String, default: null, trim: true },
+
+    // Student-specific: dedupe for the "haven't studied in N days" reminder
+    // job (jobs/notificationScheduler.js) — without this it would re-fire
+    // every single day once a student goes quiet, instead of once per gap.
+    last_inactivity_reminder_at: { type: Date, default: null },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },

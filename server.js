@@ -104,6 +104,8 @@ async function start() {
   await connectToDatabase();
   await seedAdmin();
 
+  require('./src/jobs/notificationScheduler').start();
+
   // Initialize FCM at startup so we know immediately if it's configured
   try {
     const { sendToUser } = require('./src/utils/fcm');

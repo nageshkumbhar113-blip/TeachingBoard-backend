@@ -228,6 +228,15 @@ exports.updateStudent = asyncHandler(async (req, res) => {
   res.json({ success: true, data: serializeStudent(student) });
 });
 
+// ── Student: register FCM device token (self-service, own account only) ──────
+exports.updateOwnDeviceToken = asyncHandler(async (req, res) => {
+  const token = String(req.body.device_token || '').trim();
+  if (!token) throw new AppError('device_token is required', 400);
+
+  await User.updateOne({ user_id: req.user.id, role: 'student' }, { $set: { device_token: token } });
+  res.json({ success: true, message: 'Device token updated' });
+});
+
 exports.resetDevice = asyncHandler(async (req, res) => {
   const student = await User.findOne({ user_id: req.params.id, role: 'student' });
   if (!student) throw new AppError('Student not found', 404);

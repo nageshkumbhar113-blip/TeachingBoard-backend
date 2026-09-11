@@ -2,6 +2,7 @@ const Quiz = require("../models/Quiz");
 const asyncHandler = require("../utils/asyncHandler");
 const AppError = require("../utils/AppError");
 const { QUIZ_STATUSES, buildQuizDocument, serializeQuiz } = require("../utils/quizPayload");
+const { notifyBatch } = require("../utils/studentNotify");
 
 const MAX_SECTION_COUNT = 200;
 const MAX_SECTIONS_PER_REQUEST = 20;
@@ -64,6 +65,7 @@ exports.createQuiz = asyncHandler(async (req, res) => {
   const existingQuiz = req.body.quiz_id
     ? await Quiz.findOne({ quiz_id: String(req.body.quiz_id).trim() })
     : null;
+  const wasPublished = existingQuiz?.status === 'published';
 
   const quizPayload = buildQuizDocument(req.body, existingQuiz);
   let quiz;
@@ -73,6 +75,18 @@ exports.createQuiz = asyncHandler(async (req, res) => {
     quiz = await existingQuiz.save();
   } else {
     quiz = await Quiz.create(quizPayload);
+  }
+
+  // Only the draft→published transition — not every autosave/edit — should
+  // reach students, and only once per quiz (repeat edits after publishing
+  // stay silent since wasPublished is already true by then).
+  if (quiz.status === 'published' && !wasPublished) {
+    notifyBatch(
+      quiz.batch,
+      '📝 नवीन Test उपलब्ध!',
+      `${quiz.subject} — "${quiz.title}" आत्ताच द्या`,
+      { type: 'new_test', quiz_id: quiz.quiz_id, batch: quiz.batch }
+    ).catch(err => console.warn('quiz-publish notify failed:', err.message));
   }
 
   res.status(existingQuiz ? 200 : 201).json({

@@ -3,6 +3,7 @@ const { Readable }   = require('stream');
 const Note         = require('../models/Note');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError     = require('../utils/AppError');
+const { notifyBatch } = require('../utils/studentNotify');
 
 function _iregex(s) {
   return { $regex: new RegExp('^' + String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') };
@@ -50,6 +51,13 @@ exports.uploadNote = asyncHandler(async (req, res) => {
     file_size_bytes:      fileSizeBytes,
     created_by:           req.user?.id || 'admin',
   });
+
+  notifyBatch(
+    note.batch,
+    '📘 नवीन Notes आले!',
+    `${note.subject}${note.chapter ? ' · ' + note.chapter : ''} — "${note.title}" आत्ताच वाचा`,
+    { type: 'new_notes', note_id: note.note_id, batch: note.batch }
+  ).catch(err => console.warn('note-upload notify failed:', err.message));
 
   res.status(201).json({ success: true, note_id: note.note_id, title: note.title });
 });

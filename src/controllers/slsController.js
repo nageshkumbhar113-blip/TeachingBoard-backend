@@ -7,6 +7,7 @@ const Batch = require('../models/Batch');
 // Same composite chapterId scheme reused (not reimplemented) — see its own
 // doc-comment in youtubeTeacherController.js.
 const { makeChapterId } = require('./youtubeTeacherController');
+const NotificationQueue = require('../models/NotificationQueue');
 
 /**
  * ═══════════════════════════════════════════════════════════
@@ -366,6 +367,21 @@ exports.publishQuestion = async (req, res) => {
         message: 'Question not found'
       });
     }
+
+    // Don't push once per question — an admin typically publishes a whole
+    // exercise (many questions) back to back. Upsert a debounce row instead;
+    // the notification scheduler (jobs/notificationScheduler.js) sends ONE
+    // grouped push per batch+chapter once publishing has gone quiet for a
+    // couple of minutes.
+    const queueKey = `exercise::${question.batchId}::${question.chapterId}`;
+    NotificationQueue.updateOne(
+      { key: queueKey },
+      {
+        $set: { type: 'exercise', batchId: question.batchId, chapterId: question.chapterId, subjectId: question.subjectId, notified: false },
+        $inc: { count: 1 },
+      },
+      { upsert: true }
+    ).catch(err => console.warn('exercise-publish queue failed:', err.message));
 
     res.status(200).json({
       success: true,

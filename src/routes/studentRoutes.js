@@ -1,5 +1,5 @@
 const express = require('express');
-const { requireAdmin } = require('../middleware/auth');
+const { requireAdmin, requireStudent } = require('../middleware/auth');
 const { createRateLimiter } = require('../middleware/rateLimiter');
 const {
   createStudent,
@@ -8,6 +8,7 @@ const {
   resetDevice,
   deleteStudent,
   selfRegister,
+  updateOwnDeviceToken,
 } = require('../controllers/studentController');
 
 const router = express.Router();
@@ -26,4 +27,8 @@ router.patch('/:id', requireAdmin, updateStudent);
 router.delete('/:id', requireAdmin, deleteStudent);
 router.post('/:id/reset-device', requireAdmin, resetDevice);
 
-module.exports = router;
+// ── Student: /api/student (self-service, own account only) ──────────────────
+const selfRouter = express.Router();
+selfRouter.patch('/device-token', requireStudent, updateOwnDeviceToken);
+
+module.exports = { router, selfRouter };
