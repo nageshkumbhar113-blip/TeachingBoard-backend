@@ -4,24 +4,31 @@
  *   1. Debounced "new Exercise questions" pushes (many publish calls → one push)
  *   2. Daily "haven't studied in N days" reminder
  *   3. Daily motivation quote
+ *   4. Abandoned-checkout "complete your payment" nudge
  *
- * No external cron service — this project has none configured — so it's a
- * plain setInterval as long as the Node process stays up, same tradeoff
- * every other in-process feature here already makes. Call start() once from
- * app.js after the DB connects.
+ * There IS an external cron already hitting this backend — see
+ * paymentController.processExpiryReminders / POST /api/payment/process-expiry-reminders,
+ * guarded by an x-cron-secret header — but that's a per-feature endpoint
+ * tied to whatever schedule was configured for it outside this repo. Rather
+ * than add more cron-secret endpoints and depend on someone wiring up new
+ * external schedules for each one, these four run on a plain setInterval as
+ * long as the Node process stays up. Call start() once from server.js after
+ * the DB connects.
  */
 
 const User = require('../models/User');
 const StudentProgress = require('../models/StudentProgress');
+const StudentSubscription = require('../models/StudentSubscription');
 const NotificationQueue = require('../models/NotificationQueue');
 const SchedulerState = require('../models/SchedulerState');
 const DefaultBannerQuote = require('../models/DefaultBannerQuote');
 const { notifyBatch } = require('../utils/studentNotify');
 const { sendToMany } = require('../utils/fcm');
 
-const QUEUE_POLL_MS   = 5 * 60 * 1000;   // check the debounce queue every 5 min
-const QUEUE_QUIET_MS  = 2 * 60 * 1000;   // ...but only send once a batch/chapter has been quiet 2 min
-const INACTIVITY_DAYS = 3;               // configurable per the confirmed 3-day reminder
+const QUEUE_POLL_MS       = 5 * 60 * 1000;   // check the debounce queue every 5 min
+const QUEUE_QUIET_MS      = 2 * 60 * 1000;   // ...but only send once a batch/chapter has been quiet 2 min
+const INACTIVITY_DAYS     = 3;               // confirmed 3-day "haven't studied" reminder
+const PAYMENT_REMINDER_MS = 60 * 60 * 1000;  // give a checkout 1 hour before calling it abandoned
 
 function _todayStr() {
   return new Date().toISOString().slice(0, 10); // 'YYYY-MM-DD', UTC — fine for a once-a-day gate
@@ -102,6 +109,45 @@ async function _sendDailyMotivation() {
   );
 }
 
+// ── 4. Abandoned-checkout "complete your payment" nudge ─────────────────────
+// Runs on the regular 5-min poll (not the once-a-day gate) since it has its
+// own one-time-ever dedupe via payment_reminder_sent, and giving up-to-an-hour
+// -old abandoned checkouts a prompt sooner rather than waiting for the next
+// calendar day is the whole point.
+async function _sendPendingPaymentReminders() {
+  const cutoff = new Date(Date.now() - PAYMENT_REMINDER_MS);
+  const pending = await StudentSubscription.find({
+    status: 'created',
+    payment_verified: false,
+    payment_reminder_sent: false,
+    created_at: { $lte: cutoff },
+  }).lean();
+  if (!pending.length) return;
+
+  const userIds = [...new Set(pending.map(p => p.student_user_id))];
+  const students = await User.find({
+    user_id: { $in: userIds },
+    device_token: { $exists: true, $nin: [null, ''] },
+  }).select('user_id device_token').lean();
+  const tokenByUserId = new Map(students.map(s => [s.user_id, s.device_token]));
+
+  for (const sub of pending) {
+    const token = tokenByUserId.get(sub.student_user_id);
+    if (token) {
+      await sendToMany(
+        [token],
+        '💳 तुमची नोंदणी अपूर्ण आहे',
+        `${sub.batch} साठी payment पूर्ण झालेलं नाही — आत्ताच पूर्ण करून access मिळवा`,
+        { type: 'pending_payment', batch: sub.batch, period: sub.period }
+      ).catch(err => console.warn('pending payment reminder send failed:', err.message));
+    }
+    // Mark sent even with no device token on file — a one-time nudge, not a
+    // retry queue; re-attempting forever for a student who never registered
+    // a token would just accumulate dead work every poll.
+    await StudentSubscription.updateOne({ _id: sub._id }, { $set: { payment_reminder_sent: true } }).catch(() => {});
+  }
+}
+
 async function _runDailyJobsIfNeeded() {
   const today = _todayStr();
   const KEY = 'daily_student_notifications';
@@ -130,6 +176,7 @@ function start() {
 
   setInterval(() => {
     _processExerciseQueue().catch(err => console.warn('exercise queue poll failed:', err.message));
+    _sendPendingPaymentReminders().catch(err => console.warn('pending payment poll failed:', err.message));
     _runDailyJobsIfNeeded().catch(err => console.warn('daily jobs check failed:', err.message));
   }, QUEUE_POLL_MS);
 

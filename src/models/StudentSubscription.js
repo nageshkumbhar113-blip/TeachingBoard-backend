@@ -35,6 +35,11 @@ const studentSubscriptionSchema = new mongoose.Schema(
     is_trial:    { type: Boolean, default: false },
     start_date:  { type: Date, default: null },
     expiry_date: { type: Date, default: null, index: true },
+
+    // A Razorpay order created but abandoned (checkout closed without
+    // paying) stays status:'created' forever — dedupe flag for the
+    // one-time "complete your payment" nudge (see notificationScheduler.js).
+    payment_reminder_sent: { type: Boolean, default: false },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
