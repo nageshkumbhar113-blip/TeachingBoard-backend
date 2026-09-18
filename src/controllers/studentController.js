@@ -288,6 +288,18 @@ exports.selfRegister = asyncHandler(async (req, res) => {
     assignedBatches = [batchDoc.name];
   }
 
+  // Optional teacher code: links the new student to that teacher's list so the
+  // teacher's dashboard (and later the Paper Builder quota) count them. Checked
+  // BEFORE the student is created so a typo never leaves a half-registered account.
+  const teacherCode = normalizeStudentCode(req.body.teacher_code);
+  let teacherDoc = null;
+  if (teacherCode) {
+    teacherDoc = await User.findOne({ role: 'teacher', teacher_code: teacherCode });
+    if (!teacherDoc) {
+      throw new AppError('हा Teacher code सापडला नाही. तो दुरुस्त करा किंवा रकाना रिकामा ठेवा.', 404);
+    }
+  }
+
   // Auto-generate unique student_code from name
   const prefix = name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) || 'STU';
   let student_code, attempts = 0;
@@ -314,6 +326,13 @@ exports.selfRegister = asyncHandler(async (req, res) => {
     pin_hash:       User.hashPin(pin),
   });
 
+  if (teacherDoc) {
+    await User.updateOne(
+      { _id: teacherDoc._id },
+      { $addToSet: { assigned_students: student.student_code } }
+    );
+  }
+
   res.status(201).json({
     success:      true,
     message:      'Registration complete. You can log in now.',
@@ -322,5 +341,7 @@ exports.selfRegister = asyncHandler(async (req, res) => {
     status:       student.status,
     access_level: 'free',
     assigned_batches: student.assigned_batches,
+    teacher_linked: !!teacherDoc,
+    teacher_name:   teacherDoc ? teacherDoc.name : '',
   });
 });
