@@ -14,6 +14,16 @@ const {
   canAccessChapterId,
   chapterLockedBody,
 } = require('../utils/contentAccess');
+const { getQuota, limitMessage } = require('../utils/paperQuota');
+
+// Teachers may save only a limited number of papers per batch until enough of
+// that batch's students have paid (utils/paperQuota.js). Admins are never limited.
+async function _teacherPaperLimitResponse(req, batchId) {
+  if (req.user?.role !== 'teacher') return null;
+  const quota = await getQuota(req.userDoc || {}, batchId);
+  if (quota.allowed) return null;
+  return { success: false, code: 'PAPER_LIMIT', message: limitMessage(quota), quota };
+}
 
 /**
  * ═══════════════════════════════════════════════════════════
@@ -437,6 +447,9 @@ exports.generatePaper = async (req, res) => {
       });
     }
 
+    const limited = await _teacherPaperLimitResponse(req, batchId);
+    if (limited) return res.status(403).json(limited);
+
     // Get all concepts in chapter with marks assigned
     const concepts = await ConceptMarks.find({
       chapterId,
@@ -580,6 +593,9 @@ exports.createPaperManual = async (req, res) => {
         message: 'Missing required fields: batchId, chapterId(s), subjectId(s), questions[]'
       });
     }
+
+    const limited = await _teacherPaperLimitResponse(req, batchId);
+    if (limited) return res.status(403).json(limited);
 
     const ids = questions.map(q => q.questionId);
     const found = await SLSQuestion.find({ _id: { $in: ids } }).lean();

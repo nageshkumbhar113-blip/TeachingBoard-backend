@@ -45,6 +45,17 @@ const userSchema = new mongoose.Schema(
     assigned_students:  { type: [String], default: [] }, // array of student_codes
     fee_upi_id:         { type: String, default: '', trim: true },
     fee_upi_name:       { type: String, default: '', trim: true },
+    // Paper Builder quota overrides (admin-set): batch name, or '*' for all batches.
+    paper_quota_overrides: {
+      type: [{
+        _id: false,
+        batch: { type: String, required: true, trim: true },
+        mode: { type: String, enum: ['unlimited', 'custom'], required: true },
+        free_papers: { type: Number, min: 0 },
+        unlock_paid_students: { type: Number, min: 1 },
+      }],
+      default: [],
+    },
 
     // Parent-specific
     parent_code:  { type: String, unique: true, sparse: true, trim: true, index: true },

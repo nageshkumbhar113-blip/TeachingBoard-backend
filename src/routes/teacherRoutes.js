@@ -20,11 +20,22 @@ const {
   getNotificationHistory,
 } = require('../controllers/notificationController');
 const { getTeacherVocabScores } = require('../controllers/wordController');
+const {
+  getMyPaperQuota,
+  getQuotaConfig,
+  setQuotaConfig,
+  listQuotas,
+  setOverride,
+} = require('../controllers/paperQuotaController');
 
 // ── Admin CRUD: mounted at /api/teachers ──────────────────────────────────────
 const adminRouter = express.Router();
 adminRouter.get('/',                     requireAdmin, getTeachers);
 adminRouter.get('/unassigned-students',  requireAdmin, getUnassignedStudents);
+adminRouter.get('/paper-quota',          requireAdmin, listQuotas);
+adminRouter.get('/paper-quota/config',   requireAdmin, getQuotaConfig);
+adminRouter.put('/paper-quota/config',   requireAdmin, setQuotaConfig);
+adminRouter.put('/:id/paper-quota-override', requireAdmin, setOverride);
 adminRouter.post('/',                    requireAdmin, createTeacher);
 adminRouter.patch('/:id',                requireAdmin, updateTeacher);
 adminRouter.delete('/:id',               requireAdmin, deleteTeacher);
@@ -32,6 +43,7 @@ adminRouter.delete('/:id',               requireAdmin, deleteTeacher);
 // ── Teacher dashboard: mounted at /api/teacher ───────────────────────────────
 const teacherRouter = express.Router();
 teacherRouter.get('/students',                    requireTeacher, getMyStudents);
+teacherRouter.get('/paper-quota',                requireTeacher, getMyPaperQuota);
 teacherRouter.get('/students/:code/attempts',     requireTeacher, getStudentAttempts);
 teacherRouter.patch('/device-token',              requireTeacher, updateDeviceToken);
 teacherRouter.get('/analytics/weekly',            requireTeacher, getWeeklyAnalytics);
