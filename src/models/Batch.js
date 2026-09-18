@@ -4,6 +4,9 @@ const chapterSchema = new mongoose.Schema(
   {
     name:  { type: String, required: true, trim: true },
     order: { type: Number, default: 0 },
+    // Admin override: chapter stays open to free-tier students even though
+    // it is not the subject's first chapter (first chapter is always free).
+    is_free: { type: Boolean, default: false },
   },
   { _id: false }
 );

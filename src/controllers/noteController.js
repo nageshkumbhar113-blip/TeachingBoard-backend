@@ -4,6 +4,7 @@ const Note         = require('../models/Note');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError     = require('../utils/AppError');
 const { notifyBatch } = require('../utils/studentNotify');
+const { canAccessChapter, chapterLockedBody } = require('../utils/contentAccess');
 
 function _iregex(s) {
   return { $regex: new RegExp('^' + String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') };
@@ -132,8 +133,14 @@ exports.listNotesStudent = asyncHandler(async (req, res) => {
 
   const notes = await Note.find(filter)
     .sort({ created_at: -1 })
-    .select('note_id title batch subject file_size_bytes view_count created_at')
+    .select('note_id title batch subject chapter file_size_bytes view_count created_at')
     .lean();
+
+  // Metadata stays listed, but locked notes are flagged so the app can show a
+  // lock; the PDF itself is refused in viewNoteStudent.
+  for (const n of notes) {
+    n.locked = !(await canAccessChapter(req.userDoc, n.batch, n.subject, n.chapter));
+  }
 
   res.json({ success: true, notes });
 });
@@ -151,6 +158,10 @@ exports.viewNoteStudent = asyncHandler(async (req, res) => {
   const noteBatchLower  = (note.batch || '').trim().toLowerCase();
   if (assignedBatches.length > 0 && !assignedBatches.some(b => b.toLowerCase() === noteBatchLower))
     throw new AppError('Access denied — this note is not for your batch', 403);
+
+  if (!(await canAccessChapter(req.userDoc, note.batch, note.subject, note.chapter))) {
+    return res.status(403).json(chapterLockedBody());
+  }
 
   // Increment view count (non-blocking, ignore errors)
   Note.updateOne({ note_id: req.params.id }, { $inc: { view_count: 1 } }).catch(() => {});

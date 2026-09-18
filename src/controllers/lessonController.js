@@ -1,6 +1,7 @@
 const { randomUUID } = require('crypto');
 const Lesson         = require('../models/Lesson');
 const asyncHandler   = require('../utils/asyncHandler');
+const { hasFullAccess } = require('../utils/contentAccess');
 
 function parseContent(content) {
   if (content === null || content === undefined) return {};
@@ -34,6 +35,15 @@ exports.getLessons = asyncHandler(async (req, res) => {
       code: req.authDenied.code,
       expiryDate: req.authDenied.expiryDate || '',
     });
+  }
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: 'Login required' });
+  }
+
+  // Lessons carry no chapter, so they cannot be gated per chapter — they are
+  // a paid-only feature for free-tier / expired students.
+  if (!hasFullAccess(req.userDoc)) {
+    return res.json({ success: true, count: 0, data: [] });
   }
 
   const filter = {};

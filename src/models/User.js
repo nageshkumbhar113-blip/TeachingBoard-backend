@@ -35,6 +35,10 @@ const userSchema = new mongoose.Schema(
     device_id:        { type: String, default: null },
     device_bound_at:  { type: Date, default: null },
     shared_device:    { type: Boolean, default: false },
+    // Free-tier student: self-registered and has not paid yet — may open only
+    // free chapters (utils/contentAccess.js). Cleared when a payment activates
+    // them. Existing students default to false, i.e. nothing changes for them.
+    free_tier:        { type: Boolean, default: false },
 
     // Teacher-specific
     teacher_code:       { type: String, unique: true, sparse: true, trim: true, index: true },

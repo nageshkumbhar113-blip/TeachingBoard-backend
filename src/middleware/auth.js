@@ -1,7 +1,6 @@
 const { decodeTokenFromHeader } = require('../utils/token');
 const User = require('../models/User');
 const YoutubeTeacherPartner = require('../models/YoutubeTeacherPartner');
-const { isExpiredDate, normalizeExpiryDate } = require('../utils/accountStatus');
 
 // 60-second in-memory cache — avoids DB hit on every API request.
 // Max 200 entries; stale entries evicted lazily on insert.
@@ -14,12 +13,15 @@ function _studentDenial(userDoc) {
     return { message: 'Student access is blocked', code: 'ACCOUNT_BLOCKED' };
   }
 
-  const expiryDate = normalizeExpiryDate(userDoc.expiry_date);
-  if (expiryDate && isExpiredDate(expiryDate)) {
-    return { message: 'Student access expired', code: 'ACCOUNT_EXPIRED', expiryDate };
-  }
-
+  // An expired student is no longer locked out: they fall back to the free
+  // tier (free chapters only), enforced per-item by utils/contentAccess.js.
   return null;
+}
+
+// Drop a cached user doc right after a payment / admin change so the new
+// access level applies immediately instead of after the 60s cache TTL.
+function invalidateUserCache(role, id) {
+  _userCache.delete(`${role}:${id}`);
 }
 
 async function _attachResolvedUser(req) {
@@ -131,6 +133,7 @@ async function requireYoutubeTeacher(req, res, next) {
 }
 
 module.exports = {
+  invalidateUserCache,
   attachUserIfPresent,
   requireAuth,
   requireAdmin,

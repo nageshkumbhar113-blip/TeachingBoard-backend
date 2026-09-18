@@ -1,7 +1,8 @@
 const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const { createToken } = require('../utils/token');
-const { isExpiredDate, normalizeExpiryDate } = require('../utils/accountStatus');
+const { normalizeExpiryDate } = require('../utils/accountStatus');
+const { hasFullAccess } = require('../utils/contentAccess');
 
 function normalizeBatches(value) {
   if (!Array.isArray(value)) return [];
@@ -19,6 +20,9 @@ function serializeStudent(student) {
     assigned_batches: normalizeBatches(student.assigned_batches),
     expiry_date: normalizeExpiryDate(student.expiry_date),
     shared_device: !!student.shared_device,
+    // 'full' = every chapter; 'free' = free chapters only (self-registered
+    // and unpaid, or paid period expired). Drives the lock UI in the app.
+    access_level: hasFullAccess(student) ? 'full' : 'free',
   };
 }
 
@@ -193,15 +197,8 @@ exports.login = asyncHandler(async (req, res) => {
     return res.status(403).json({ success: false, message: 'Student access is blocked', code: 'ACCOUNT_BLOCKED' });
   }
 
-  const expiryDate = normalizeExpiryDate(student.expiry_date);
-  if (expiryDate && isExpiredDate(expiryDate)) {
-    return res.status(403).json({
-      success: false,
-      message: 'Student access expired',
-      code: 'ACCOUNT_EXPIRED',
-      expiryDate,
-    });
-  }
+  // Expired students may still log in — they get free chapters only
+  // (access_level: 'free'), with a Renew prompt in the app.
 
   student.last_login_at = new Date();
   if (bindDevice) {
@@ -258,16 +255,6 @@ exports.me = asyncHandler(async (req, res) => {
       return res.status(403).json({ success: false, message: 'Student access is blocked', code: 'ACCOUNT_BLOCKED' });
     }
 
-    const expiryDate = normalizeExpiryDate(userDoc.expiry_date);
-    if (expiryDate && isExpiredDate(expiryDate)) {
-      return res.status(403).json({
-        success: false,
-        message: 'Student access expired',
-        code: 'ACCOUNT_EXPIRED',
-        expiryDate,
-      });
-    }
-
     return res.json({
       success: true,
       user: {
@@ -280,6 +267,7 @@ exports.me = asyncHandler(async (req, res) => {
         assigned_batches: Array.isArray(userDoc.assigned_batches) ? userDoc.assigned_batches : [],
         expiry_date: normalizeExpiryDate(userDoc.expiry_date),
         shared_device: !!userDoc.shared_device,
+        access_level: hasFullAccess(userDoc) ? 'full' : 'free',
       },
     });
   }

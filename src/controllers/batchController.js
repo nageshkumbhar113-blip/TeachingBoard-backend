@@ -20,6 +20,7 @@ const Concept      = require('../models/Concept');
 // Same composite chapterId scheme as SLS concepts/exercises — reused here
 // (not reimplemented) so a subject/chapter rename can correctly remap it.
 const { makeChapterId } = require('./youtubeTeacherController');
+const { isChapterFree, listFreeChapters, invalidateContentAccessCache } = require('../utils/contentAccess');
 
 /**
  * Shared merge logic behind GET /api/batches and the student-scoped
@@ -649,7 +650,58 @@ exports.reorderChapters = asyncHandler(async (req, res) => {
     if (ch) ch.order = idx;
   });
   await batch.save();
+  invalidateContentAccessCache();
   res.json({ success: true });
+});
+
+/**
+ * PUT /api/batches/:name/subjects/:subject/chapters/:chapter/free
+ * Mark a chapter open (free) or locked (paid) for free-tier students.
+ * The first chapter of every subject is always free; this flags extra ones.
+ * Body: { is_free: boolean }
+ */
+exports.setChapterFree = asyncHandler(async (req, res) => {
+  const name    = decodeURIComponent(req.params.name    || '').trim();
+  const subject = decodeURIComponent(req.params.subject || '').trim();
+  const chapter = decodeURIComponent(req.params.chapter || '').trim();
+  if (!name || !subject || !chapter) throw new AppError('batch, subject and chapter are required', 400);
+  const isFree = !!req.body.is_free;
+
+  const batch = await Batch.findOne({ name });
+  if (!batch) throw new AppError('Batch not found', 404);
+  let subjectDoc = batch.subjects.find(s => s.name === subject);
+  if (!subjectDoc) {
+    batch.subjects.push({ name: subject, chapters: [] });
+    subjectDoc = batch.subjects[batch.subjects.length - 1];
+  }
+  let ch = subjectDoc.chapters.find(c => c.name === chapter);
+  if (!ch) {
+    // Chapter known only from question data — add it to the catalog so the flag can live somewhere.
+    const maxOrder = subjectDoc.chapters.reduce((m, c) => Math.max(m, c.order || 0), -1);
+    subjectDoc.chapters.push({ name: chapter, order: maxOrder + 1, is_free: isFree });
+  } else {
+    ch.is_free = isFree;
+  }
+  await batch.save();
+  invalidateContentAccessCache();
+  res.json({ success: true, is_free: isFree });
+});
+
+/**
+ * GET /api/batches/student/free-chapters
+ * The free chapters of the student's own batches, so the app can show a lock
+ * on everything else. Also reports the student's access level.
+ */
+exports.getStudentFreeChapters = asyncHandler(async (req, res) => {
+  const assigned = new Set(
+    (Array.isArray(req.userDoc?.assigned_batches) ? req.userDoc.assigned_batches : [])
+      .map(b => String(b || '').trim().toLowerCase())
+  );
+  const all = await listFreeChapters();
+  const free = all
+    .filter(f => assigned.has(String(f.batch).trim().toLowerCase()))
+    .map(({ batch, subject, chapter }) => ({ batch, subject, chapter }));
+  res.json({ success: true, data: free });
 });
 
 /**
@@ -666,8 +718,12 @@ exports.getSubjectChapters = asyncHandler(async (req, res) => {
   const batch = await Batch.findOne({ name, 'subjects.name': subject }).lean();
   const subjectDoc = batch?.subjects.find(s => s.name === subject);
   const chapters = (subjectDoc?.chapters || [])
-    .map(c => ({ name: c.name, order: c.order || 0 }))
+    .map(c => ({ name: c.name, order: c.order || 0, is_free: c.is_free === true }))
     .sort((a, b) => a.order - b.order);
+
+  // `free` = what a free-tier student can actually open (first chapter,
+  // flagged chapters, or a free batch) — computed by the shared access rules.
+  for (const c of chapters) c.free = await isChapterFree(name, subject, c.name);
 
   res.json({ success: true, data: chapters });
 });

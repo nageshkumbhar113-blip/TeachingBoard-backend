@@ -3,6 +3,9 @@ const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const { normalizeExpiryDate } = require('../utils/accountStatus');
+const Batch = require('../models/Batch');
+const { hasFullAccess } = require('../utils/contentAccess');
+const { invalidateUserCache } = require('../middleware/auth');
 
 function normalizeBatches(value) {
   if (!Array.isArray(value)) return [];
@@ -66,6 +69,8 @@ function serializeStudent(student) {
     device_bound: !!student.device_id,
     device_bound_at: student.device_bound_at || null,
     shared_device: !!student.shared_device,
+    free_tier: !!student.free_tier,
+    access_level: hasFullAccess(student) ? 'full' : 'free',
   };
 }
 
@@ -156,6 +161,12 @@ exports.updateStudent = asyncHandler(async (req, res) => {
 
   if (req.body.expiry_date !== undefined) {
     student.expiry_date = normalizeDate(req.body.expiry_date);
+    // Admin explicitly granting a validity period = full access.
+    if (student.expiry_date) student.free_tier = false;
+  }
+
+  if (req.body.free_tier !== undefined) {
+    student.free_tier = !!req.body.free_tier;
   }
 
   if (req.body.pin !== undefined) {
@@ -174,6 +185,7 @@ exports.updateStudent = asyncHandler(async (req, res) => {
   }
 
   await student.save();
+  invalidateUserCache('student', student.user_id);
 
   // Propagate expiry to teacher and parent when expiry_date is updated
   if (req.body.expiry_date !== undefined) {
@@ -266,6 +278,16 @@ exports.selfRegister = asyncHandler(async (req, res) => {
   if (!mobile)                        throw new AppError('Mobile number is required', 400);
   if (!isValidMobile(mobile))         throw new AppError('Invalid mobile number', 400);
 
+  // Optional batch the student wants to study — lets them open that batch's
+  // free chapters right away. Older app versions don't send one.
+  const requestedBatch = String(req.body.batch || '').trim();
+  let assignedBatches = [];
+  if (requestedBatch) {
+    const batchDoc = await Batch.findOne({ name: requestedBatch }).lean();
+    if (!batchDoc || batchDoc.is_active === false) throw new AppError('Batch not found', 404);
+    assignedBatches = [batchDoc.name];
+  }
+
   // Auto-generate unique student_code from name
   const prefix = name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) || 'STU';
   let student_code, attempts = 0;
@@ -281,15 +303,24 @@ exports.selfRegister = asyncHandler(async (req, res) => {
     student_code,
     mobile,
     school_name,
-    status:         'pending',
+    // Active immediately on the free tier: only free chapters open until a
+    // payment activates the full course (see paymentController).
+    status:         'active',
+    free_tier:      true,
+    assigned_batches: assignedBatches,
+    approved_at:    new Date(),
+    approved_by:    'auto',
     request_source: 'self',
     pin_hash:       User.hashPin(pin),
   });
 
   res.status(201).json({
     success:      true,
-    message:      'Registration request submitted. Wait for admin approval.',
+    message:      'Registration complete. You can log in now.',
     student_code: student.student_code,
     name:         student.name,
+    status:       student.status,
+    access_level: 'free',
+    assigned_batches: student.assigned_batches,
   });
 });

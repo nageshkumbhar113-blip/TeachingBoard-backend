@@ -14,6 +14,8 @@ const {
   renameChapter,
   deleteChapter,
   reorderChapters,
+  setChapterFree,
+  getStudentFreeChapters,
   getSubjectChapters,
   updateBatchPricing,
   getBatchPricing,
@@ -28,6 +30,7 @@ router.get('/',                                                        requireTe
 // Student-safe equivalent of the above — own assigned batches only, no
 // pricing. See getStudentBatchHierarchy's own doc-comment for the bug this fixes.
 router.get('/student/hierarchy',                                       requireStudent, getStudentBatchHierarchy);
+router.get('/student/free-chapters',                                    requireStudent, getStudentFreeChapters);
 router.get('/orphaned-chapter-ids',                                    requireAdmin, listOrphanedChapterIds);
 router.get('/pricing/all',                                             getAllBatchesPricing);
 router.post('/',                                                       requireAdmin, createBatch);
@@ -48,6 +51,7 @@ router.post('/:name/subjects/:subject/chapters',                       requireAd
 // match renameChapter with :chapter="reorder" (Express matches routes in
 // registration order, not literal-before-param).
 router.put('/:name/subjects/:subject/chapters/reorder',                requireAdmin, reorderChapters);
+router.put('/:name/subjects/:subject/chapters/:chapter/free',          requireAdmin, setChapterFree);
 router.put('/:name/subjects/:subject/chapters/:chapter',               requireAdmin, renameChapter);
 router.delete('/:name/subjects/:subject/chapters/:chapter',            requireAdmin, deleteChapter);
 

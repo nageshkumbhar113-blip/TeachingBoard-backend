@@ -7,6 +7,12 @@ const StudentProgress = require('../models/StudentProgress');
 // not reimplementing SLSQuestion access, just reusing the model here too).
 const SLSQuestion = require('../models/SLSQuestion');
 const asyncHandler = require('../utils/asyncHandler');
+const {
+  hasFullAccess,
+  isChapterIdFree,
+  canAccessChapterId,
+  chapterLockedBody,
+} = require('../utils/contentAccess');
 
 // A concept's chapterId is built by the admin app as
 // `${batch}::${subject}::${chapter}` (normalized lowercase/hyphenated) —
@@ -175,6 +181,9 @@ exports.getConcept = asyncHandler(async (req, res) => {
   if (allowedBatches && !allowedBatches.has(_chapterIdBatch(concept.chapterId))) {
     return res.status(403).json({ success: false, message: 'Not available for your batch' });
   }
+  if (!(await canAccessChapterId(req.userDoc, concept.chapterId))) {
+    return res.status(403).json(chapterLockedBody());
+  }
 
   res.json({
     success: true,
@@ -193,6 +202,9 @@ exports.getChapterConcepts = asyncHandler(async (req, res) => {
   const allowedBatches = _studentAllowedBatchSet(req);
   if (allowedBatches && !allowedBatches.has(_chapterIdBatch(chapterId))) {
     return res.status(403).json({ success: false, message: 'Not available for your batch' });
+  }
+  if (!(await canAccessChapterId(req.userDoc, chapterId))) {
+    return res.status(403).json(chapterLockedBody());
   }
 
   const query = { chapterId };
@@ -247,10 +259,21 @@ exports.getStudentFullSync = asyncHandler(async (req, res) => {
     questionQuery.chapterId = chapterIdFilter;
   }
 
-  const [concepts, exerciseQuestions] = await Promise.all([
+  let [concepts, exerciseQuestions] = await Promise.all([
     Concept.find(conceptQuery).sort({ chapterId: 1, order: 1 }).lean(),
     SLSQuestion.find(questionQuery).sort({ chapterId: 1, exerciseNo: 1, created_at: 1 }).lean(),
   ]);
+
+  // Free-tier / expired students only get FREE chapters in the offline bundle,
+  // so locked content never reaches the device.
+  if (!hasFullAccess(req.userDoc)) {
+    const freeIds = new Set();
+    for (const id of new Set([...concepts, ...exerciseQuestions].map(x => x.chapterId))) {
+      if (await isChapterIdFree(id)) freeIds.add(id);
+    }
+    concepts = concepts.filter(c => freeIds.has(c.chapterId));
+    exerciseQuestions = exerciseQuestions.filter(q => freeIds.has(q.chapterId));
+  }
 
   res.json({
     success: true,
@@ -293,7 +316,13 @@ exports.getPublishedChapters = asyncHandler(async (req, res) => {
     ? chapters.filter(ch => allowedBatches.has(_chapterIdBatch(ch.chapterId)))
     : chapters;
 
-  res.json({ success: true, data: visible });
+  // Keep locked chapters listed (so the app can show a lock) but flag them.
+  const data = [];
+  for (const ch of visible) {
+    data.push({ ...ch, locked: !(await canAccessChapterId(req.userDoc, ch.chapterId)) });
+  }
+
+  res.json({ success: true, data });
 });
 
 // ════════════════════════════════════
@@ -514,9 +543,16 @@ exports.searchConcepts = asyncHandler(async (req, res) => {
     .select('title difficulty examTags chapterId')
     .lean();
 
-  const filtered = allowedBatches
+  let filtered = allowedBatches
     ? results.filter(c => allowedBatches.has(_chapterIdBatch(c.chapterId))).slice(0, requestedLimit)
     : results;
+
+  // Locked chapters must not surface in search for free-tier / expired students.
+  if (!hasFullAccess(req.userDoc)) {
+    const kept = [];
+    for (const c of filtered) if (await isChapterIdFree(c.chapterId)) kept.push(c);
+    filtered = kept;
+  }
 
   res.json({
     success: true,

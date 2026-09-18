@@ -5,6 +5,7 @@ const User = require("../models/User");
 const asyncHandler = require("../utils/asyncHandler");
 const AppError = require("../utils/AppError");
 const { sendToUser } = require("../utils/fcm");
+const { isQuizLocked, chapterLockedBody } = require("../utils/contentAccess");
 
 function normalizeAnswerValue(value) {
   return String(value || "").trim();
@@ -67,6 +68,9 @@ exports.createAttempt = asyncHandler(async (req, res) => {
       : [];
     if (!allowedBatches.includes(quiz.batch || '')) {
       throw new AppError("Quiz not found", 404);
+    }
+    if (await isQuizLocked(req.userDoc, quiz)) {
+      return res.status(403).json(chapterLockedBody());
     }
   }
 

@@ -5,6 +5,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const razorpay = require('../utils/razorpay');
 const { sendToUser } = require('../utils/fcm');
+const { invalidateUserCache } = require('../middleware/auth');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -42,6 +43,8 @@ async function resolvePaidBatch(batchName, period) {
 // Extend access: active status, ensure batch assigned, push expiry forward.
 async function activateStudentForBatch(student, batchName, newExpiry) {
   student.status = 'active';
+  // A payment upgrades a free-tier (self-registered) student to full access.
+  student.free_tier = false;
   if (!Array.isArray(student.assigned_batches)) student.assigned_batches = [];
   if (!student.assigned_batches.includes(batchName)) {
     student.assigned_batches.push(batchName);
@@ -55,6 +58,7 @@ async function activateStudentForBatch(student, batchName, newExpiry) {
     student.approved_by = 'payment';
   }
   await student.save();
+  invalidateUserCache('student', student.user_id);
 }
 
 // ── Public config (frontend needs the key id to open Checkout) ────────────────
@@ -116,51 +120,13 @@ exports.createOrder = asyncHandler(async (req, res) => {
   });
 });
 
-// ── Start a free trial (1 day) for a batch ────────────────────────────────────
-// Body: { student_code, pin, batch }
+// ── Free trial: discontinued ──────────────────────────────────────────────────
+// Replaced by the free-chapter model (first chapter of every subject is free
+// for every account, see utils/contentAccess.js). Kept as a stub so old app
+// versions that still call it get a clear message instead of a 404.
 
-exports.startTrial = asyncHandler(async (req, res) => {
-  const student = await authStudentByPin(req.body.student_code, req.body.pin);
-  const batch = await Batch.findOne({ name: String(req.body.batch || '').trim() });
-  if (!batch) throw new AppError('Batch not found', 404);
-  if (batch.is_active === false) throw new AppError('Batch is not available', 403);
-
-  const trialDays = batch.trial_days != null ? batch.trial_days : 1;
-  if (trialDays <= 0) throw new AppError('No free trial available for this batch', 400);
-
-  // One trial per student per batch
-  const existingTrial = await StudentSubscription.findOne({
-    student_user_id: student.user_id,
-    batch: batch.name,
-    is_trial: true,
-  });
-  if (existingTrial) throw new AppError('Free trial already used for this batch', 409);
-
-  const start = new Date();
-  const expiry = StudentSubscription.computeExpiry('trial', start, trialDays);
-
-  await StudentSubscription.create({
-    student_user_id: student.user_id,
-    student_code: student.student_code,
-    batch: batch.name,
-    period: 'trial',
-    amount: 0,
-    razorpay_order_id: '',
-    payment_verified: true,
-    status: 'active',
-    is_trial: true,
-    start_date: start,
-    expiry_date: expiry,
-  });
-
-  await activateStudentForBatch(student, batch.name, expiry);
-
-  res.status(201).json({
-    success: true,
-    message: `Free trial started (${trialDays} day${trialDays > 1 ? 's' : ''})`,
-    batch: batch.name,
-    expiry_date: expiry,
-  });
+exports.startTrial = asyncHandler(async (_req, _res) => {
+  throw new AppError('Free trial has been replaced by free chapters. Register and open the free chapter, or subscribe to unlock everything.', 410);
 });
 
 // ── Verify payment synchronously from the Checkout success handler ───────────

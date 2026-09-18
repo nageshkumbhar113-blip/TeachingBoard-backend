@@ -2,6 +2,7 @@ const { randomUUID } = require('crypto');
 const Question       = require('../models/Question');
 const asyncHandler   = require('../utils/asyncHandler');
 const AppError       = require('../utils/AppError');
+const { hasFullAccess, isChapterFree } = require('../utils/contentAccess');
 
 const VALID_TYPES       = new Set(['mcq', 'tf', 'fib', 'mtp']);
 const VALID_DIFFICULTIES = new Set(['easy', 'medium', 'hard']);
@@ -86,6 +87,9 @@ exports.getQuestions = asyncHandler(async (req, res) => {
       expiryDate: req.authDenied.expiryDate || '',
     });
   }
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: 'Login required' });
+  }
 
   const filter = {};
   if (req.query.batch)   filter.batch   = String(req.query.batch).trim();
@@ -108,7 +112,15 @@ exports.getQuestions = asyncHandler(async (req, res) => {
 
   const limit = Math.min(Math.max(parseInt(req.query.limit) || 1000, 1), 2000);
   const skip  = Math.max(parseInt(req.query.skip)  || 0, 0);
-  const rows = await Question.find(filter).sort({ created_at: -1 }).skip(skip).limit(limit).lean();
+  let rows = await Question.find(filter).sort({ created_at: -1 }).skip(skip).limit(limit).lean();
+
+  // Free-tier / expired students only get questions of FREE chapters.
+  if (!hasFullAccess(req.userDoc)) {
+    const kept = [];
+    for (const r of rows) if (await isChapterFree(r.batch, r.subject, r.chapter)) kept.push(r);
+    rows = kept;
+  }
+
   res.json({ success: true, count: rows.length, skip, limit, data: rows });
 });
 

@@ -3,6 +3,7 @@ const asyncHandler = require("../utils/asyncHandler");
 const AppError = require("../utils/AppError");
 const { QUIZ_STATUSES, buildQuizDocument, serializeQuiz } = require("../utils/quizPayload");
 const { notifyBatch } = require("../utils/studentNotify");
+const { isQuizLocked, chapterLockedBody } = require("../utils/contentAccess");
 
 const MAX_SECTION_COUNT = 200;
 const MAX_SECTIONS_PER_REQUEST = 20;
@@ -40,6 +41,33 @@ function getAllowedBatches(req) {
   return Array.isArray(req.userDoc?.assigned_batches)
     ? req.userDoc.assigned_batches.map(item => String(item || '').trim()).filter(Boolean)
     : [];
+}
+
+// Metadata only — no questions/answers — so a locked quiz can still be listed
+// with a lock icon without leaking its content.
+function serializeLockedQuiz(quiz) {
+  const full = serializeQuiz(quiz, { includeAnswers: false });
+  return {
+    quiz_id: full.quiz_id,
+    title: full.title,
+    subject: full.subject,
+    chapter: full.chapter,
+    batch: full.batch,
+    status: full.status,
+    updated_at: full.updated_at,
+    version: full.version,
+    question_count: (full.questions || []).length,
+    questions: [],
+    locked: true
+  };
+}
+
+function requireLogin(req, res) {
+  if (!req.user) {
+    res.status(401).json({ success: false, message: "Login required" });
+    return false;
+  }
+  return true;
 }
 
 function parseStatusFilter(rawStatus, isAdmin) {
@@ -104,6 +132,7 @@ exports.getQuizzes = asyncHandler(async (req, res) => {
       expiryDate: req.authDenied.expiryDate || '',
     });
   }
+  if (!requireLogin(req, res)) return;
 
   const isAdmin = isAdminRequest(req);
   const statusFilter = parseStatusFilter(req.query.status, isAdmin);
@@ -125,15 +154,22 @@ exports.getQuizzes = asyncHandler(async (req, res) => {
 
   const quizzes = await Quiz.find(filter).sort({ updated_at: -1 });
 
+  const data = [];
+  for (const quiz of quizzes) {
+    data.push(
+      (await isQuizLocked(req.userDoc, quiz))
+        ? serializeLockedQuiz(quiz)
+        : serializeQuiz(quiz, {
+            // Student clients cache full quizzes for offline play and local scoring.
+            includeAnswers: true
+          })
+    );
+  }
+
   res.json({
     success: true,
-    count: quizzes.length,
-    data: quizzes.map(quiz =>
-      serializeQuiz(quiz, {
-        // Student clients cache full quizzes for offline play and local scoring.
-        includeAnswers: true
-      })
-    )
+    count: data.length,
+    data
   });
 });
 
@@ -146,6 +182,7 @@ exports.getQuizById = asyncHandler(async (req, res) => {
       expiryDate: req.authDenied.expiryDate || '',
     });
   }
+  if (!requireLogin(req, res)) return;
 
   const isAdmin = isAdminRequest(req);
   const quiz = await Quiz.findOne({ quiz_id: req.params.id });
@@ -161,6 +198,10 @@ exports.getQuizById = asyncHandler(async (req, res) => {
   const allowedBatches = getAllowedBatches(req);
   if (allowedBatches && (!quiz.batch || !allowedBatches.includes(quiz.batch))) {
     throw new AppError("Quiz not found", 404);
+  }
+
+  if (await isQuizLocked(req.userDoc, quiz)) {
+    return res.status(403).json(chapterLockedBody());
   }
 
   res.json({

@@ -8,6 +8,12 @@ const Batch = require('../models/Batch');
 // doc-comment in youtubeTeacherController.js.
 const { makeChapterId } = require('./youtubeTeacherController');
 const NotificationQueue = require('../models/NotificationQueue');
+const {
+  hasFullAccess,
+  isChapterIdFree,
+  canAccessChapterId,
+  chapterLockedBody,
+} = require('../utils/contentAccess');
 
 /**
  * ═══════════════════════════════════════════════════════════
@@ -186,6 +192,9 @@ exports.getStudentExerciseQuestions = async (req, res) => {
     if (assigned.length && !allowed) {
       return res.status(403).json({ success: false, message: 'Not available for your batch' });
     }
+    if (!(await canAccessChapterId(req.userDoc, chapterId))) {
+      return res.status(403).json(chapterLockedBody());
+    }
 
     const filter = { chapterId, status: 'published' };
     if (exerciseNo) filter.exerciseNo = exerciseNo;
@@ -230,8 +239,15 @@ exports.searchExerciseQuestions = async (req, res) => {
       .select('questionText marks exerciseNo chapterId subjectId batchId')
       .lean();
 
-    const filtered = (allowedSet ? results.filter(r => allowedSet.has(String(r.batchId).trim())) : results)
+    let filtered = (allowedSet ? results.filter(r => allowedSet.has(String(r.batchId).trim())) : results)
       .slice(0, requestedLimit);
+
+    // Locked chapters must not leak question text through search.
+    if (!hasFullAccess(req.userDoc)) {
+      const kept = [];
+      for (const r of filtered) if (await isChapterIdFree(r.chapterId)) kept.push(r);
+      filtered = kept;
+    }
 
     // chapterId is a normalized (lowercase-hyphenated) composite — it can't
     // be reversed directly into the chapter's real display name, so look it
@@ -658,6 +674,19 @@ exports.createPaperManual = async (req, res) => {
   }
 };
 
+// A paper is open to a free-tier / expired student only if it has at least
+// one chapter and EVERY chapter it draws from is free (mixed papers that touch
+// any locked chapter stay locked). Full-access users and non-students always pass.
+async function _canAccessPaper(userDoc, paper) {
+  if (hasFullAccess(userDoc)) return true;
+  const ids = [...new Set([paper.chapterId, ...(paper.chapterIds || [])].filter(Boolean))];
+  if (!ids.length) return false;
+  for (const id of ids) {
+    if (!(await isChapterIdFree(id))) return false;
+  }
+  return true;
+}
+
 // Get Papers
 exports.getPapers = async (req, res) => {
   try {
@@ -689,9 +718,19 @@ exports.getPapers = async (req, res) => {
 
     const total = await PracticePaper.countDocuments(filter);
 
+    // Students see every paper in their batch, with locked ones flagged so
+    // the app can show a lock (content itself is refused below).
+    let data = papers;
+    if (req.user?.role === 'student') {
+      data = [];
+      for (const p of papers) {
+        data.push({ ...p.toObject(), locked: !(await _canAccessPaper(req.userDoc, p)) });
+      }
+    }
+
     res.status(200).json({
       success: true,
-      data: papers,
+      data,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -725,6 +764,9 @@ exports.getPaperWithQuestions = async (req, res) => {
       const assigned = Array.isArray(req.userDoc?.assigned_batches) ? req.userDoc.assigned_batches : [];
       if (!assigned.includes(paper.batchId)) {
         return res.status(403).json({ success: false, message: 'Not available for your batch' });
+      }
+      if (!(await _canAccessPaper(req.userDoc, paper))) {
+        return res.status(403).json(chapterLockedBody());
       }
     }
 
@@ -831,6 +873,9 @@ exports.submitAnswers = async (req, res) => {
     const assignedBatches = Array.isArray(req.userDoc?.assigned_batches) ? req.userDoc.assigned_batches : [];
     if (!assignedBatches.includes(paper.batchId)) {
       return res.status(403).json({ success: false, message: 'Not available for your batch' });
+    }
+    if (!(await _canAccessPaper(req.userDoc, paper))) {
+      return res.status(403).json(chapterLockedBody());
     }
 
     // getStudentAttempts lists every past attempt (repeat practice is
