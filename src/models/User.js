@@ -45,6 +45,13 @@ const userSchema = new mongoose.Schema(
     assigned_students:  { type: [String], default: [] }, // array of student_codes
     fee_upi_id:         { type: String, default: '', trim: true },
     fee_upi_name:       { type: String, default: '', trim: true },
+    // Admin-set last valid day for a teacher account (null = no limit). Kept separate from
+    // expiry_date, which is derived from the teacher's students and is informational only.
+    validity_until:     { type: Date, default: null },
+    // Set when a teacher registers themselves (status starts 'pending' until an admin approves).
+    institute_name:     { type: String, default: '', trim: true },
+    terms_accepted_at:  { type: Date, default: null },
+    terms_version:      { type: String, default: '' },
     // Paper Builder quota overrides (admin-set): batch name, or '*' for all batches.
     paper_quota_overrides: {
       type: [{

@@ -3,6 +3,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const { createToken } = require('../utils/token');
 const { normalizeExpiryDate } = require('../utils/accountStatus');
 const { hasFullAccess } = require('../utils/contentAccess');
+const { isExpiredDate: _isExpiredDate } = require('../utils/accountStatus');
 
 function normalizeBatches(value) {
   if (!Array.isArray(value)) return [];
@@ -33,6 +34,7 @@ function serializeTeacher(teacher) {
     role: teacher.role,
     teacher_code: teacher.teacher_code || '',
     mobile: teacher.mobile || '',
+    institute_name: teacher.institute_name || '',
     assigned_students: Array.isArray(teacher.assigned_students) ? teacher.assigned_students : [],
   };
 }
@@ -90,6 +92,16 @@ exports.login = asyncHandler(async (req, res) => {
     const teacher = await User.findOne({ teacher_code: teacherCode, role: 'teacher' });
     if (!teacher || !teacher.verifyPin(pin)) {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
+
+    if (teacher.status === 'pending') {
+      return res.status(403).json({ success: false, message: 'Your registration is waiting for admin approval. We will contact you soon.', code: 'ACCOUNT_PENDING' });
+    }
+    if (teacher.status === 'blocked') {
+      return res.status(403).json({ success: false, message: 'This teacher account is blocked. Please contact the admin.', code: 'ACCOUNT_BLOCKED' });
+    }
+    if (teacher.validity_until && _isExpiredDate(teacher.validity_until)) {
+      return res.status(403).json({ success: false, message: 'Your validity period has ended. Please contact the admin to renew.', code: 'TEACHER_VALIDITY_ENDED' });
     }
 
     teacher.last_login_at = new Date();

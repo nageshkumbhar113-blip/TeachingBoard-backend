@@ -4,6 +4,22 @@ const Attempt = require('../models/Attempt');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const { isValidMobile } = require('../utils/mobile');
+const { isWeakPin } = require('../utils/pin');
+const { normalizeExpiryDate } = require('../utils/accountStatus');
+
+// '' / null -> null (no limit); otherwise a YYYY-MM-DD date.
+function parseValidity(value) {
+  const clean = String(value == null ? '' : value).trim();
+  if (!clean) return null;
+  const d = new Date(clean);
+  if (Number.isNaN(d.getTime())) throw new AppError('Invalid validity date', 400);
+  return new Date(d.toISOString().slice(0, 10));
+}
+const { invalidateUserCache } = require('../middleware/auth');
+
+// Version of the terms a self-registering teacher agrees to: the free plan allows
+// 4 papers per batch, and unlimited Paper Builder needs 10 paid students in that batch.
+const TEACHER_TERMS_VERSION = 'teacher-terms-v1';
 
 function normalizeCode(value) {
   return String(value || '').trim().toUpperCase();
@@ -22,12 +38,72 @@ function serializeTeacher(t) {
     teacher_code: t.teacher_code || '',
     mobile: t.mobile || '',
     assigned_students: Array.isArray(t.assigned_students) ? t.assigned_students : [],
+    status: t.status || 'active',
+    validity_until: normalizeExpiryDate(t.validity_until),
+    institute_name: t.institute_name || '',
+    request_source: t.request_source || 'admin',
+    terms_accepted_at: t.terms_accepted_at || null,
+    approved_at: t.approved_at || null,
     last_login_at: t.last_login_at || null,
     created_at: t.created_at || null,
   };
 }
 
 // ── Admin: CRUD ──────────────────────────────────────────────────────────────
+
+// POST /api/teachers/register - public self-registration. The account starts
+// 'pending': the teacher gets a code straight away but cannot log in until an
+// admin approves (and contacts them).
+exports.registerTeacher = asyncHandler(async (req, res) => {
+  const name = String(req.body.name || '').trim();
+  const mobile = String(req.body.mobile || '').trim();
+  const institute = String(req.body.institute_name || '').trim();
+  const pin = String(req.body.pin || '').trim();
+
+  if (!name) throw new AppError('Name is required', 400);
+  if (!isValidMobile(mobile)) throw new AppError('A valid 10-digit mobile number is required', 400);
+  if (!institute) throw new AppError('Institute / coaching name is required', 400);
+  if (!/^\d{4}$/.test(pin)) throw new AppError('PIN must be 4 digits', 400);
+  if (isWeakPin(pin)) throw new AppError('PIN is too easy to guess (avoid 0000, 1234, repeating patterns)', 400);
+  if (req.body.agree !== true) throw new AppError('You must agree to the terms to register', 400);
+
+  const dup = await User.findOne({ role: 'teacher', mobile });
+  if (dup) throw new AppError('A teacher is already registered with this mobile number', 409);
+
+  const prefix = name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) || 'TCH';
+  let teacherCode;
+  let attempts = 0;
+  do {
+    teacherCode = prefix + String(Math.floor(100 + Math.random() * 900));
+    attempts++;
+  } while (attempts < 10 && await User.findOne({ teacher_code: teacherCode }));
+  if (await User.findOne({ teacher_code: teacherCode })) {
+    throw new AppError('Could not generate a teacher code, please try again', 500);
+  }
+
+  await User.create({
+    user_id: `teacher-${randomUUID()}`,
+    name,
+    role: 'teacher',
+    teacher_code: teacherCode,
+    mobile,
+    institute_name: institute,
+    status: 'pending',
+    request_source: 'self',
+    terms_accepted_at: new Date(),
+    terms_version: TEACHER_TERMS_VERSION,
+    assigned_students: [],
+    pin_hash: User.hashPin(pin),
+  });
+
+  res.status(201).json({
+    success: true,
+    message: 'Registration received. An admin will contact you; you can log in after approval.',
+    teacher_code: teacherCode,
+    name,
+    status: 'pending',
+  });
+});
 
 exports.getTeachers = asyncHandler(async (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query.limit) || 200, 1), 1000);
@@ -68,6 +144,8 @@ exports.createTeacher = asyncHandler(async (req, res) => {
     role: 'teacher',
     teacher_code: teacherCode,
     mobile: String(req.body.mobile || '').trim(),
+    institute_name: String(req.body.institute_name || '').trim(),
+    validity_until: parseValidity(req.body.validity_until),
     assigned_students: normalizeStudentCodes(req.body.assigned_students),
     pin_hash: User.hashPin(pin),
   });
@@ -90,6 +168,24 @@ exports.updateTeacher = asyncHandler(async (req, res) => {
     teacher.mobile = String(req.body.mobile).trim();
   }
 
+  if (req.body.institute_name !== undefined) {
+    teacher.institute_name = String(req.body.institute_name || '').trim();
+  }
+
+  if (req.body.validity_until !== undefined) {
+    teacher.validity_until = parseValidity(req.body.validity_until);
+  }
+
+  if (req.body.status !== undefined) {
+    const status = String(req.body.status || '').trim().toLowerCase();
+    if (!['pending', 'active', 'blocked'].includes(status)) throw new AppError('Invalid status', 400);
+    teacher.status = status;
+    if (status === 'active' && !teacher.approved_at) {
+      teacher.approved_at = new Date();
+      teacher.approved_by = String(req.user?.id || '').trim();
+    }
+  }
+
   if (req.body.assigned_students !== undefined) {
     teacher.assigned_students = normalizeStudentCodes(req.body.assigned_students);
   }
@@ -101,6 +197,7 @@ exports.updateTeacher = asyncHandler(async (req, res) => {
   }
 
   await teacher.save();
+  invalidateUserCache('teacher', teacher.user_id);
   res.json({ success: true, data: serializeTeacher(teacher) });
 });
 

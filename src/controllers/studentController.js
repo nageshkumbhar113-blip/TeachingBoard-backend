@@ -20,17 +20,7 @@ function normalizePin(value) {
   return String(value || '').trim();
 }
 
-// Reject trivially-guessable 4-digit PINs (all-same, sequential, repeating pairs)
-function isWeakPin(pin) {
-  if (!/^\d{4}$/.test(pin)) return true;
-  if (/^(\d)\1{3}$/.test(pin)) return true;            // 0000, 1111…
-  const [a, b, c, d] = pin.split('').map(Number);
-  if (b === a + 1 && c === b + 1 && d === c + 1) return true;  // 1234…
-  if (b === a - 1 && c === b - 1 && d === c - 1) return true;  // 9876…
-  if (a === c && b === d) return true;                  // 1212…
-  return false;
-}
-
+const { isWeakPin } = require('../utils/pin');
 const { isValidMobile } = require('../utils/mobile');
 
 function normalizeDate(value) {

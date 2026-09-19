@@ -1,6 +1,7 @@
 const { decodeTokenFromHeader } = require('../utils/token');
 const User = require('../models/User');
 const YoutubeTeacherPartner = require('../models/YoutubeTeacherPartner');
+const { isExpiredDate } = require('../utils/accountStatus');
 
 // 60-second in-memory cache — avoids DB hit on every API request.
 // Max 200 entries; stale entries evicted lazily on insert.
@@ -96,10 +97,33 @@ async function requireStudent(req, res, next) {
   next();
 }
 
+// A teacher account that is pending approval, or blocked, has no API access.
+function _teacherDenied(req, res) {
+  const st = req.userDoc?.status;
+  if (req.userDoc?.validity_until && isExpiredDate(req.userDoc.validity_until)) {
+    res.status(403).json({
+      success: false,
+      message: 'Your validity period has ended. Please contact the admin to renew.',
+      code: 'TEACHER_VALIDITY_ENDED',
+    });
+    return true;
+  }
+  if (st === 'pending' || st === 'blocked') {
+    res.status(403).json({
+      success: false,
+      message: st === 'pending' ? 'Your registration is waiting for admin approval.' : 'This teacher account is blocked.',
+      code: st === 'pending' ? 'ACCOUNT_PENDING' : 'ACCOUNT_BLOCKED',
+    });
+    return true;
+  }
+  return false;
+}
+
 async function requireTeacher(req, res, next) {
   const payload = await _attachResolvedUser(req);
   if (!payload) return res.status(401).json({ success: false, message: 'Authentication required' });
   if (payload.role !== 'teacher') return res.status(403).json({ success: false, message: 'Teacher access required' });
+  if (_teacherDenied(req, res)) return;
   next();
 }
 
@@ -115,6 +139,7 @@ async function requireTeacherOrAdmin(req, res, next) {
   if (!payload || !['teacher', 'admin'].includes(payload.role)) {
     return res.status(403).json({ success: false, message: 'Teacher or admin access required' });
   }
+  if (payload.role === 'teacher' && _teacherDenied(req, res)) return;
   next();
 }
 

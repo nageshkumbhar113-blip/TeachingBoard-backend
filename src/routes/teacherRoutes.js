@@ -6,6 +6,7 @@ const {
   updateTeacher,
   deleteTeacher,
   getUnassignedStudents,
+  registerTeacher,
   getMyStudents,
   getStudentAttempts,
   updateDeviceToken,
@@ -20,6 +21,7 @@ const {
   getNotificationHistory,
 } = require('../controllers/notificationController');
 const { getTeacherVocabScores } = require('../controllers/wordController');
+const { createRateLimiter } = require('../middleware/rateLimiter');
 const {
   getMyPaperQuota,
   getQuotaConfig,
@@ -28,10 +30,13 @@ const {
   setOverride,
 } = require('../controllers/paperQuotaController');
 
+const registerLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000, max: 10, message: 'Too many registration attempts, please try again later' });
+
 // ── Admin CRUD: mounted at /api/teachers ──────────────────────────────────────
 const adminRouter = express.Router();
 adminRouter.get('/',                     requireAdmin, getTeachers);
 adminRouter.get('/unassigned-students',  requireAdmin, getUnassignedStudents);
+adminRouter.post('/register',            registerLimiter, registerTeacher);
 adminRouter.get('/paper-quota',          requireAdmin, listQuotas);
 adminRouter.get('/paper-quota/config',   requireAdmin, getQuotaConfig);
 adminRouter.put('/paper-quota/config',   requireAdmin, setQuotaConfig);
