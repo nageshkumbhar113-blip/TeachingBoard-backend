@@ -17,6 +17,7 @@ const YoutubeTeacherVideo        = require('../models/YoutubeTeacherVideo');
 const YoutubeTeacherTeachingArea = require('../models/YoutubeTeacherTeachingArea');
 const SLSQuestion = require('../models/SLSQuestion');
 const Concept      = require('../models/Concept');
+const PracticePaper = require('../models/PracticePaper');
 // Same composite chapterId scheme as SLS concepts/exercises — reused here
 // (not reimplemented) so a subject/chapter rename can correctly remap it.
 const { makeChapterId } = require('./youtubeTeacherController');
@@ -366,6 +367,11 @@ exports.renameBatch = asyncHandler(async (req, res) => {
       Note.updateMany({ batch: oldName }, { $set: { batch: newName } }),
       Lesson.updateMany({ batch: oldName }, { $set: { batch: newName } }),
       Question.updateMany({ batch: oldName }, { $set: { batch: newName } }),
+      // Exercise questions, saved papers and tests also store the batch NAME; without
+      // this a renamed batch could no longer save papers ("does not belong to this batch").
+      SLSQuestion.updateMany({ batchId: oldName }, { $set: { batchId: newName } }),
+      PracticePaper.updateMany({ batchId: oldName }, { $set: { batchId: newName } }),
+      Quiz.updateMany({ batch: oldName }, { $set: { batch: newName } }),
       YoutubeTeacherVideo.updateMany({ batch_name: oldName }, { $set: { batch_name: newName } }),
       YoutubeTeacherTeachingArea.updateMany({ batch_name: oldName }, { $set: { batch_name: newName } }),
       ..._remapChapterIdsForBatch(oldName, newName, batchDocBefore),
@@ -450,8 +456,21 @@ exports.repairBatchChapterIds = asyncHandler(async (req, res) => {
   const norm = s => String(s || '').trim().toLowerCase().replace(/\s+/g, '-');
   const oldPrefix = `${norm(oldName)}::`;
   const newPrefix = `${norm(currentName)}::`;
+  // Batch NAME references (SLSQuestion.batchId, PracticePaper.batchId, Quiz.batch) that
+  // an older rename left on the previous name.
+  const [exRepair, paperRepair, quizRepair] = await Promise.all([
+    SLSQuestion.updateMany({ batchId: oldName }, { $set: { batchId: currentName } }),
+    PracticePaper.updateMany({ batchId: oldName }, { $set: { batchId: currentName } }),
+    Quiz.updateMany({ batch: oldName }, { $set: { batch: currentName } }),
+  ]);
+  const nameRefs = {
+    exercise_questions_renamed: exRepair.modifiedCount,
+    papers_renamed: paperRepair.modifiedCount,
+    quizzes_renamed: quizRepair.modifiedCount,
+  };
+
   if (oldPrefix === newPrefix) {
-    return res.json({ success: true, message: 'old_batch_name normalizes the same as the current name — nothing to repair', concepts_repaired: 0, questions_repaired: 0 });
+    return res.json({ success: true, message: 'old_batch_name normalizes the same as the current name — chapter ids need no repair', concepts_repaired: 0, questions_repaired: 0, ...nameRefs });
   }
 
   const escaped = oldPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -468,7 +487,7 @@ exports.repairBatchChapterIds = asyncHandler(async (req, res) => {
     ...questions.map(q => SLSQuestion.updateOne({ _id: q._id }, { $set: { chapterId: rewrite(q.chapterId) } })),
   ]);
 
-  res.json({ success: true, concepts_repaired: concepts.length, questions_repaired: questions.length });
+  res.json({ success: true, concepts_repaired: concepts.length, questions_repaired: questions.length, ...nameRefs });
 });
 
 /**
