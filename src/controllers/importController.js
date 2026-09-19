@@ -1,4 +1,5 @@
 const { randomUUID } = require('crypto');
+const { v2: cloudinary } = require('cloudinary'); // configured in noteController at startup
 const { mongoose } = require('../config/db');
 const Batch = require('../models/Batch');
 const Concept = require('../models/Concept');
@@ -505,6 +506,7 @@ exports.undo = asyncHandler(async (req, res) => {
   if (job.undone) throw new AppError('This import was already undone', 400);
 
   const filter = { importJobId: jobId };
+  const copiedFiles = [...new Set((await Note.find(filter, 'cloudinary_public_id').lean()).map(n => n.cloudinary_public_id).filter(Boolean))];
   const [c, s, q, z, n] = await Promise.all([
     Concept.deleteMany(filter),
     SLSQuestion.deleteMany(filter),
@@ -514,6 +516,14 @@ exports.undo = asyncHandler(async (req, res) => {
     // stored file is never touched here.
     Note.deleteMany(filter),
   ]);
+
+  // A copied PDF shares the original's stored file: remove the file only if no
+  // note (original or copy) still uses it.
+  for (const publicId of copiedFiles) {
+    if (!(await Note.countDocuments({ cloudinary_public_id: publicId }))) {
+      try { await cloudinary.uploader.destroy(publicId, { resource_type: 'raw' }); } catch (_) { /* file already gone */ }
+    }
+  }
 
   // Remove catalog entries this job created, if nothing else lives in them.
   const tBatch = job.target.batch;
