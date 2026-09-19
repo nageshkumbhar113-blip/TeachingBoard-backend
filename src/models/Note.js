@@ -14,6 +14,8 @@ const noteSchema = new mongoose.Schema({
   status:               { type: String, enum: ['active', 'archived'], default: 'active' },
   created_by:           { type: String, default: '' },
   created_at:           { type: Date, default: Date.now },
+  importedFrom:         { id: { type: String }, batch: { type: String } },
+  importJobId:          { type: String, index: true },
 }, {
   timestamps: false,
   versionKey: false,

@@ -142,6 +142,7 @@ app.use("/api/teacher",   teacherDashRoutes);
 app.use("/api/parents",      parentAdminRoutes);
 app.use("/api/parent",       parentDashRoutes);
 app.use("/api/app-version",  appVersionRoutes);
+app.use("/api/admin/import",     require("./routes/importRoutes"));
 app.use("/api/admin/words",      adminWordRouter);
 app.use("/api/admin/word-tests", wordTestAdminRouter);
 app.use("/api/vocab",            vocabLimiter, vocabRouter);

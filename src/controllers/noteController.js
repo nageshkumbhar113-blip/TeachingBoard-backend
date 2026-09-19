@@ -102,9 +102,17 @@ exports.deleteNote = asyncHandler(async (req, res) => {
   const note = await Note.findOne({ note_id: req.params.id });
   if (!note) throw new AppError('Note not found', 404);
 
-  try {
-    await cloudinary.uploader.destroy(note.cloudinary_public_id, { resource_type: 'raw' });
-  } catch (_) { /* Cloudinary delete failed — still remove from DB */ }
+  // Copies made by Admin > Import point at the same stored file, so only remove
+  // the file itself when no other note still uses it.
+  const sharedWith = await Note.countDocuments({
+    cloudinary_public_id: note.cloudinary_public_id,
+    note_id: { $ne: note.note_id },
+  });
+  if (!sharedWith) {
+    try {
+      await cloudinary.uploader.destroy(note.cloudinary_public_id, { resource_type: 'raw' });
+    } catch (_) { /* Cloudinary delete failed — still remove from DB */ }
+  }
 
   await note.deleteOne();
   res.json({ success: true });

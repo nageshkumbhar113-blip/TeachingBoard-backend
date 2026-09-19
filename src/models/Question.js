@@ -14,6 +14,10 @@ const questionSchema = new mongoose.Schema(
     image:      { type: String, default: null },
     option_images: { type: mongoose.Schema.Types.Mixed, default: {} },
     tags:       { type: [String], default: [] },
+    // Set only on copies made by Admin > Import (controllers/importController.js):
+    // where the copy came from, and which import job made it (for Undo).
+    importedFrom: { id: { type: String }, batch: { type: String } },
+    importJobId: { type: String, index: true },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },

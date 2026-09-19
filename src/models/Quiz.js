@@ -147,6 +147,10 @@ const quizSchema = new mongoose.Schema(
       type: String,
       enum: ["manual", "random", "chapter_random", "mixed"]
     },
+    // Set only on copies made by Admin > Import (controllers/importController.js):
+    // where the copy came from, and which import job made it (for Undo).
+    importedFrom: { id: { type: String }, batch: { type: String } },
+    importJobId: { type: String, index: true },
     created_at: {
       type: Date,
       required: true,

@@ -182,6 +182,10 @@ const conceptSchema = new mongoose.Schema(
       default: 'draft',
       index: true
     },
+    // Set only on copies made by Admin > Import (controllers/importController.js):
+    // where the copy came from, and which import job made it (for Undo).
+    importedFrom: { id: { type: String }, batch: { type: String } },
+    importJobId: { type: String, index: true },
     order: {
       type: Number,
       required: true,

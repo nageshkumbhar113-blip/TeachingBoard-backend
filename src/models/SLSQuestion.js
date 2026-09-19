@@ -188,6 +188,11 @@ const slsQuestionSchema = new mongoose.Schema(
       index: true
     },
 
+    // Set only on copies made by Admin > Import (controllers/importController.js):
+    // where the copy came from, and which import job made it (for Undo).
+    importedFrom: { id: { type: String }, batch: { type: String } },
+    importJobId: { type: String, index: true },
+
     // Metadata
     createdBy: {
       type: String,
