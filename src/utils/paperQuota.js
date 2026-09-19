@@ -68,7 +68,7 @@ async function getQuota(teacherDoc, batch, cfg) {
 }
 
 function limitMessage(q) {
-  return `या batch चे ${q.limit} मोफत papers वापरून झाले. या batch चे ${q.need} विद्यार्थी paid झाले की Paper Builder अमर्यादित होतो (${q.paid} / ${q.need} झाले).`;
+  return `You have used the ${q.limit} free papers for this batch. Unlimited Paper Builder unlocks when ${q.need} students of this batch have paid (${q.paid} / ${q.need} so far).`;
 }
 
 module.exports = { getConfig, countPaidStudents, getQuota, limitMessage };
