@@ -31,13 +31,7 @@ function isWeakPin(pin) {
   return false;
 }
 
-// Basic Indian mobile sanity: 10 digits, starts 6-9, not all-same
-function isValidMobile(mobile) {
-  if (!/^\d{10}$/.test(mobile)) return false;
-  if (/^(\d)\1{9}$/.test(mobile)) return false;
-  if (parseInt(mobile[0], 10) < 6) return false;
-  return true;
-}
+const { isValidMobile } = require('../utils/mobile');
 
 function normalizeDate(value) {
   const clean = String(value || '').trim();
@@ -95,6 +89,7 @@ exports.createStudent = asyncHandler(async (req, res) => {
 
   if (!studentCode) throw new AppError('student_code is required', 400);
   if (!name) throw new AppError('name is required', 400);
+  if (!isValidMobile(req.body.mobile)) throw new AppError('A valid 10-digit mobile number is required', 400);
   if (!pin || !/^\d{4}$/.test(pin)) throw new AppError('pin must be 4 digits', 400);
   if (!['pending', 'active', 'blocked'].includes(status)) throw new AppError('Invalid status', 400);
 
@@ -130,7 +125,8 @@ exports.updateStudent = asyncHandler(async (req, res) => {
   }
 
   if (req.body.mobile !== undefined) {
-    student.mobile = String(req.body.mobile || '').trim();
+    if (!isValidMobile(req.body.mobile)) throw new AppError('A valid 10-digit mobile number is required', 400);
+    student.mobile = String(req.body.mobile).trim();
   }
 
   if (req.body.student_code !== undefined) {

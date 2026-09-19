@@ -3,6 +3,7 @@ const User = require('../models/User');
 const Attempt = require('../models/Attempt');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
+const { isValidMobile } = require('../utils/mobile');
 
 function normalizeCode(value) {
   return String(value || '').trim().toUpperCase();
@@ -45,6 +46,7 @@ exports.createTeacher = asyncHandler(async (req, res) => {
   let teacherCode = normalizeCode(req.body.teacher_code);
 
   if (!name) throw new AppError('name is required', 400);
+  if (!isValidMobile(req.body.mobile)) throw new AppError('A valid 10-digit mobile number is required', 400);
   if (!pin || !/^\d{4}$/.test(pin)) throw new AppError('pin must be 4 digits', 400);
 
   // Auto-generate teacher_code if not provided
@@ -84,7 +86,8 @@ exports.updateTeacher = asyncHandler(async (req, res) => {
   }
 
   if (req.body.mobile !== undefined) {
-    teacher.mobile = String(req.body.mobile || '').trim();
+    if (!isValidMobile(req.body.mobile)) throw new AppError('A valid 10-digit mobile number is required', 400);
+    teacher.mobile = String(req.body.mobile).trim();
   }
 
   if (req.body.assigned_students !== undefined) {
