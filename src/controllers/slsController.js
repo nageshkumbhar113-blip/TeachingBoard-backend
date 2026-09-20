@@ -590,6 +590,15 @@ exports.createPaperManual = async (req, res) => {
       return res.status(400).json({ success: false, message: structure.error });
     }
 
+    // Exam look-alike papers are an admin-controlled permission for teachers, and every
+    // teacher-made one is marked as a practice/mock paper on the PDF.
+    if (structure.layout === 'board' && req.user?.role === 'teacher') {
+      if (req.userDoc?.board_papers_allowed !== true) {
+        return res.status(403).json({ success: false, code: 'BOARD_NOT_ALLOWED', message: 'Board-style papers are not enabled for your account. Please contact the admin.' });
+      }
+      structure.header.mock = true;
+    }
+
     const effectiveChapterIds = Array.isArray(chapterIds) && chapterIds.length ? chapterIds : (chapterId ? [chapterId] : []);
     const effectiveSubjectIds = Array.isArray(subjectIds) && subjectIds.length ? subjectIds : (subjectId ? [subjectId] : []);
     const isMulti = effectiveChapterIds.length > 1;

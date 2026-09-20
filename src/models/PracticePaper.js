@@ -74,6 +74,7 @@ const paperHeaderSchema = new mongoose.Schema(
     timeText:        { type: String, default: '' },
     notes:           { type: [String], default: [] },
     seatOnEveryPage: { type: Boolean, default: true },
+    mock:            { type: Boolean, default: false },  // set by the server for teacher papers
     mcqLayout:       { type: String, enum: ['list', 'columns'], default: 'list' }
   },
   { _id: false }

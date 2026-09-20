@@ -11,10 +11,10 @@ exports.getMyPaperQuota = asyncHandler(async (req, res) => {
   const batch = String(req.query.batch || '').trim();
   const config = await getConfig();
   if (!batch) {
-    return res.json({ success: true, data: { free_papers: config.free_papers, unlock_paid_students: config.unlock_paid_students } });
+    return res.json({ success: true, data: { free_papers: config.free_papers, unlock_paid_students: config.unlock_paid_students, board_papers_allowed: req.userDoc?.board_papers_allowed === true } });
   }
   const quota = await getQuota(req.userDoc, batch, config);
-  res.json({ success: true, data: quota });
+  res.json({ success: true, data: { ...quota, board_papers_allowed: req.userDoc?.board_papers_allowed === true } });
 });
 
 // GET /api/teachers/paper-quota/config

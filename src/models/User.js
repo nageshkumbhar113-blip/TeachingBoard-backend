@@ -50,6 +50,8 @@ const userSchema = new mongoose.Schema(
     validity_until:     { type: Date, default: null },
     // Set when a teacher registers themselves (status starts 'pending' until an admin approves).
     institute_name:     { type: String, default: '', trim: true },
+    // Board-style (exam look-alike) papers are off for teachers unless an admin allows them.
+    board_papers_allowed: { type: Boolean, default: false },
     terms_accepted_at:  { type: Date, default: null },
     terms_version:      { type: String, default: '' },
     // Paper Builder quota overrides (admin-set): batch name, or '*' for all batches.

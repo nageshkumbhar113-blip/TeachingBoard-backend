@@ -41,6 +41,7 @@ function serializeTeacher(t) {
     status: t.status || 'active',
     validity_until: normalizeExpiryDate(t.validity_until),
     institute_name: t.institute_name || '',
+    board_papers_allowed: t.board_papers_allowed === true,
     request_source: t.request_source || 'admin',
     terms_accepted_at: t.terms_accepted_at || null,
     approved_at: t.approved_at || null,
@@ -145,6 +146,7 @@ exports.createTeacher = asyncHandler(async (req, res) => {
     teacher_code: teacherCode,
     mobile: String(req.body.mobile || '').trim(),
     institute_name: String(req.body.institute_name || '').trim(),
+    board_papers_allowed: req.body.board_papers_allowed === true,
     validity_until: parseValidity(req.body.validity_until),
     assigned_students: normalizeStudentCodes(req.body.assigned_students),
     pin_hash: User.hashPin(pin),
@@ -170,6 +172,10 @@ exports.updateTeacher = asyncHandler(async (req, res) => {
 
   if (req.body.institute_name !== undefined) {
     teacher.institute_name = String(req.body.institute_name || '').trim();
+  }
+
+  if (req.body.board_papers_allowed !== undefined) {
+    teacher.board_papers_allowed = req.body.board_papers_allowed === true;
   }
 
   if (req.body.validity_until !== undefined) {
