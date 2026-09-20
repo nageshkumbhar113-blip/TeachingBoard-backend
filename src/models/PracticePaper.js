@@ -26,6 +26,11 @@ const questionInPaperSchema = new mongoose.Schema(
       required: true
     },
     questionType: String,
+    // Board-style papers: which section (Q.1 (A) ...) this question is printed in.
+    sectionId: {
+      type: String,
+      default: undefined
+    },
     displayOrder: {
       type: Number,
       required: true
@@ -44,6 +49,34 @@ const questionInPaperSchema = new mongoose.Schema(
     }
   },
   { _id: true }
+);
+
+// Board-style structure (see utils/paperSections.js). All optional: a paper without
+// sections is the original practice layout and behaves exactly as before.
+const paperSectionSchema = new mongoose.Schema(
+  {
+    id:          { type: String, required: true },
+    qNo:         { type: String, default: '' },
+    part:        { type: String, default: '' },
+    instruction: { type: String, default: '' },
+    marksEach:   { type: Number, required: true, min: 0 },
+    attempt:     { type: Number, required: true, min: 1 }
+  },
+  { _id: false }
+);
+
+const paperHeaderSchema = new mongoose.Schema(
+  {
+    paperCode:       { type: String, default: '' },
+    examLine:        { type: String, default: '' },
+    subjectLine:     { type: String, default: '' },
+    courseLine:      { type: String, default: '' },
+    timeText:        { type: String, default: '' },
+    notes:           { type: [String], default: [] },
+    seatOnEveryPage: { type: Boolean, default: true },
+    mcqLayout:       { type: String, enum: ['list', 'columns'], default: 'list' }
+  },
+  { _id: false }
 );
 
 const practicePaperSchema = new mongoose.Schema(
@@ -112,6 +145,20 @@ const practicePaperSchema = new mongoose.Schema(
 
     // Questions in Paper
     questions: [questionInPaperSchema],
+
+    layout: {
+      type: String,
+      enum: ['practice', 'board'],
+      default: 'practice'
+    },
+    sections: {
+      type: [paperSectionSchema],
+      default: undefined
+    },
+    header: {
+      type: paperHeaderSchema,
+      default: undefined
+    },
 
     // Paper Generation Details
     generationFilters: {

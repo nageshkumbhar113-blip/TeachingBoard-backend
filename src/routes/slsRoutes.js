@@ -67,6 +67,7 @@ slsRouter.post('/admin/papers',                       requireTeacherOrAdmin, sls
 slsRouter.get('/admin/papers',                        requireTeacherOrAdmin, slsController.getPapers);
 slsRouter.get('/admin/papers/:id',                    requireTeacherOrAdmin, slsController.getPaperWithQuestions);
 slsRouter.post('/admin/papers/:id/publish',           requireTeacherOrAdmin, slsController.publishPaper);
+slsRouter.delete('/admin/papers/:id',                 requireAdmin, slsController.deletePaper);
 
 // ───── ADMIN: Evaluation & Marking
 slsRouter.patch('/admin/attempts/:id/evaluate',       requireAdmin, slsController.evaluateAttempt);

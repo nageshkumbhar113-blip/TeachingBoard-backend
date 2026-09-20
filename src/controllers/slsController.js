@@ -15,6 +15,7 @@ const {
   chapterLockedBody,
 } = require('../utils/contentAccess');
 const { getQuota, limitMessage } = require('../utils/paperQuota');
+const { sanitizeStructure, boardTotalMarks } = require('../utils/paperSections');
 
 // Teachers may save only a limited number of papers per batch until enough of
 // that batch's students have paid (utils/paperQuota.js). Admins are never limited.
@@ -583,6 +584,12 @@ exports.createPaperManual = async (req, res) => {
   try {
     const { batchId, chapterId, subjectId, chapterIds, subjectIds, paperTitle, questions } = req.body;
 
+    // Board-style structure (optional) - validated before anything is read or written.
+    const structure = sanitizeStructure(req.body, Array.isArray(questions) ? questions : []);
+    if (structure.error) {
+      return res.status(400).json({ success: false, message: structure.error });
+    }
+
     const effectiveChapterIds = Array.isArray(chapterIds) && chapterIds.length ? chapterIds : (chapterId ? [chapterId] : []);
     const effectiveSubjectIds = Array.isArray(subjectIds) && subjectIds.length ? subjectIds : (subjectId ? [subjectId] : []);
     const isMulti = effectiveChapterIds.length > 1;
@@ -622,6 +629,7 @@ exports.createPaperManual = async (req, res) => {
         marks: src.marks,
         difficulty: src.difficulty,
         questionType: src.questionType,
+        ...(structure.layout === 'board' ? { sectionId: String(item.sectionId || '') } : {}),
         displayOrder: order,
         totalAttempts: 0,
         correctAttempts: 0,
@@ -651,9 +659,13 @@ exports.createPaperManual = async (req, res) => {
       subjectIds: effectiveSubjectIds.length > 1 ? effectiveSubjectIds : [],
       paperNumber,
       paperTitle: paperTitle || `Practice Paper ${paperNumber}`,
-      totalMarks,
+      // Board-style: the total counts only what a student must attempt.
+      totalMarks: structure.layout === 'board' ? boardTotalMarks(structure.sections) : totalMarks,
       totalQuestions: selectedQuestions.length,
       questions: selectedQuestions,
+      ...(structure.layout === 'board'
+        ? { layout: 'board', sections: structure.sections, header: structure.header }
+        : {}),
       marksBreakdown: Object.entries(marksTally).map(([marks, count]) => ({
         marks: parseInt(marks),
         count,
@@ -814,6 +826,24 @@ exports.getPaperWithQuestions = async (req, res) => {
       success: false,
       message: error.message
     });
+  }
+};
+
+// Delete Paper (admin) - removes the paper and its usage bookkeeping on the questions,
+// so a mistaken or test paper does not keep counting against them.
+exports.deletePaper = async (req, res) => {
+  try {
+    const paper = await PracticePaper.findById(req.params.id);
+    if (!paper) return res.status(404).json({ success: false, message: 'Paper not found' });
+    const paperId = String(paper._id);
+    await SLSQuestion.updateMany(
+      { 'usedInPapers.paperId': paperId },
+      { $pull: { usedInPapers: { paperId } }, $inc: { usageCount: -1 } }
+    );
+    await paper.deleteOne();
+    res.status(200).json({ success: true, message: 'Paper deleted' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
