@@ -31,6 +31,12 @@ const questionInPaperSchema = new mongoose.Schema(
       type: String,
       default: undefined
     },
+    // Board-style papers can carry a multiple-choice question taken from the MCQ bank
+    // (models/Question.js). It is stored as a snapshot: { qid, text, options:{A..D}, answer }.
+    mcq: {
+      type: mongoose.Schema.Types.Mixed,
+      default: undefined
+    },
     displayOrder: {
       type: Number,
       required: true

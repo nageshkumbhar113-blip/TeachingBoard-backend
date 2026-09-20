@@ -70,4 +70,19 @@ function boardTotalMarks(sections) {
   return sections.reduce((sum, s) => sum + s.attempt * s.marksEach, 0);
 }
 
-module.exports = { sanitizeStructure, boardTotalMarks };
+// MCQ-bank question -> the { questionText, answerText } shape the paper PDF already prints.
+// Options go on their own lines: "(A) ...", "(B) ...".
+function mcqSnapshot(q) {
+  const options = {};
+  for (const k of ['A', 'B', 'C', 'D']) options[k] = _str((q.options || {})[k], 300);
+  return { qid: String(q._id), text: _str(q.question, 1500), options, answer: _str(q.answer, 8).toUpperCase() };
+}
+
+function mcqFormat(m) {
+  const lines = ['A', 'B', 'C', 'D'].filter(k => m.options && m.options[k]).map(k => `(${k}) ${m.options[k]}`);
+  const questionText = { english: [m.text, ...lines].join('\n') };
+  const ans = m.answer && m.options && m.options[m.answer] ? `(${m.answer}) ${m.options[m.answer]}` : (m.answer || '');
+  return { questionText, answerText: { english: ans } };
+}
+
+module.exports = { sanitizeStructure, boardTotalMarks, mcqSnapshot, mcqFormat };

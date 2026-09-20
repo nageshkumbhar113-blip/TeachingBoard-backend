@@ -15,7 +15,8 @@ const {
   chapterLockedBody,
 } = require('../utils/contentAccess');
 const { getQuota, limitMessage } = require('../utils/paperQuota');
-const { sanitizeStructure, boardTotalMarks } = require('../utils/paperSections');
+const { sanitizeStructure, boardTotalMarks, mcqSnapshot, mcqFormat } = require('../utils/paperSections');
+const McqQuestion = require('../models/Question');
 
 // Teachers may save only a limited number of papers per batch until enough of
 // that batch's students have paid (utils/paperQuota.js). Admins are never limited.
@@ -613,14 +614,47 @@ exports.createPaperManual = async (req, res) => {
     const limited = await _teacherPaperLimitResponse(req, batchId);
     if (limited) return res.status(403).json(limited);
 
-    const ids = questions.map(q => q.questionId);
+    if (questions.some(q => !q || (!q.questionId && !q.mcqId))) {
+      return res.status(400).json({ success: false, message: 'Every question needs a questionId' });
+    }
+    const mcqItems = questions.filter(q => q.mcqId);
+    if (mcqItems.length && structure.layout !== 'board') {
+      return res.status(400).json({ success: false, message: 'MCQ-bank questions can only be used in board-style papers' });
+    }
+    const ids = questions.filter(q => !q.mcqId).map(q => q.questionId);
     const found = await SLSQuestion.find({ _id: { $in: ids } }).lean();
     const foundMap = new Map(found.map(q => [q._id.toString(), q]));
+    const mcqFound = mcqItems.length ? await McqQuestion.find({ _id: { $in: mcqItems.map(q => q.mcqId) } }).lean() : [];
+    const mcqMap = new Map(mcqFound.map(q => [q._id.toString(), q]));
 
     const selectedQuestions = [];
     let totalMarks = 0;
     let order = 0;
     for (const item of questions) {
+      if (item.mcqId) {
+        const mq = mcqMap.get(String(item.mcqId));
+        if (!mq || mq.type !== 'mcq') {
+          return res.status(400).json({ success: false, message: `MCQ ${item.mcqId} not found` });
+        }
+        if (mq.batch !== batchId) {
+          return res.status(400).json({ success: false, message: `MCQ ${item.mcqId} does not belong to this batch` });
+        }
+        order += 1;
+        selectedQuestions.push({
+          questionId: `mcq:${mq._id}`,
+          marks: 1,
+          difficulty: mq.difficulty || 'medium',
+          questionType: 'MCQ',
+          sectionId: String(item.sectionId || ''),
+          mcq: mcqSnapshot(mq),
+          displayOrder: order,
+          totalAttempts: 0,
+          correctAttempts: 0,
+          averageScore: 0
+        });
+        totalMarks += 1;
+        continue;
+      }
       const src = foundMap.get(String(item.questionId));
       if (!src) {
         return res.status(400).json({ success: false, message: `Question ${item.questionId} not found` });
@@ -689,6 +723,7 @@ exports.createPaperManual = async (req, res) => {
 
     // Same usage-tracking bookkeeping generatePaper() does.
     for (const sq of selectedQuestions) {
+      if (sq.mcq) continue; // MCQ-bank questions have no usage counter
       await SLSQuestion.findByIdAndUpdate(
         sq.questionId,
         {
@@ -808,11 +843,12 @@ exports.getPaperWithQuestions = async (req, res) => {
     }
 
     // Get all questions for this paper
-    const questionIds = paper.questions.map(q => q.questionId);
+    const questionIds = paper.questions.filter(q => !q.mcq).map(q => q.questionId);
     const questions = await SLSQuestion.find({ _id: { $in: questionIds } }).lean();
 
     // Map questions to paper questions maintaining order
     const questionsWithDetails = paper.questions.map(pq => {
+      if (pq.mcq) return { ...pq.toObject(), ...mcqFormat(pq.mcq) };
       const fullQuestion = questions.find(q => q._id.toString() === pq.questionId.toString());
       return {
         ...pq.toObject(),
