@@ -34,6 +34,14 @@ async function countFriends(studentCode) {
   return { counted, pending, joined: friends.length };
 }
 
+// Friends are SPENT by a claim: claiming a prize uses up ALL the friends that were ready, so the
+// counter starts again from 0 and they can never count for another prize. A prize the admin does not
+// approve gives its friends back.
+async function spentFriends(studentCode) {
+  const claims = await ReferralClaim.find({ student_code: studentCode, status: { $ne: 'rejected' } }).select('milestone friends_used').lean();
+  return claims.reduce((t, c) => t + (Number(c.friends_used) || Number(c.milestone) || 0), 0);
+}
+
 const claimView = (c, deliveryDays = 10) => ({
   id: String(c._id), milestone: c.milestone, title: c.title, status: c.status,
   requested_at: c.created_at, shipped_at: c.shipped_at, tracking: c.tracking, note: c.note,
@@ -49,24 +57,26 @@ exports.getMyReferrals = asyncHandler(async (req, res) => {
     countFriends(s.student_code),
     ReferralClaim.find({ student_user_id: s.user_id }).lean(),
   ]);
-  const byMilestone = new Map(claims.map(c => [c.milestone, c]));
-  const milestones = (cfg.prizes || []).slice().sort((a, b) => a.count - b.count).map(p => {
-    const claim = byMilestone.get(p.count);
-    const state = claim ? (claim.status === 'shipped' ? 'shipped' : claim.status === 'rejected' ? 'rejected' : 'requested')
-      : counts.counted >= p.count ? 'claimable' : 'locked';
-    return { count: p.count, title: p.title, state, claim: claim ? claimView(claim, cfg.prize_delivery_days || 10) : null };
-  });
+  const spent = claims.filter(c => c.status !== 'rejected').reduce((t, c) => t + (Number(c.friends_used) || Number(c.milestone) || 0), 0);
+  const available = Math.max(0, counts.counted - spent);
+  const days = cfg.prize_delivery_days || 10;
+  const milestones = (cfg.prizes || []).slice().sort((a, b) => a.count - b.count).map(p => ({
+    count: p.count, title: p.title, state: available >= p.count ? 'claimable' : 'locked',
+  }));
   const next = milestones.find(m => m.state === 'locked');
   res.json({
     success: true,
     data: {
       code: s.student_code,
       friends_paid: counts.counted,
+      friends_spent: spent,
+      friends_available: available,
+      claims: claims.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).map(c => claimView(c, days)),
       friends_pending: counts.pending,
       friends_joined: counts.joined,
       hold_days: cfg.hold_days,
       milestones,
-      next: next ? { count: next.count, title: next.title, remaining: next.count - counts.counted } : null,
+      next: next ? { count: next.count, title: next.title, remaining: next.count - available } : null,
     },
   });
 });
@@ -80,8 +90,8 @@ exports.claimPrize = asyncHandler(async (req, res) => {
   if (!prize) throw new AppError('This prize is not available', 400);
 
   const counts = await countFriends(s.student_code);
-  if (counts.counted < milestone) throw new AppError(`You need ${milestone} friends who have paid (you have ${counts.counted})`, 400);
-  if (await ReferralClaim.findOne({ student_code: s.student_code, milestone }).lean()) throw new AppError('You have already claimed this prize', 409);
+  const available = counts.counted - (await spentFriends(s.student_code));
+  if (available < milestone) throw new AppError(`You need ${milestone} friends who have paid and are not used yet (you have ${Math.max(0, available)})`, 400);
 
   const recipient = String(req.body.recipient_name || '').trim().slice(0, 80);
   const phone = String(req.body.phone || '').trim();
@@ -95,10 +105,15 @@ exports.claimPrize = asyncHandler(async (req, res) => {
 
   const claim = await ReferralClaim.create({
     student_user_id: s.user_id, student_code: s.student_code, student_name: s.name,
-    milestone, title: prize.title, friends_at_claim: counts.counted,
+    milestone, title: prize.title, friends_at_claim: available, friends_used: available,
     recipient_name: recipient, phone, address, pincode, parent_consent: true,
   });
-  res.status(201).json({ success: true, data: claimView(claim) });
+  // Two claims sent at the same moment must not spend the same friends twice
+  if (counts.counted - (await spentFriends(s.student_code)) < 0) {
+    await ReferralClaim.deleteOne({ _id: claim._id });
+    throw new AppError('You do not have enough unused friends for this prize', 409);
+  }
+  res.status(201).json({ success: true, data: claimView(claim, cfg.prize_delivery_days || 10) });
 });
 
 // ── Admin ─────────────────────────────────────────────────────────────────────

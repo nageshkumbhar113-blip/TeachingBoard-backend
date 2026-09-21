@@ -12,6 +12,7 @@ const referralClaimSchema = new mongoose.Schema(
     milestone: { type: Number, required: true },   // friend count that unlocked the prize
     title:     { type: String, default: '' },      // prize name (snapshot)
     friends_at_claim: { type: Number, default: 0 },
+    friends_used: { type: Number, default: 0 },    // friends spent by this claim (all that were ready)
 
     // Delivery details, given with a parent's consent
     recipient_name: { type: String, default: '' },
@@ -28,6 +29,7 @@ const referralClaimSchema = new mongoose.Schema(
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }, versionKey: false }
 );
 
-referralClaimSchema.index({ student_code: 1, milestone: 1 }, { unique: true });
+// A student may claim again later with new friends, so there is no uniqueness on the milestone.
+referralClaimSchema.index({ student_code: 1, milestone: 1 });
 
 module.exports = mongoose.models.ReferralClaim || mongoose.model('ReferralClaim', referralClaimSchema);
