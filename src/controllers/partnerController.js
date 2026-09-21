@@ -63,6 +63,7 @@ function serializeEntry(e) {
 
 const configView = cfg => ({
   hold_days: cfg.hold_days, min_payout: cfg.min_payout, youtube_flat: cfg.youtube_flat, school_percent: cfg.school_percent,
+  prize_delivery_days: cfg.prize_delivery_days || 10,
   prizes: (cfg.prizes || []).map(p => ({ count: p.count, title: p.title })),
 });
 
@@ -83,6 +84,7 @@ exports.setPartnerConfig = asyncHandler(async (req, res) => {
   num('min_payout', 0, 100000);
   num('youtube_flat', 0, 10000);
   num('school_percent', 0, 100);
+  num('prize_delivery_days', 1, 90);
   if (req.body.prizes !== undefined) {
     if (!Array.isArray(req.body.prizes) || req.body.prizes.length > 8) throw new AppError('prizes must be a list of at most 8 items', 400);
     const seen = new Set();

@@ -5,6 +5,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const { isValidMobile } = require('../utils/mobile');
 const { getConfig } = require('../utils/partnerCommission');
+const { notifyStudent } = require('../utils/studentNotify');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -33,9 +34,11 @@ async function countFriends(studentCode) {
   return { counted, pending, joined: friends.length };
 }
 
-const claimView = c => ({
+const claimView = (c, deliveryDays = 10) => ({
   id: String(c._id), milestone: c.milestone, title: c.title, status: c.status,
   requested_at: c.created_at, shipped_at: c.shipped_at, tracking: c.tracking, note: c.note,
+  expected_by: c.shipped_at ? new Date(new Date(c.shipped_at).getTime() + deliveryDays * DAY_MS) : null,
+  delivery_days: deliveryDays,
 });
 
 // GET /api/referrals/me  (student)
@@ -51,7 +54,7 @@ exports.getMyReferrals = asyncHandler(async (req, res) => {
     const claim = byMilestone.get(p.count);
     const state = claim ? (claim.status === 'shipped' ? 'shipped' : claim.status === 'rejected' ? 'rejected' : 'requested')
       : counts.counted >= p.count ? 'claimable' : 'locked';
-    return { count: p.count, title: p.title, state, claim: claim ? claimView(claim) : null };
+    return { count: p.count, title: p.title, state, claim: claim ? claimView(claim, cfg.prize_delivery_days || 10) : null };
   });
   const next = milestones.find(m => m.state === 'locked');
   res.json({
@@ -104,10 +107,11 @@ exports.listClaims = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.status) filter.status = String(req.query.status);
   const rows = await ReferralClaim.find(filter).sort({ created_at: -1 }).limit(500).lean();
+  const days = (await getConfig()).prize_delivery_days || 10;
   res.json({
     success: true,
     data: rows.map(c => ({
-      ...claimView(c), student_code: c.student_code, student_name: c.student_name, friends_at_claim: c.friends_at_claim,
+      ...claimView(c, days), student_code: c.student_code, student_name: c.student_name, friends_at_claim: c.friends_at_claim,
       recipient_name: c.recipient_name, phone: c.phone, address: c.address, pincode: c.pincode,
     })),
   });
@@ -118,12 +122,26 @@ exports.updateClaim = asyncHandler(async (req, res) => {
   if (!claim) throw new AppError('Claim not found', 404);
   const status = String(req.body.status || '').trim();
   if (!['shipped', 'rejected', 'requested'].includes(status)) throw new AppError('status must be shipped, rejected or requested', 400);
+  const before = claim.status;
   claim.status = status;
-  claim.shipped_at = status === 'shipped' ? new Date() : null;
+  claim.shipped_at = status === 'shipped' ? (claim.shipped_at || new Date()) : null;
   if (req.body.tracking !== undefined) claim.tracking = String(req.body.tracking || '').trim().slice(0, 100);
   if (req.body.note !== undefined) claim.note = String(req.body.note || '').trim().slice(0, 200);
   await claim.save();
-  res.json({ success: true, data: claimView(claim) });
+
+  // Tell the student when the decision changes (not on every edit of the tracking note)
+  const cfg = await getConfig();
+  const days = cfg.prize_delivery_days || 10;
+  if (before !== status) {
+    if (status === 'shipped') {
+      notifyStudent(claim.student_user_id, '🎁 Your prize is on the way!',
+        `We have sent your ${claim.title}. You should receive it within ${days} days.`, { type: 'referral_prize', status: 'shipped' });
+    } else if (status === 'rejected') {
+      notifyStudent(claim.student_user_id, 'About your prize request',
+        `We could not approve your ${claim.title} request${claim.note ? `: ${claim.note}` : '.'} Please contact us if you have questions.`, { type: 'referral_prize', status: 'rejected' });
+    }
+  }
+  res.json({ success: true, data: claimView(claim, days) });
 });
 
 exports.countFriends = countFriends;

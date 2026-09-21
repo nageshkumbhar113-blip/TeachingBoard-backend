@@ -30,4 +30,15 @@ async function notifyBatch(batchName, title, body, data = {}) {
   );
 }
 
-module.exports = { notifyBatch };
+/** Push one student (by user_id). Silently no-ops without a device token / FCM. */
+async function notifyStudent(userId, title, body, data = {}) {
+  try {
+    const s = await User.findOne({ role: 'student', user_id: userId }).select('device_token').lean();
+    if (!s || !s.device_token) return;
+    await sendToMany([s.device_token], title, body, data);
+  } catch (err) {
+    console.warn('notifyStudent failed:', err.message);
+  }
+}
+
+module.exports = { notifyBatch, notifyStudent };
