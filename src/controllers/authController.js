@@ -35,6 +35,8 @@ function serializeTeacher(teacher) {
     teacher_code: teacher.teacher_code || '',
     mobile: teacher.mobile || '',
     institute_name: teacher.institute_name || '',
+    partner_type: teacher.partner_type || '',
+    commission_enabled: teacher.commission_enabled === true,
     assigned_students: Array.isArray(teacher.assigned_students) ? teacher.assigned_students : [],
   };
 }
