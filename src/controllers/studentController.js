@@ -279,17 +279,22 @@ exports.selfRegister = asyncHandler(async (req, res) => {
   // BEFORE the student is created so a typo never leaves a half-registered account.
   const teacherCode = normalizeStudentCode(req.body.teacher_code);
   let teacherDoc = null;
+  let typedFriend = null;
   if (teacherCode) {
     teacherDoc = await User.findOne({ role: 'teacher', teacher_code: teacherCode });
     if (!teacherDoc) {
-      throw new AppError('हा Teacher code सापडला नाही. तो दुरुस्त करा किंवा रकाना रिकामा ठेवा.', 404);
+      // Not a teacher code: it may be a friend's student code typed into the same field.
+      typedFriend = await User.findOne({ role: 'student', student_code: teacherCode }).select('student_code mobile').lean();
+      if (!typedFriend) {
+        throw new AppError('This code was not found. Correct it or leave the field empty.', 404);
+      }
     }
   }
 
   // Optional friend code (?ref=): the student who shared the app. A wrong, own or same-mobile code is
   // ignored quietly - registration must never fail because of a referral.
   let friendCode = '';
-  const refCode = normalizeStudentCode(req.body.ref_code);
+  const refCode = typedFriend ? typedFriend.student_code : normalizeStudentCode(req.body.ref_code);
   if (refCode) {
     const friend = await User.findOne({ role: 'student', student_code: refCode }).select('student_code mobile').lean();
     if (friend && friend.mobile !== mobile) friendCode = friend.student_code;
