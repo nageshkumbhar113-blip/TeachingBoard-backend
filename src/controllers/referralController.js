@@ -130,7 +130,7 @@ exports.countFriends = countFriends;
 
 // GET /api/referrals/summary (admin): every student who has shared the app, with friend counts.
 exports.summary = asyncHandler(async (req, res) => {
-  const friends = await User.find({ role: 'student', referred_by_student: { $ne: '' } })
+  const friends = await User.find({ role: 'student', referred_by_student: { $exists: true, $nin: ['', null] } })
     .select('name student_code user_id referred_by_student created_at').lean();
   if (!friends.length) return res.json({ success: true, data: [], prizes: (await getConfig()).prizes });
   const cfg = await getConfig();
