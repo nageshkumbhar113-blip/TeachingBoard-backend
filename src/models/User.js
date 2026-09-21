@@ -63,6 +63,12 @@ const userSchema = new mongoose.Schema(
     pan:                { type: String, default: '', trim: true },
     // Student side: the teacher/partner code the student registered with (set once).
     referred_by_teacher: { type: String, default: '', trim: true },
+    // Student side: the friend (student code) who shared the app with this student (set once).
+    referred_by_student: { type: String, default: '', trim: true },
+    // YouTube partner registration details, and the IP the terms were accepted from.
+    channel_name: { type: String, default: '', trim: true },
+    channel_url:  { type: String, default: '', trim: true },
+    terms_ip:     { type: String, default: '', trim: true },
     terms_accepted_at:  { type: Date, default: null },
     terms_version:      { type: String, default: '' },
     // Paper Builder quota overrides (admin-set): batch name, or '*' for all batches.

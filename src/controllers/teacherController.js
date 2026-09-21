@@ -20,6 +20,13 @@ const { invalidateUserCache } = require('../middleware/auth');
 // Version of the terms a self-registering teacher agrees to: the free plan allows
 // 4 papers per batch, and unlimited Paper Builder needs 10 paid students in that batch.
 const TEACHER_TERMS_VERSION = 'teacher-terms-v1';
+const YOUTUBE_TERMS_VERSION = 'youtube-partner-terms-v1';
+const { getConfig: getPartnerConfig } = require('../utils/partnerCommission');
+
+function clientIp(req) {
+  const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return (fwd || req.ip || '').slice(0, 64);
+}
 
 function normalizeCode(value) {
   return String(value || '').trim().toUpperCase();
@@ -42,6 +49,9 @@ function serializeTeacher(t) {
     validity_until: normalizeExpiryDate(t.validity_until),
     institute_name: t.institute_name || '',
     board_papers_allowed: t.board_papers_allowed === true,
+    channel_name: t.channel_name || '',
+    channel_url: t.channel_url || '',
+    terms_version: t.terms_version || '',
     partner_type: t.partner_type || '',
     commission_enabled: t.commission_enabled === true,
     commission_mode: t.commission_mode || 'flat',
@@ -66,12 +76,22 @@ function serializeTeacher(t) {
 exports.registerTeacher = asyncHandler(async (req, res) => {
   const name = String(req.body.name || '').trim();
   const mobile = String(req.body.mobile || '').trim();
+  const partnerType = String(req.body.partner_type || 'school').trim().toLowerCase();
   const institute = String(req.body.institute_name || '').trim();
+  const channelName = String(req.body.channel_name || '').trim().slice(0, 100);
+  const channelUrl = String(req.body.channel_url || '').trim().slice(0, 300);
   const pin = String(req.body.pin || '').trim();
 
+  if (!['school', 'youtube'].includes(partnerType)) throw new AppError('Choose School teacher or YouTube partner', 400);
   if (!name) throw new AppError('Name is required', 400);
   if (!isValidMobile(mobile)) throw new AppError('A valid 10-digit mobile number is required', 400);
-  if (!institute) throw new AppError('Institute / coaching name is required', 400);
+  if (partnerType === 'school' && !institute) throw new AppError('Institute / coaching name is required', 400);
+  if (partnerType === 'youtube') {
+    if (!channelName) throw new AppError('YouTube channel name is required', 400);
+    if (!/^https?:\/\/(www\.|m\.)?(youtube\.com|youtu\.be)\//i.test(channelUrl)) {
+      throw new AppError('Enter your YouTube channel link, for example https://www.youtube.com/@yourchannel', 400);
+    }
+  }
   if (!/^\d{4}$/.test(pin)) throw new AppError('PIN must be 4 digits', 400);
   if (isWeakPin(pin)) throw new AppError('PIN is too easy to guess (avoid 0000, 1234, repeating patterns)', 400);
   if (req.body.agree !== true) throw new AppError('You must agree to the terms to register', 400);
@@ -90,17 +110,30 @@ exports.registerTeacher = asyncHandler(async (req, res) => {
     throw new AppError('Could not generate a teacher code, please try again', 500);
   }
 
+  // Registering makes the teacher a partner straight away: commission is switched on with the
+  // default rate for the type (edited in Admin > Partners). The account itself still waits for approval.
+  const cfg = await getPartnerConfig();
+  const isYoutube = partnerType === 'youtube';
+
   await User.create({
     user_id: `teacher-${randomUUID()}`,
     name,
     role: 'teacher',
     teacher_code: teacherCode,
     mobile,
-    institute_name: institute,
+    institute_name: isYoutube ? '' : institute,
+    channel_name: isYoutube ? channelName : '',
+    channel_url: isYoutube ? channelUrl : '',
+    partner_type: partnerType,
+    commission_enabled: true,
+    commission_mode: isYoutube ? 'flat' : 'percent',
+    commission_value: isYoutube ? cfg.youtube_flat : cfg.school_percent,
+    commission_first_payment_only: true,
     status: 'pending',
     request_source: 'self',
     terms_accepted_at: new Date(),
-    terms_version: TEACHER_TERMS_VERSION,
+    terms_version: isYoutube ? YOUTUBE_TERMS_VERSION : TEACHER_TERMS_VERSION,
+    terms_ip: clientIp(req),
     assigned_students: [],
     pin_hash: User.hashPin(pin),
   });

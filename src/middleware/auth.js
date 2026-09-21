@@ -119,11 +119,22 @@ function _teacherDenied(req, res) {
   return false;
 }
 
+// A YouTube partner earns commission but must not see student data or use teacher tools.
+// Only the partner (earnings) endpoints and device-token registration stay open to them.
+function _youtubePartnerBlocked(req, res) {
+  if (req.userDoc?.partner_type !== 'youtube') return false;
+  const url = String(req.originalUrl || '');
+  if (url.startsWith('/api/partners/') || url.startsWith('/api/teacher/device-token')) return false;
+  res.status(403).json({ success: false, code: 'PARTNER_NO_ACCESS', message: 'This feature is not available for YouTube partner accounts.' });
+  return true;
+}
+
 async function requireTeacher(req, res, next) {
   const payload = await _attachResolvedUser(req);
   if (!payload) return res.status(401).json({ success: false, message: 'Authentication required' });
   if (payload.role !== 'teacher') return res.status(403).json({ success: false, message: 'Teacher access required' });
   if (_teacherDenied(req, res)) return;
+  if (_youtubePartnerBlocked(req, res)) return;
   next();
 }
 
@@ -140,6 +151,7 @@ async function requireTeacherOrAdmin(req, res, next) {
     return res.status(403).json({ success: false, message: 'Teacher or admin access required' });
   }
   if (payload.role === 'teacher' && _teacherDenied(req, res)) return;
+  if (payload.role === 'teacher' && _youtubePartnerBlocked(req, res)) return;
   next();
 }
 

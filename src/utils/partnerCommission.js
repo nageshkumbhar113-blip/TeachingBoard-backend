@@ -6,9 +6,13 @@ const PartnerConfig = require('../models/PartnerConfig');
 const IST_MS = 5.5 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+const DEFAULT_PRIZES = [{ count: 5, title: 'Compass box' }, { count: 8, title: 'Stationery kit' }, { count: 15, title: 'School bag' }];
+
 async function getConfig() {
   let cfg = await PartnerConfig.findOne({ key: 'main' }).lean();
   if (!cfg) cfg = (await PartnerConfig.create({ key: 'main' })).toObject();
+  // a settings document saved before prizes existed has no list yet
+  if (!Array.isArray(cfg.prizes)) cfg = { ...cfg, prizes: DEFAULT_PRIZES };
   return cfg;
 }
 

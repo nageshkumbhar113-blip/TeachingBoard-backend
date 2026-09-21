@@ -61,9 +61,14 @@ function serializeEntry(e) {
 
 // ── Admin: settings ───────────────────────────────────────────────────────────
 
+const configView = cfg => ({
+  hold_days: cfg.hold_days, min_payout: cfg.min_payout, youtube_flat: cfg.youtube_flat, school_percent: cfg.school_percent,
+  prizes: (cfg.prizes || []).map(p => ({ count: p.count, title: p.title })),
+});
+
 exports.getPartnerConfig = asyncHandler(async (_req, res) => {
   const cfg = await getConfig();
-  res.json({ success: true, data: { hold_days: cfg.hold_days, min_payout: cfg.min_payout, youtube_flat: cfg.youtube_flat, school_percent: cfg.school_percent } });
+  res.json({ success: true, data: configView(cfg) });
 });
 
 exports.setPartnerConfig = asyncHandler(async (req, res) => {
@@ -78,9 +83,23 @@ exports.setPartnerConfig = asyncHandler(async (req, res) => {
   num('min_payout', 0, 100000);
   num('youtube_flat', 0, 10000);
   num('school_percent', 0, 100);
+  if (req.body.prizes !== undefined) {
+    if (!Array.isArray(req.body.prizes) || req.body.prizes.length > 8) throw new AppError('prizes must be a list of at most 8 items', 400);
+    const seen = new Set();
+    const prizes = req.body.prizes.map(p => {
+      const count = Number(p?.count);
+      const title = String(p?.title || '').trim().slice(0, 60);
+      if (!Number.isInteger(count) || count < 1 || count > 1000) throw new AppError('Each prize needs a friend count between 1 and 1000', 400);
+      if (!title) throw new AppError('Each prize needs a name', 400);
+      if (seen.has(count)) throw new AppError('Two prizes cannot have the same friend count', 400);
+      seen.add(count);
+      return { count, title };
+    }).sort((a, b) => a.count - b.count);
+    patch.prizes = prizes;
+  }
   await PartnerConfig.updateOne({ key: 'main' }, { $set: patch }, { upsert: true });
   const cfg = await getConfig();
-  res.json({ success: true, data: { hold_days: cfg.hold_days, min_payout: cfg.min_payout, youtube_flat: cfg.youtube_flat, school_percent: cfg.school_percent } });
+  res.json({ success: true, data: configView(cfg) });
 });
 
 // ── Admin: overview of every partner's running balance ───────────────────────

@@ -286,6 +286,15 @@ exports.selfRegister = asyncHandler(async (req, res) => {
     }
   }
 
+  // Optional friend code (?ref=): the student who shared the app. A wrong, own or same-mobile code is
+  // ignored quietly - registration must never fail because of a referral.
+  let friendCode = '';
+  const refCode = normalizeStudentCode(req.body.ref_code);
+  if (refCode) {
+    const friend = await User.findOne({ role: 'student', student_code: refCode }).select('student_code mobile').lean();
+    if (friend && friend.mobile !== mobile) friendCode = friend.student_code;
+  }
+
   // Auto-generate unique student_code from name
   const prefix = name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) || 'STU';
   let student_code, attempts = 0;
@@ -310,6 +319,7 @@ exports.selfRegister = asyncHandler(async (req, res) => {
     approved_by:    'auto',
     request_source: 'self',
     referred_by_teacher: teacherDoc ? (teacherDoc.teacher_code || '') : '',
+    referred_by_student: friendCode,
     pin_hash:       User.hashPin(pin),
   });
 

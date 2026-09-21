@@ -9,6 +9,11 @@ const partnerConfigSchema = new mongoose.Schema(
     // Defaults offered when the admin turns commission on for a teacher (per-teacher values override).
     youtube_flat: { type: Number, default: 30, min: 0 },
     school_percent: { type: Number, default: 15, min: 0, max: 100 },
+    // Friend-referral prizes for students: reached when that many referred friends have paid.
+    prizes: {
+      type: [{ count: { type: Number, min: 1 }, title: { type: String, trim: true }, _id: false }],
+      default: () => [{ count: 5, title: 'Compass box' }, { count: 8, title: 'Stationery kit' }, { count: 15, title: 'School bag' }],
+    },
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }, versionKey: false }
 );
