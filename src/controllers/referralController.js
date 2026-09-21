@@ -108,8 +108,13 @@ exports.claimPrize = asyncHandler(async (req, res) => {
     milestone, title: prize.title, friends_at_claim: available, friends_used: available,
     recipient_name: recipient, phone, address, pincode, parent_consent: true,
   });
-  // Two claims sent at the same moment must not spend the same friends twice
-  if (counts.counted - (await spentFriends(s.student_code)) < 0) {
+  // Two claims sent at the same moment must not spend the same friends twice: the earlier one (by
+  // time, then id) keeps its friends, a later one that no longer fits is removed.
+  const earlier = await ReferralClaim.find({ student_code: s.student_code, status: { $ne: 'rejected' }, _id: { $ne: claim._id } }).select('milestone friends_used created_at').lean();
+  const before = earlier
+    .filter(c => new Date(c.created_at) < new Date(claim.created_at) || (+new Date(c.created_at) === +new Date(claim.created_at) && String(c._id) < String(claim._id)))
+    .reduce((t, c) => t + (Number(c.friends_used) || Number(c.milestone) || 0), 0);
+  if (counts.counted - before < (claim.friends_used || 0)) {
     await ReferralClaim.deleteOne({ _id: claim._id });
     throw new AppError('You do not have enough unused friends for this prize', 409);
   }
