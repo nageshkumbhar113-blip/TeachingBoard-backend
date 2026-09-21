@@ -127,3 +127,40 @@ exports.updateClaim = asyncHandler(async (req, res) => {
 });
 
 exports.countFriends = countFriends;
+
+// GET /api/referrals/summary (admin): every student who has shared the app, with friend counts.
+exports.summary = asyncHandler(async (req, res) => {
+  const friends = await User.find({ role: 'student', referred_by_student: { $ne: '' } })
+    .select('name student_code user_id referred_by_student created_at').lean();
+  if (!friends.length) return res.json({ success: true, data: [], prizes: (await getConfig()).prizes });
+  const cfg = await getConfig();
+  const cutoff = new Date(Date.now() - (cfg.hold_days || 0) * DAY_MS);
+  const subs = await StudentSubscription.find({
+    student_user_id: { $in: friends.map(f => f.user_id) },
+    payment_verified: true, is_trial: false, amount: { $gt: 0 }, status: { $nin: ['cancelled', 'failed'] },
+  }).select('student_user_id start_date created_at').lean();
+  const firstPaid = new Map();
+  for (const s of subs) {
+    const at = s.start_date || s.created_at;
+    const prev = firstPaid.get(s.student_user_id);
+    if (!prev || at < prev) firstPaid.set(s.student_user_id, at);
+  }
+  const owners = new Map();
+  for (const f of friends) {
+    const o = owners.get(f.referred_by_student) || { code: f.referred_by_student, joined: 0, paid: 0, pending: 0, friends: [] };
+    const at = firstPaid.get(f.user_id);
+    const state = !at ? 'not paid' : at <= cutoff ? 'paid' : 'in wait';
+    o.joined++;
+    if (state === 'paid') o.paid++; else if (state === 'in wait') o.pending++;
+    o.friends.push({ name: f.name, code: f.student_code, state, joined_at: f.created_at });
+    owners.set(o.code, o);
+  }
+  const names = new Map((await User.find({ role: 'student', student_code: { $in: [...owners.keys()] } }).select('name student_code').lean()).map(u => [u.student_code, u.name]));
+  const claims = await ReferralClaim.find({ student_code: { $in: [...owners.keys()] } }).select('student_code milestone status').lean();
+  const rows = [...owners.values()].map(o => ({
+    ...o,
+    name: names.get(o.code) || '',
+    claims: claims.filter(c => c.student_code === o.code).map(c => ({ milestone: c.milestone, status: c.status })),
+  })).sort((a, b) => b.paid - a.paid || b.joined - a.joined);
+  res.json({ success: true, data: rows, prizes: cfg.prizes });
+});

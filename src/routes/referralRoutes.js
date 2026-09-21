@@ -10,6 +10,7 @@ router.post('/me/claim',   requireStudent, c.claimPrize);
 
 // Admin: prize requests to send
 router.get('/claims',      requireAdmin, c.listClaims);
+router.get('/summary',     requireAdmin, c.summary);
 router.patch('/claims/:id', requireAdmin, c.updateClaim);
 
 module.exports = router;
