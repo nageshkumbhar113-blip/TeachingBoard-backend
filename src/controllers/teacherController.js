@@ -42,6 +42,14 @@ function serializeTeacher(t) {
     validity_until: normalizeExpiryDate(t.validity_until),
     institute_name: t.institute_name || '',
     board_papers_allowed: t.board_papers_allowed === true,
+    partner_type: t.partner_type || '',
+    commission_enabled: t.commission_enabled === true,
+    commission_mode: t.commission_mode || 'flat',
+    commission_value: t.commission_value || 0,
+    commission_first_payment_only: t.commission_first_payment_only !== false,
+    payout_upi_id: t.payout_upi_id || '',
+    payout_name: t.payout_name || '',
+    pan: t.pan || '',
     request_source: t.request_source || 'admin',
     terms_accepted_at: t.terms_accepted_at || null,
     approved_at: t.approved_at || null,
@@ -177,6 +185,27 @@ exports.updateTeacher = asyncHandler(async (req, res) => {
   if (req.body.board_papers_allowed !== undefined) {
     teacher.board_papers_allowed = req.body.board_papers_allowed === true;
   }
+
+  // Partner programme settings (admin only; this route is admin-only)
+  if (req.body.partner_type !== undefined) {
+    const pt = String(req.body.partner_type || '').trim().toLowerCase();
+    if (!['', 'school', 'youtube'].includes(pt)) throw new AppError('partner_type must be school or youtube', 400);
+    teacher.partner_type = pt;
+  }
+  if (req.body.commission_enabled !== undefined) teacher.commission_enabled = req.body.commission_enabled === true;
+  if (req.body.commission_mode !== undefined) {
+    const m = String(req.body.commission_mode || '').trim().toLowerCase();
+    if (!['flat', 'percent'].includes(m)) throw new AppError('commission_mode must be flat or percent', 400);
+    teacher.commission_mode = m;
+  }
+  if (req.body.commission_value !== undefined) {
+    const v = Number(req.body.commission_value);
+    if (!Number.isFinite(v) || v < 0 || v > 100000 || (teacher.commission_mode === 'percent' && v > 100)) {
+      throw new AppError('commission_value is out of range', 400);
+    }
+    teacher.commission_value = v;
+  }
+  if (req.body.commission_first_payment_only !== undefined) teacher.commission_first_payment_only = req.body.commission_first_payment_only !== false;
 
   if (req.body.validity_until !== undefined) {
     teacher.validity_until = parseValidity(req.body.validity_until);

@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const Batch = require('../models/Batch');
+const { recordCommissionForPayment } = require('../utils/partnerCommission');
 const StudentSubscription = require('../models/StudentSubscription');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
@@ -171,6 +172,8 @@ exports.verifyPayment = asyncHandler(async (req, res) => {
 
   await activateStudentForBatch(student, sub.batch, expiry);
 
+  await recordCommissionForPayment(sub, student);
+
   res.json({ success: true, message: 'Payment verified', student: { status: student.status, expiry_date: student.expiry_date } });
 });
 
@@ -218,6 +221,8 @@ exports.verifyPaymentPublic = asyncHandler(async (req, res) => {
   await sub.save();
 
   await activateStudentForBatch(student, sub.batch, expiry);
+
+  await recordCommissionForPayment(sub, student);
 
   res.json({ success: true, message: 'Payment verified' });
 });
@@ -292,6 +297,8 @@ exports.webhook = asyncHandler(async (req, res) => {
     await sub.save();
 
     await activateStudentForBatch(student, sub.batch, expiry);
+
+    await recordCommissionForPayment(sub, student);
 
     return res.status(200).json({ success: true, message: 'Payment processed' });
   }

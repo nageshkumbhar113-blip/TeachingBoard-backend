@@ -309,6 +309,7 @@ exports.selfRegister = asyncHandler(async (req, res) => {
     approved_at:    new Date(),
     approved_by:    'auto',
     request_source: 'self',
+    referred_by_teacher: teacherDoc ? (teacherDoc.teacher_code || '') : '',
     pin_hash:       User.hashPin(pin),
   });
 

@@ -52,6 +52,17 @@ const userSchema = new mongoose.Schema(
     institute_name:     { type: String, default: '', trim: true },
     // Board-style (exam look-alike) papers are off for teachers unless an admin allows them.
     board_papers_allowed: { type: Boolean, default: false },
+    // Partner programme (YouTube teacher / school teacher earning a commission on linked students' payments).
+    partner_type:       { type: String, enum: ['', 'school', 'youtube'], default: '' },
+    commission_enabled: { type: Boolean, default: false },
+    commission_mode:    { type: String, enum: ['flat', 'percent'], default: 'flat' },
+    commission_value:   { type: Number, default: 0, min: 0 },   // rupees (flat) or percent
+    commission_first_payment_only: { type: Boolean, default: true },
+    payout_upi_id:      { type: String, default: '', trim: true },
+    payout_name:        { type: String, default: '', trim: true },
+    pan:                { type: String, default: '', trim: true },
+    // Student side: the teacher/partner code the student registered with (set once).
+    referred_by_teacher: { type: String, default: '', trim: true },
     terms_accepted_at:  { type: Date, default: null },
     terms_version:      { type: String, default: '' },
     // Paper Builder quota overrides (admin-set): batch name, or '*' for all batches.
