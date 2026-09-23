@@ -98,6 +98,7 @@ exports.createBlock = asyncHandler(async (req, res) => {
 });
 
 exports.updateBlock = asyncHandler(async (req, res) => {
+  if (!/^[0-9a-fA-F]{24}$/.test(String(req.params.id))) throw new AppError('Block not found', 404);
   const { error, doc } = validateBlock(req.body, 0);
   if (error) throw new AppError(error, 400);
   const block = await PassageBlock.findByIdAndUpdate(req.params.id, doc, { new: true });
@@ -107,6 +108,7 @@ exports.updateBlock = asyncHandler(async (req, res) => {
 });
 
 exports.deleteBlock = asyncHandler(async (req, res) => {
+  if (!/^[0-9a-fA-F]{24}$/.test(String(req.params.id))) throw new AppError('Block not found', 404);
   const block = await PassageBlock.findByIdAndDelete(req.params.id);
   if (!block) throw new AppError('Block not found', 404);
   invalidateContentAccessCache();
@@ -129,6 +131,7 @@ exports.listBlocks = asyncHandler(async (req, res) => {
 });
 
 exports.getBlock = asyncHandler(async (req, res) => {
+  if (!/^[0-9a-fA-F]{24}$/.test(String(req.params.id))) throw new AppError('Block not found', 404);
   const block = await PassageBlock.findById(req.params.id);
   if (!block) throw new AppError('Block not found', 404);
   res.json({ success: true, data: serialize(block) });

@@ -590,7 +590,9 @@ exports.createPaperManual = async (req, res) => {
     // that carries a passageBlockId needs that block's total marks loaded first (see
     // utils/paperSections.js's sanitizeStructure doc-comment).
     const rawSectionsIn = Array.isArray(req.body.sections) ? req.body.sections : [];
-    const passageBlockIds = [...new Set(rawSectionsIn.map(s => String(s?.passageBlockId || '')).filter(Boolean))];
+    // Only real ObjectId-shaped ids are ever looked up — an invalid id (typo, tampering) is simply
+    // "not found" to sanitizeStructure below, rather than a 500 from Mongoose's CastError.
+    const passageBlockIds = [...new Set(rawSectionsIn.map(s => String(s?.passageBlockId || '')).filter(id => /^[0-9a-fA-F]{24}$/.test(id)))];
     let passageBlocksMap = new Map();
     let passageBlockDocs = [];
     if (passageBlockIds.length) {
