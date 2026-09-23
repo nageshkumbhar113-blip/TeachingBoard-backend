@@ -9,10 +9,15 @@ function _str(v, max) {
 }
 
 // Returns { sections, header, layout } cleaned for storage, or throws { message } via the callback.
-function sanitizeStructure(body, questions) {
+// passageBlocks (optional): Map<blockId, totalMarks> for every PassageBlock the caller already
+// loaded from the DB — a "passage" section carries the whole block as one unit instead of
+// individual questions (see models/PassageBlock.js), so its marks come from the block, not
+// from counting attempted questions.
+function sanitizeStructure(body, questions, passageBlocks) {
   const layout = body.layout === 'board' ? 'board' : 'practice';
   if (layout !== 'board') return { layout: 'practice', sections: [], header: undefined, error: null };
 
+  const blocks = passageBlocks instanceof Map ? passageBlocks : new Map();
   const rawSections = Array.isArray(body.sections) ? body.sections : [];
   if (!rawSections.length) return { error: 'A board-style paper needs at least one section' };
   if (rawSections.length > MAX_SECTIONS) return { error: `A paper can have at most ${MAX_SECTIONS} sections` };
@@ -24,6 +29,17 @@ function sanitizeStructure(body, questions) {
     if (!id) return { error: 'Every section needs an id' };
     if (seen.has(id)) return { error: `Duplicate section id "${id}"` };
     seen.add(id);
+
+    const passageBlockId = _str(s.passageBlockId, 40);
+    if (passageBlockId) {
+      if (!blocks.has(passageBlockId)) return { error: `Section ${_str(s.qNo, 8)}: passage block not found` };
+      sections.push({
+        id, qNo: _str(s.qNo, 8), part: _str(s.part, 4), instruction: _str(s.instruction, 400),
+        passageBlockId, marksEach: blocks.get(passageBlockId), attempt: 1,
+      });
+      continue;
+    }
+
     const marksEach = Number(s.marksEach);
     const attempt = Number(s.attempt);
     if (!(marksEach > 0)) return { error: `Section ${_str(s.qNo, 8)} needs marks per question above 0` };
@@ -38,13 +54,15 @@ function sanitizeStructure(body, questions) {
     });
   }
 
-  // Every question must sit in a known section, and each section must have enough questions.
-  const counts = new Map(sections.map(s => [s.id, 0]));
+  // Every question must sit in a known, non-passage section, and each such section must have
+  // enough questions. A passage section carries its block instead and takes no individual questions.
+  const counts = new Map(sections.filter(s => !s.passageBlockId).map(s => [s.id, 0]));
   for (const q of questions) {
     if (!counts.has(q.sectionId)) return { error: 'Every question must be assigned to a section' };
     counts.set(q.sectionId, counts.get(q.sectionId) + 1);
   }
   for (const s of sections) {
+    if (s.passageBlockId) continue;
     const n = counts.get(s.id);
     if (n < s.attempt) {
       return { error: `Section ${s.qNo}${s.part ? ` (${s.part})` : ''}: attempt ${s.attempt} but only ${n} question${n === 1 ? '' : 's'} added` };

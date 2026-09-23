@@ -66,7 +66,12 @@ const paperSectionSchema = new mongoose.Schema(
     part:        { type: String, default: '' },
     instruction: { type: String, default: '' },
     marksEach:   { type: Number, required: true, min: 0 },
-    attempt:     { type: Number, required: true, min: 1 }
+    attempt:     { type: Number, required: true, min: 1 },
+    // Set only when this section carries a whole PassageBlock instead of individual questions
+    // (see models/PassageBlock.js). Snapshotted at save time so the printed paper never changes
+    // even if the block is later edited or deleted.
+    passageBlockId: { type: String, default: undefined },
+    passageSnapshot: { type: mongoose.Schema.Types.Mixed, default: undefined },
   },
   { _id: false }
 );

@@ -17,6 +17,7 @@ const {
 const { getQuota, limitMessage } = require('../utils/paperQuota');
 const { sanitizeStructure, boardTotalMarks, mcqSnapshot, mcqFormat } = require('../utils/paperSections');
 const McqQuestion = require('../models/Question');
+const PassageBlock = require('../models/PassageBlock');
 
 // Teachers may save only a limited number of papers per batch until enough of
 // that batch's students have paid (utils/paperQuota.js). Admins are never limited.
@@ -585,8 +586,18 @@ exports.createPaperManual = async (req, res) => {
   try {
     const { batchId, chapterId, subjectId, chapterIds, subjectIds, paperTitle, questions } = req.body;
 
-    // Board-style structure (optional) - validated before anything is read or written.
-    const structure = sanitizeStructure(req.body, Array.isArray(questions) ? questions : []);
+    // Board-style structure (optional) - validated before anything is read or written. A section
+    // that carries a passageBlockId needs that block's total marks loaded first (see
+    // utils/paperSections.js's sanitizeStructure doc-comment).
+    const rawSectionsIn = Array.isArray(req.body.sections) ? req.body.sections : [];
+    const passageBlockIds = [...new Set(rawSectionsIn.map(s => String(s?.passageBlockId || '')).filter(Boolean))];
+    let passageBlocksMap = new Map();
+    let passageBlockDocs = [];
+    if (passageBlockIds.length) {
+      passageBlockDocs = await PassageBlock.find({ _id: { $in: passageBlockIds } }).lean();
+      passageBlocksMap = new Map(passageBlockDocs.map(b => [String(b._id), (b.type === 'writing' ? b.marks : (b.subQuestions || []).reduce((t, q) => t + (q.marks || 0), 0))]));
+    }
+    const structure = sanitizeStructure(req.body, Array.isArray(questions) ? questions : [], passageBlocksMap);
     if (structure.error) {
       return res.status(400).json({ success: false, message: structure.error });
     }
@@ -707,7 +718,13 @@ exports.createPaperManual = async (req, res) => {
       totalQuestions: selectedQuestions.length,
       questions: selectedQuestions,
       ...(structure.layout === 'board'
-        ? { layout: 'board', sections: structure.sections, header: structure.header }
+        ? {
+            layout: 'board',
+            sections: structure.sections.map(s => s.passageBlockId
+              ? { ...s, passageSnapshot: passageBlockDocs.find(b => String(b._id) === s.passageBlockId) }
+              : s),
+            header: structure.header,
+          }
         : {}),
       marksBreakdown: Object.entries(marksTally).map(([marks, count]) => ({
         marks: parseInt(marks),
@@ -731,6 +748,9 @@ exports.createPaperManual = async (req, res) => {
           $push: { usedInPapers: { paperId: paper._id, usedDate: new Date() } }
         }
       );
+    }
+    if (passageBlockIds.length) {
+      await PassageBlock.updateMany({ _id: { $in: passageBlockIds } }, { $inc: { usageCount: 1 } });
     }
 
     res.status(201).json({

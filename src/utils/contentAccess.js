@@ -1,5 +1,6 @@
 const Batch = require('../models/Batch');
 const Question = require('../models/Question');
+const PassageBlock = require('../models/PassageBlock');
 const { isExpiredDate, normalizeExpiryDate } = require('./accountStatus');
 
 // "Free chapter + paid" access rules.
@@ -28,13 +29,21 @@ async function _load() {
   const now = Date.now();
   if (_cache && now - _cache.at < _CACHE_TTL) return _cache;
 
-  const [batches, derived] = await Promise.all([
+  const [batches, derived, derivedFromPassages] = await Promise.all([
     Batch.find({}, 'name pricing_type subjects').lean(),
     // Chapters that exist only through MCQ question data (never added to the
     // Batch catalog) still count: they follow the catalog chapters, A-Z.
     Question.aggregate([
       { $match: { batch: { $ne: '' }, subject: { $ne: '' }, chapter: { $ne: '' } } },
       { $group: { _id: { batch: '$batch', subject: '$subject', chapter: '$chapter' } } },
+    ]),
+    // A chapter that exists only through a PassageBlock's chapterId (batch::subject::chapter,
+    // same composite scheme as SLSQuestion) — the rare case of a lesson-tied passage on a
+    // chapter never added to the Batch catalog. Most passage blocks have chapterId '' (unseen
+    // pool) and never reach here.
+    PassageBlock.aggregate([
+      { $match: { chapterId: { $ne: '' } } },
+      { $group: { _id: '$chapterId' } },
     ]),
   ]);
 
@@ -68,6 +77,21 @@ async function _load() {
     const sl = slot(batch, subject);
     const known = sl.catalog.some(c => _norm(c.name) === _norm(chapter));
     if (!known) sl.derived.set(_norm(chapter), chapter);
+  }
+  for (const d of derivedFromPassages) {
+    const [batchPart, subjectPart, chapterPart] = String(d._id).split('::');
+    // These parts are already normalized (makeChapterId lower-cases + dashes them), so this
+    // entry can only ever match by chapterId, never rejoin a catalog entry by display name —
+    // fine, since its only job is to make isChapterIdFree/canAccessChapterId see it at all.
+    for (const b of batches) {
+      if (_norm(b.name) !== batchPart) continue;
+      for (const s of b.subjects || []) {
+        if (_norm(s.name) !== subjectPart) continue;
+        const sl = slot(b.name, s.name);
+        const known = sl.catalog.some(c => _norm(c.name) === chapterPart) || sl.derived.has(chapterPart);
+        if (!known) sl.derived.set(chapterPart, chapterPart);
+      }
+    }
   }
 
   for (const sl of subjects.values()) {
