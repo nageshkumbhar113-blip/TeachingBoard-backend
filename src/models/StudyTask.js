@@ -21,7 +21,7 @@ const studyTaskSchema = new mongoose.Schema(
     subjectId:  { type: String, required: true, trim: true },
     chapterId:  { type: String, required: true, trim: true },
     chapterName: { type: String, default: '', trim: true },
-    itemType:   { type: String, enum: ['notes', 'exercise', 'passage'], required: true },
+    itemType:   { type: String, enum: ['notes', 'exercise', 'passage', 'mcq'], required: true },
     refId:      { type: String, required: true, trim: true },
     label:      { type: String, required: true, trim: true },
     sequence:   { type: Number, default: 0 }, // display order within the day

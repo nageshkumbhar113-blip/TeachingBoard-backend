@@ -36,6 +36,7 @@ const studyPlanSchema = new mongoose.Schema(
     maxItemsPerDay:    { type: Number, default: 4, min: 1, max: 10 }, // exercise groups/day
     maxNotesPerDay:    { type: Number, default: 8, min: 1, max: 20 }, // notes concepts/day
     maxPassagesPerDay: { type: Number, default: 3, min: 1, max: 10 }, // passage blocks/day
+    maxMcqPerDay:      { type: Number, default: 6, min: 1, max: 20 }, // MCQ self-checks/day (one per chapter, quick like notes)
 
     subjects: { type: [studyPlanSubjectSchema], default: [] },
     totalItemsOverall: { type: Number, default: 0, min: 0 }, // sum of subjects[].totalItems, frozen with them

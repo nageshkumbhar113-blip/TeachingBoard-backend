@@ -7,6 +7,7 @@ const Batch = require('../models/Batch');
 const Concept = require('../models/Concept');
 const SLSQuestion = require('../models/SLSQuestion');
 const PassageBlock = require('../models/PassageBlock');
+const Question = require('../models/Question');
 const StudyPlan = require('../models/StudyPlan');
 const StudyPlanCursor = require('../models/StudyPlanCursor');
 const StudyTask = require('../models/StudyTask');
@@ -62,21 +63,30 @@ function _naturalCompare(a, b) {
 
 // ── content sizing: one subject's ordered StudyItem list ────────────────────
 
+// Recovers the catalog's real chapter name (original casing/spacing) even when the caller only
+// passed normalized chapterId strings — needed because the MCQ Question bank keys off the raw
+// batch/subject/chapter strings (an older scheme, predating chapterId), not the composite id.
 async function _chapterList(batchId, subjectId, chapterIds) {
-  if (Array.isArray(chapterIds) && chapterIds.length) {
-    return chapterIds.map(id => ({ chapterId: id, name: String(id).split('::')[2] || id }));
-  }
+  const norm = s => String(s || '').trim().toLowerCase().replace(/\s+/g, '-');
   const batch = await Batch.findOne({ name: batchId, 'subjects.name': subjectId }).lean();
   const subjectDoc = batch?.subjects.find(s => s.name === subjectId);
-  const norm = s => String(s || '').trim().toLowerCase().replace(/\s+/g, '-');
-  const chapters = (subjectDoc?.chapters || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
-  return chapters.map(c => ({ chapterId: `${norm(batchId)}::${norm(subjectId)}::${norm(c.name)}`, name: c.name }));
+  const catalogChapters = (subjectDoc?.chapters || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+  if (Array.isArray(chapterIds) && chapterIds.length) {
+    const byNormalized = new Map(catalogChapters.map(c => [norm(c.name), c.name]));
+    return chapterIds.map(id => {
+      const guess = String(id).split('::')[2] || id;
+      return { chapterId: id, name: byNormalized.get(guess) || guess };
+    });
+  }
+  return catalogChapters.map(c => ({ chapterId: `${norm(batchId)}::${norm(subjectId)}::${norm(c.name)}`, name: c.name }));
 }
 
-// Notes concepts, then Passage blocks, then Exercise groups, per chapter, in catalog chapter order —
-// matches how a student naturally studies a lesson (learn it, read/practice the passage, then drill
-// the exercises). Passage blocks only count here when tagged to one of the plan's own chapters — the
-// chapterId-blank "unseen pool" used for paper generation isn't lesson-scoped, so it's excluded.
+// Notes concepts, then Passage blocks, then Exercise groups, then an MCQ self-check, per chapter, in
+// catalog chapter order — matches how a student naturally studies a lesson (learn it, read/practice
+// the passage, drill the exercises, then a quick MCQ check at the end). Passage blocks only count
+// here when tagged to one of the plan's own chapters — the chapterId-blank "unseen pool" used for
+// paper generation isn't lesson-scoped, so it's excluded. MCQs aren't grouped by anything in the bank
+// (unlike Exercise's exerciseNo), so one chapter's whole MCQ pool becomes a single StudyItem.
 async function materializeSubjectItems(batchId, subjectId, chapterIds) {
   const chapters = await _chapterList(batchId, subjectId, chapterIds);
   const items = [];
@@ -94,6 +104,10 @@ async function materializeSubjectItems(batchId, subjectId, chapterIds) {
     for (const no of exerciseNos) {
       items.push({ itemType: 'exercise', chapterId: ch.chapterId, chapterName: ch.name, refId: no, label: `Exercise ${no}` });
     }
+    const hasMcq = await Question.exists({ batch: batchId, subject: subjectId, chapter: ch.name });
+    if (hasMcq) {
+      items.push({ itemType: 'mcq', chapterId: ch.chapterId, chapterName: ch.name, refId: ch.chapterId, label: `MCQ Practice — ${ch.name}` });
+    }
   }
   return items;
 }
@@ -103,15 +117,17 @@ async function materializeSubjectItems(batchId, subjectId, chapterIds) {
 const DEFAULT_MAX_ITEMS_PER_DAY = 4;      // exercise groups/day
 const DEFAULT_MAX_NOTES_PER_DAY = 8;      // notes concepts/day — reading is lighter than solving, so this is looser
 const DEFAULT_MAX_PASSAGES_PER_DAY = 3;   // passage blocks/day — sub-questions make these closer to exercise effort
+const DEFAULT_MAX_MCQ_PER_DAY = 6;        // MCQ self-checks/day — quick, so looser like notes
 
 function _perDayCaps(plan) {
   return {
     notes: plan.maxNotesPerDay || DEFAULT_MAX_NOTES_PER_DAY,
     exercise: plan.maxItemsPerDay || DEFAULT_MAX_ITEMS_PER_DAY,
     passage: plan.maxPassagesPerDay || DEFAULT_MAX_PASSAGES_PER_DAY,
+    mcq: plan.maxMcqPerDay || DEFAULT_MAX_MCQ_PER_DAY,
   };
 }
-const ITEM_TYPES = ['notes', 'exercise', 'passage'];
+const ITEM_TYPES = ['notes', 'exercise', 'passage', 'mcq'];
 
 /**
  * Checks feasibility and, unless it only warns, creates the plan + per-subject cursors + today's
@@ -120,7 +136,7 @@ const ITEM_TYPES = ['notes', 'exercise', 'passage'];
  * (notes vs exercise) — a subject with lots of notes but few exercises should not be flagged just
  * because the combined item count looks high; each type has its own realistic daily ceiling.
  */
-async function createPlan({ studentUserId, studentCode, batchId, examName, targetDateStr, offDaysOfWeek = [], revisionSharePercent = 15, subjects, force = false, maxItemsPerDay = DEFAULT_MAX_ITEMS_PER_DAY, maxNotesPerDay = DEFAULT_MAX_NOTES_PER_DAY, maxPassagesPerDay = DEFAULT_MAX_PASSAGES_PER_DAY }) {
+async function createPlan({ studentUserId, studentCode, batchId, examName, targetDateStr, offDaysOfWeek = [], revisionSharePercent = 15, subjects, force = false, maxItemsPerDay = DEFAULT_MAX_ITEMS_PER_DAY, maxNotesPerDay = DEFAULT_MAX_NOTES_PER_DAY, maxPassagesPerDay = DEFAULT_MAX_PASSAGES_PER_DAY, maxMcqPerDay = DEFAULT_MAX_MCQ_PER_DAY }) {
   const startStr = todayStr();
   if (targetDateStr <= startStr) return { error: 'targetDate must be after today' };
 
@@ -128,7 +144,7 @@ async function createPlan({ studentUserId, studentCode, batchId, examName, targe
   if (totalStudyDays <= 0) return { error: 'No study days between today and the target date with these weekly offs' };
   const revisionDays = Math.max(0, Math.round(totalStudyDays * (revisionSharePercent / 100)));
   const newContentDays = Math.max(1, totalStudyDays - revisionDays);
-  const caps = { notes: maxNotesPerDay, exercise: maxItemsPerDay, passage: maxPassagesPerDay };
+  const caps = { notes: maxNotesPerDay, exercise: maxItemsPerDay, passage: maxPassagesPerDay, mcq: maxMcqPerDay };
 
   const built = [];
   const warnings = [];
@@ -139,7 +155,8 @@ async function createPlan({ studentUserId, studentCode, batchId, examName, targe
     if (ITEM_TYPES.some(t => perDay[t] > caps[t])) {
       warnings.push({
         subjectId: s.subjectId, totalItems: items.length,
-        notesPerDay: Math.ceil(perDay.notes * 10) / 10, exercisesPerDay: Math.ceil(perDay.exercise * 10) / 10, passagesPerDay: Math.ceil(perDay.passage * 10) / 10,
+        notesPerDay: Math.ceil(perDay.notes * 10) / 10, exercisesPerDay: Math.ceil(perDay.exercise * 10) / 10,
+        passagesPerDay: Math.ceil(perDay.passage * 10) / 10, mcqPerDay: Math.ceil(perDay.mcq * 10) / 10,
       });
     }
     built.push({ subjectId: s.subjectId, chapterIds: s.chapterIds || [], items });
@@ -155,7 +172,7 @@ async function createPlan({ studentUserId, studentCode, batchId, examName, targe
   const plan = await StudyPlan.create({
     studentUserId, studentCode, batchId, examName,
     startDate: strToDate(startStr), targetDate: strToDate(targetDateStr),
-    offDaysOfWeek, revisionSharePercent, maxItemsPerDay, maxNotesPerDay, maxPassagesPerDay,
+    offDaysOfWeek, revisionSharePercent, maxItemsPerDay, maxNotesPerDay, maxPassagesPerDay, maxMcqPerDay,
     subjects: built.map(s => ({ subjectId: s.subjectId, chapterIds: s.chapterIds, totalItems: s.items.length })),
     totalItemsOverall,
     status: 'active',
@@ -333,5 +350,5 @@ async function getProgress(plan) {
 module.exports = {
   todayStr, dateToStr, strToDate, addDaysStr, countStudyDays, calendarDaysBetween,
   materializeSubjectItems, createPlan, generateTasksForDate, getTodayTasks, getProgress,
-  DEFAULT_MAX_ITEMS_PER_DAY, DEFAULT_MAX_NOTES_PER_DAY, DEFAULT_MAX_PASSAGES_PER_DAY,
+  DEFAULT_MAX_ITEMS_PER_DAY, DEFAULT_MAX_NOTES_PER_DAY, DEFAULT_MAX_PASSAGES_PER_DAY, DEFAULT_MAX_MCQ_PER_DAY,
 };
