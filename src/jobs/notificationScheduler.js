@@ -22,7 +22,10 @@ const StudentSubscription = require('../models/StudentSubscription');
 const NotificationQueue = require('../models/NotificationQueue');
 const SchedulerState = require('../models/SchedulerState');
 const DefaultBannerQuote = require('../models/DefaultBannerQuote');
-const { notifyBatch } = require('../utils/studentNotify');
+const StudyPlan = require('../models/StudyPlan');
+const StudyTask = require('../models/StudyTask');
+const studyPlan = require('../utils/studyPlan');
+const { notifyBatch, notifyStudent } = require('../utils/studentNotify');
 const { sendToMany } = require('../utils/fcm');
 
 const QUEUE_POLL_MS       = 5 * 60 * 1000;   // check the debounce queue every 5 min
@@ -148,6 +151,108 @@ async function _sendPendingPaymentReminders() {
   }
 }
 
+// ── 5. Study Plan: morning "today's tasks" push (student) ───────────────────
+// Also generates the day's tasks server-side so they exist even if the student never opens the
+// app until later — utils/studyPlan.generateTasksForDate is idempotent, safe to call again here
+// even though getMyToday (controller) calls it too on demand.
+async function _sendStudyPlanMorningPush() {
+  const plans = await StudyPlan.find({ status: 'active' });
+  for (const plan of plans) {
+    try {
+      const tasks = await studyPlan.getTodayTasks(plan);
+      if (!tasks.length) continue;
+      await notifyStudent(plan.studentUserId, '📚 आजचा अभ्यास तयार आहे',
+        `आज ${tasks.length} Study Items — ${tasks.slice(0, 2).map(t => t.label).join(', ')}${tasks.length > 2 ? '...' : ''}`,
+        { type: 'study_plan_today', planId: String(plan._id) });
+    } catch (err) {
+      console.warn('study plan morning push failed for', plan.studentUserId, ':', err.message);
+    }
+  }
+}
+
+// ── 6. Study Plan: evening "pending" reminder (student) + daily summary (parent) ────────────────
+async function _sendStudyPlanEveningJobs() {
+  const today = studyPlan.todayStr();
+  const plans = await StudyPlan.find({ status: 'active' });
+  for (const plan of plans) {
+    try {
+      const tasks = await StudyTask.find({ studyPlanId: plan._id, date: today }).lean();
+      if (!tasks.length) continue;
+      const completed = tasks.filter(t => t.status === 'completed').length;
+      const pending = tasks.length - completed;
+
+      if (pending > 0) {
+        await notifyStudent(plan.studentUserId, '📚 आजचा अभ्यास अजून बाकी आहे',
+          `आज अजून ${pending} Study Items बाकी आहेत — पूर्ण करा.`, { type: 'study_plan_pending', planId: String(plan._id) });
+      }
+
+      const parents = await User.find({ role: 'parent', student_code: plan.studentCode, device_token: { $exists: true, $nin: [null, ''] } }).select('device_token').lean();
+      const tokens = [...new Set(parents.map(p => p.device_token).filter(Boolean))];
+      if (tokens.length) {
+        const percent = tasks.length ? Math.round((completed / tasks.length) * 100) : 0;
+        await sendToMany(tokens, '📖 आजचा अभ्यास अहवाल',
+          `आज ${tasks.length} पैकी ${completed} Study Items पूर्ण झाले. Progress: ${percent}%.`,
+          { type: 'study_plan_parent_daily', planId: String(plan._id) }).catch(() => {});
+      }
+    } catch (err) {
+      console.warn('study plan evening job failed for', plan.studentUserId, ':', err.message);
+    }
+  }
+}
+
+// ── 7. Study Plan: weekly teacher digest ─────────────────────────────────────
+// A snapshot, not a week-over-week delta (no history stored yet — a V2 addition) — one push per
+// teacher who has students with an active plan, not one push per student.
+async function _sendStudyPlanTeacherDigest() {
+  const teachers = await User.find({ role: 'teacher', status: 'active', device_token: { $exists: true, $nin: [null, ''] }, 'assigned_students.0': { $exists: true } }).select('user_id device_token assigned_students').lean();
+  for (const t of teachers) {
+    try {
+      const plans = await StudyPlan.find({ studentCode: { $in: t.assigned_students }, status: 'active' });
+      if (!plans.length) continue;
+      let sumPercent = 0;
+      let behindCount = 0;
+      for (const plan of plans) {
+        const progress = await studyPlan.getProgress(plan);
+        sumPercent += progress.overallPercent;
+        if (progress.onTrack.status === 'behind') behindCount++;
+      }
+      const avgPercent = Math.round(sumPercent / plans.length);
+      await sendToMany([t.device_token], '📊 Weekly Study Plan Summary',
+        `${plans.length} विद्यार्थ्यांची study plan चालू आहे, सरासरी ${avgPercent}% पूर्ण. ${behindCount} विद्यार्थी मागे आहेत.`,
+        { type: 'study_plan_teacher_weekly' }).catch(() => {});
+    } catch (err) {
+      console.warn('study plan teacher digest failed for', t.user_id, ':', err.message);
+    }
+  }
+}
+
+function _isoWeekKey(d = new Date()) {
+  const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+  return `${date.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+async function _runStudyPlanEveningJobsIfNeeded() {
+  if (new Date().getHours() < 18) return; // server local time — "evening" gate
+  const KEY = 'study_plan_evening';
+  const today = _todayStr();
+  const state = await SchedulerState.findOne({ key: KEY }).lean();
+  if (state?.last_run_date === today) return;
+  await SchedulerState.updateOne({ key: KEY }, { $set: { last_run_date: today } }, { upsert: true });
+  await _sendStudyPlanEveningJobs().catch(err => console.warn('study plan evening job failed:', err.message));
+}
+
+async function _runStudyPlanTeacherDigestIfNeeded() {
+  const KEY = 'study_plan_teacher_weekly';
+  const week = _isoWeekKey();
+  const state = await SchedulerState.findOne({ key: KEY }).lean();
+  if (state?.last_run_date === week) return;
+  await SchedulerState.updateOne({ key: KEY }, { $set: { last_run_date: week } }, { upsert: true });
+  await _sendStudyPlanTeacherDigest().catch(err => console.warn('study plan teacher digest failed:', err.message));
+}
+
 async function _runDailyJobsIfNeeded() {
   const today = _todayStr();
   const KEY = 'daily_student_notifications';
@@ -165,6 +270,7 @@ async function _runDailyJobsIfNeeded() {
   await Promise.all([
     _sendInactivityReminders().catch(err => console.warn('daily inactivity job failed:', err.message)),
     _sendDailyMotivation().catch(err => console.warn('daily motivation job failed:', err.message)),
+    _sendStudyPlanMorningPush().catch(err => console.warn('study plan morning job failed:', err.message)),
   ]);
 }
 
@@ -178,6 +284,8 @@ function start() {
     _processExerciseQueue().catch(err => console.warn('exercise queue poll failed:', err.message));
     _sendPendingPaymentReminders().catch(err => console.warn('pending payment poll failed:', err.message));
     _runDailyJobsIfNeeded().catch(err => console.warn('daily jobs check failed:', err.message));
+    _runStudyPlanEveningJobsIfNeeded().catch(err => console.warn('study plan evening check failed:', err.message));
+    _runStudyPlanTeacherDigestIfNeeded().catch(err => console.warn('study plan teacher digest check failed:', err.message));
   }, QUEUE_POLL_MS);
 
   console.log('notificationScheduler: started (poll every', QUEUE_POLL_MS / 1000, 's)');

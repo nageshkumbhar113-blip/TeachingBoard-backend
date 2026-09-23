@@ -154,6 +154,7 @@ app.use("/api/payment",          paymentRoutes);
 app.use("/api/partners",         require("./routes/partnerRoutes"));
 app.use("/api/referrals",        require("./routes/referralRoutes"));
 app.use("/api/passage-blocks",   require("./routes/passageBlockRoutes"));
+app.use("/api/study-plan",       require("./routes/studyPlanRoutes"));
 app.use("/api/admin/notes",     noteAdminRouter);
 app.use("/api/notes",           noteStudentRouter);
 app.use("/api/admin/sls",       slsAdminRouter);
