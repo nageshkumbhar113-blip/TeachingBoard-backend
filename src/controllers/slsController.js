@@ -617,7 +617,11 @@ exports.createPaperManual = async (req, res) => {
     const effectiveSubjectIds = Array.isArray(subjectIds) && subjectIds.length ? subjectIds : (subjectId ? [subjectId] : []);
     const isMulti = effectiveChapterIds.length > 1;
 
-    if (!batchId || !effectiveChapterIds.length || !effectiveSubjectIds.length || !Array.isArray(questions) || questions.length === 0) {
+    // A board paper made entirely of Passage sections has no individual questions at all —
+    // sanitizeStructure already refused it above if any section actually needed some (an
+    // "attempt N but 0 added" error), so an empty questions[] is only ever valid there.
+    const questionsCanBeEmpty = structure.layout === 'board';
+    if (!batchId || !effectiveChapterIds.length || !effectiveSubjectIds.length || !Array.isArray(questions) || (!questionsCanBeEmpty && questions.length === 0)) {
       return res.status(400).json({
         success: false,
         message: 'Missing required fields: batchId, chapterId(s), subjectId(s), questions[]'
