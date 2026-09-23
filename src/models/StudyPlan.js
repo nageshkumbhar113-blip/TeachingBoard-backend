@@ -29,6 +29,7 @@ const studyPlanSchema = new mongoose.Schema(
     targetDate: { type: Date, required: true },  // exam date / "finish by"
     offDaysOfWeek: { type: [Number], default: [] }, // 0=Sun..6=Sat, weekly off (no new items scheduled)
     revisionSharePercent: { type: Number, default: 15, min: 0, max: 50 }, // last N% of study days = revision-only, no new items
+    maxItemsPerDay: { type: Number, default: 4, min: 1, max: 10 }, // hard per-subject daily cap — also enforced on catch-up/carry-forward, not just fresh scheduling
 
     subjects: { type: [studyPlanSubjectSchema], default: [] },
     totalItemsOverall: { type: Number, default: 0, min: 0 }, // sum of subjects[].totalItems, frozen with them

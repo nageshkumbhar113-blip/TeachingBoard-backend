@@ -16,6 +16,7 @@ function serializePlan(plan) {
     revisionSharePercent: plan.revisionSharePercent,
     subjects: plan.subjects.map(s => ({ subjectId: s.subjectId, chapterIds: s.chapterIds, totalItems: s.totalItems })),
     totalItemsOverall: plan.totalItemsOverall,
+    maxItemsPerDay: plan.maxItemsPerDay,
     status: plan.status,
   };
 }
@@ -47,12 +48,14 @@ exports.createPlan = asyncHandler(async (req, res) => {
   const offDaysOfWeek = Array.isArray(req.body.offDaysOfWeek) ? req.body.offDaysOfWeek.map(Number).filter(n => n >= 0 && n <= 6) : [];
   const revisionSharePercent = req.body.revisionSharePercent !== undefined ? Number(req.body.revisionSharePercent) : 15;
   if (!(revisionSharePercent >= 0 && revisionSharePercent <= 50)) throw new AppError('revisionSharePercent must be between 0 and 50', 400);
+  const maxItemsPerDay = req.body.maxItemsPerDay !== undefined ? Number(req.body.maxItemsPerDay) : sp.DEFAULT_MAX_ITEMS_PER_DAY;
+  if (!(maxItemsPerDay >= 1 && maxItemsPerDay <= 10)) throw new AppError('maxItemsPerDay must be between 1 and 10', 400);
   const batchId = Array.isArray(s.assigned_batches) ? s.assigned_batches[0] : '';
   if (!batchId) throw new AppError('No batch assigned to this account', 400);
 
   const result = await sp.createPlan({
     studentUserId: s.user_id, studentCode: s.student_code, batchId, examName, targetDateStr: targetDate,
-    offDaysOfWeek, revisionSharePercent,
+    offDaysOfWeek, revisionSharePercent, maxItemsPerDay,
     subjects: subjects.map(x => ({ subjectId: String(x.subjectId).trim(), chapterIds: x.chapterIds || [] })),
     force: req.body.force === true,
   });

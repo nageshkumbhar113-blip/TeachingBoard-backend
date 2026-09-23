@@ -130,7 +130,7 @@ async function createPlan({ studentUserId, studentCode, batchId, examName, targe
   const plan = await StudyPlan.create({
     studentUserId, studentCode, batchId, examName,
     startDate: strToDate(startStr), targetDate: strToDate(targetDateStr),
-    offDaysOfWeek, revisionSharePercent,
+    offDaysOfWeek, revisionSharePercent, maxItemsPerDay,
     subjects: built.map(s => ({ subjectId: s.subjectId, chapterIds: s.chapterIds, totalItems: s.items.length })),
     totalItemsOverall,
     status: 'active',
@@ -147,9 +147,14 @@ async function createPlan({ studentUserId, studentCode, batchId, examName, targe
 // ── daily generation (idempotent — safe to call any number of times for any date) ──────────────
 
 /**
- * For each subject: carries any older still-pending tasks forward onto `dateStr`, then — if
- * `dateStr` hasn't been generated for yet — adds new items at a rate of (items left) / (new-content
- * study-days left), so falling behind automatically raises tomorrow's pace instead of losing content.
+ * For each subject: tops today up to `plan.maxItemsPerDay`, oldest overdue-pending items first
+ * (catch-up), then new items at a rate of (items left) / (new-content study-days left) — so falling
+ * behind raises tomorrow's pace automatically instead of losing content. The cap is enforced on the
+ * catch-up side too: if a student ignores the app for several days, the backlog drains at most
+ * `maxItemsPerDay` per subject per day, never dumping every missed day onto the one day they return
+ * (that pile-up was the actual bug behind "5 exercises in one day isn't doable" — the old code only
+ * capped *new* item generation, not carried-forward backlog, which could stack unbounded).
+ * Leftover overdue items simply stay pending with their old date and get reconsidered next call.
  * During the plan's last revisionSharePercent of days, no new items are added (revision-only).
  */
 async function generateTasksForDate(plan, dateStr) {
@@ -159,35 +164,45 @@ async function generateTasksForDate(plan, dateStr) {
   const revisionDays = Math.max(0, Math.round(totalStudyDays * (plan.revisionSharePercent / 100)));
   const newContentCutoffStr = revisionDays > 0 ? addDaysStr(targetStr, -revisionDays) : targetStr;
   const inRevisionPhase = dateStr > newContentCutoffStr;
+  const maxPerDay = plan.maxItemsPerDay || DEFAULT_MAX_ITEMS_PER_DAY;
 
   for (const cursor of cursors) {
-    // Carry forward: anything still pending from an earlier date moves onto dateStr. This runs
-    // every call (even if dateStr was already generated) so a student opening the app late in the
-    // day still sees yesterday's leftovers folded into today, not stuck in the past.
-    await StudyTask.updateMany(
-      { studyPlanId: plan._id, subjectId: cursor.subjectId, status: 'pending', date: { $lt: dateStr } },
-      { $set: { date: dateStr } }
-    );
+    if (!isStudyDay(dateStr, plan.offDaysOfWeek)) {
+      if (cursor.lastGeneratedDate !== dateStr) { cursor.lastGeneratedDate = dateStr; await cursor.save(); }
+      continue;
+    }
 
-    if (cursor.lastGeneratedDate === dateStr) continue; // new items for this date already added
-    if (!isStudyDay(dateStr, plan.offDaysOfWeek)) { cursor.lastGeneratedDate = dateStr; await cursor.save(); continue; }
+    let usedToday = await StudyTask.countDocuments({ studyPlanId: plan._id, subjectId: cursor.subjectId, date: dateStr });
+    let slotsLeft = Math.max(0, maxPerDay - usedToday);
+
+    // Catch-up: pull the oldest overdue-pending items onto today first, capped at slotsLeft.
+    if (slotsLeft > 0) {
+      const overdue = await StudyTask.find({ studyPlanId: plan._id, subjectId: cursor.subjectId, status: 'pending', date: { $lt: dateStr } })
+        .sort({ date: 1, sequence: 1 }).limit(slotsLeft).select('_id');
+      if (overdue.length) {
+        await StudyTask.updateMany({ _id: { $in: overdue.map(o => o._id) } }, { $set: { date: dateStr } });
+        usedToday += overdue.length;
+        slotsLeft -= overdue.length;
+      }
+    }
+
+    if (cursor.lastGeneratedDate === dateStr) continue; // new items for this date already added this run
 
     const remaining = cursor.items.length - cursor.nextItemIndex;
     let take = [];
-    if (remaining > 0 && !inRevisionPhase) {
+    if (remaining > 0 && !inRevisionPhase && slotsLeft > 0) {
       const daysLeftForNewContent = Math.max(1, countStudyDays(dateStr, newContentCutoffStr, plan.offDaysOfWeek));
-      const quota = Math.ceil(remaining / daysLeftForNewContent);
+      const quota = Math.min(slotsLeft, Math.ceil(remaining / daysLeftForNewContent));
       take = cursor.items.slice(cursor.nextItemIndex, cursor.nextItemIndex + quota);
     }
 
     if (take.length) {
-      const existingToday = await StudyTask.countDocuments({ studyPlanId: plan._id, date: dateStr });
       try {
         await StudyTask.insertMany(take.map((it, i) => ({
           studyPlanId: plan._id, studentUserId: plan.studentUserId, date: dateStr,
           subjectId: cursor.subjectId, chapterId: it.chapterId, chapterName: it.chapterName,
           itemType: it.itemType, refId: it.refId, label: it.label,
-          sequence: existingToday + i, status: 'pending',
+          sequence: usedToday + i, status: 'pending',
         })), { ordered: false });
       } catch (err) {
         // A duplicate-key error here (unique index on studyPlanId+subjectId+itemType+refId) means
