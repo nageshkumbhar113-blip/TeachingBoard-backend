@@ -12,7 +12,7 @@ const { mongoose } = require('../config/db');
  */
 const studyItemSchema = new mongoose.Schema(
   {
-    itemType: { type: String, enum: ['notes', 'exercise'], required: true },
+    itemType: { type: String, enum: ['notes', 'exercise', 'passage'], required: true },
     chapterId: { type: String, required: true, trim: true },
     chapterName: { type: String, default: '', trim: true },   // display snapshot
     refId: { type: String, required: true, trim: true },      // Concept._id (notes) or exerciseNo (exercise)

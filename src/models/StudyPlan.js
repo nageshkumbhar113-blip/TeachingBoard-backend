@@ -29,7 +29,13 @@ const studyPlanSchema = new mongoose.Schema(
     targetDate: { type: Date, required: true },  // exam date / "finish by"
     offDaysOfWeek: { type: [Number], default: [] }, // 0=Sun..6=Sat, weekly off (no new items scheduled)
     revisionSharePercent: { type: Number, default: 15, min: 0, max: 50 }, // last N% of study days = revision-only, no new items
-    maxItemsPerDay: { type: Number, default: 4, min: 1, max: 10 }, // hard per-subject daily cap — also enforced on catch-up/carry-forward, not just fresh scheduling
+    // Hard per-subject daily caps, enforced on catch-up/carry-forward too (not just fresh scheduling).
+    // Notes are just reading, so they get a looser cap than exercises (which need actually solving).
+    // Passages (language-paper comprehension/poetry/nonverbal/writing blocks) carry their own cap too
+    // since answering a passage's sub-questions is closer to exercise effort than plain notes reading.
+    maxItemsPerDay:    { type: Number, default: 4, min: 1, max: 10 }, // exercise groups/day
+    maxNotesPerDay:    { type: Number, default: 8, min: 1, max: 20 }, // notes concepts/day
+    maxPassagesPerDay: { type: Number, default: 3, min: 1, max: 10 }, // passage blocks/day
 
     subjects: { type: [studyPlanSubjectSchema], default: [] },
     totalItemsOverall: { type: Number, default: 0, min: 0 }, // sum of subjects[].totalItems, frozen with them

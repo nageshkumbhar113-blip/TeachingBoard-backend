@@ -6,6 +6,7 @@
 const Batch = require('../models/Batch');
 const Concept = require('../models/Concept');
 const SLSQuestion = require('../models/SLSQuestion');
+const PassageBlock = require('../models/PassageBlock');
 const StudyPlan = require('../models/StudyPlan');
 const StudyPlanCursor = require('../models/StudyPlanCursor');
 const StudyTask = require('../models/StudyTask');
@@ -72,8 +73,10 @@ async function _chapterList(batchId, subjectId, chapterIds) {
   return chapters.map(c => ({ chapterId: `${norm(batchId)}::${norm(subjectId)}::${norm(c.name)}`, name: c.name }));
 }
 
-// Notes concepts, then Exercise groups, per chapter, in catalog chapter order — matches how a
-// student naturally studies a lesson (learn it, then practice it).
+// Notes concepts, then Passage blocks, then Exercise groups, per chapter, in catalog chapter order —
+// matches how a student naturally studies a lesson (learn it, read/practice the passage, then drill
+// the exercises). Passage blocks only count here when tagged to one of the plan's own chapters — the
+// chapterId-blank "unseen pool" used for paper generation isn't lesson-scoped, so it's excluded.
 async function materializeSubjectItems(batchId, subjectId, chapterIds) {
   const chapters = await _chapterList(batchId, subjectId, chapterIds);
   const items = [];
@@ -81,6 +84,10 @@ async function materializeSubjectItems(batchId, subjectId, chapterIds) {
     const concepts = await Concept.find({ chapterId: ch.chapterId, status: 'published' }).sort({ order: 1, created_at: 1 }).lean();
     for (const c of concepts) {
       items.push({ itemType: 'notes', chapterId: ch.chapterId, chapterName: ch.name, refId: String(c._id), label: c.title?.english || c.title?.marathi || 'Notes' });
+    }
+    const passages = await PassageBlock.find({ chapterId: ch.chapterId, status: 'published' }).sort({ created_at: 1 }).lean();
+    for (const p of passages) {
+      items.push({ itemType: 'passage', chapterId: ch.chapterId, chapterName: ch.name, refId: String(p._id), label: p.title || 'Passage' });
     }
     const exerciseNos = await SLSQuestion.distinct('exerciseNo', { chapterId: ch.chapterId, status: 'published', exerciseNo: { $ne: '' } });
     exerciseNos.sort(_naturalCompare);
@@ -93,14 +100,27 @@ async function materializeSubjectItems(batchId, subjectId, chapterIds) {
 
 // ── plan creation ─────────────────────────────────────────────────────────────
 
-const DEFAULT_MAX_ITEMS_PER_DAY = 4;
+const DEFAULT_MAX_ITEMS_PER_DAY = 4;      // exercise groups/day
+const DEFAULT_MAX_NOTES_PER_DAY = 8;      // notes concepts/day — reading is lighter than solving, so this is looser
+const DEFAULT_MAX_PASSAGES_PER_DAY = 3;   // passage blocks/day — sub-questions make these closer to exercise effort
+
+function _perDayCaps(plan) {
+  return {
+    notes: plan.maxNotesPerDay || DEFAULT_MAX_NOTES_PER_DAY,
+    exercise: plan.maxItemsPerDay || DEFAULT_MAX_ITEMS_PER_DAY,
+    passage: plan.maxPassagesPerDay || DEFAULT_MAX_PASSAGES_PER_DAY,
+  };
+}
+const ITEM_TYPES = ['notes', 'exercise', 'passage'];
 
 /**
  * Checks feasibility and, unless it only warns, creates the plan + per-subject cursors + today's
  * tasks. Returns { warning: {...} } without writing anything if a subject's daily pace looks
- * unrealistic and `force` was not passed.
+ * unrealistic and `force` was not passed. Feasibility and daily caps are checked per item TYPE
+ * (notes vs exercise) — a subject with lots of notes but few exercises should not be flagged just
+ * because the combined item count looks high; each type has its own realistic daily ceiling.
  */
-async function createPlan({ studentUserId, studentCode, batchId, examName, targetDateStr, offDaysOfWeek = [], revisionSharePercent = 15, subjects, force = false, maxItemsPerDay = DEFAULT_MAX_ITEMS_PER_DAY }) {
+async function createPlan({ studentUserId, studentCode, batchId, examName, targetDateStr, offDaysOfWeek = [], revisionSharePercent = 15, subjects, force = false, maxItemsPerDay = DEFAULT_MAX_ITEMS_PER_DAY, maxNotesPerDay = DEFAULT_MAX_NOTES_PER_DAY, maxPassagesPerDay = DEFAULT_MAX_PASSAGES_PER_DAY }) {
   const startStr = todayStr();
   if (targetDateStr <= startStr) return { error: 'targetDate must be after today' };
 
@@ -108,14 +128,19 @@ async function createPlan({ studentUserId, studentCode, batchId, examName, targe
   if (totalStudyDays <= 0) return { error: 'No study days between today and the target date with these weekly offs' };
   const revisionDays = Math.max(0, Math.round(totalStudyDays * (revisionSharePercent / 100)));
   const newContentDays = Math.max(1, totalStudyDays - revisionDays);
+  const caps = { notes: maxNotesPerDay, exercise: maxItemsPerDay, passage: maxPassagesPerDay };
 
   const built = [];
   const warnings = [];
   for (const s of subjects) {
     const items = await materializeSubjectItems(batchId, s.subjectId, s.chapterIds || []);
-    const perDay = items.length / newContentDays;
-    if (perDay > maxItemsPerDay) {
-      warnings.push({ subjectId: s.subjectId, totalItems: items.length, itemsPerDay: Math.ceil(perDay * 10) / 10 });
+    const byType = Object.fromEntries(ITEM_TYPES.map(t => [t, items.filter(it => it.itemType === t).length]));
+    const perDay = Object.fromEntries(ITEM_TYPES.map(t => [t, byType[t] / newContentDays]));
+    if (ITEM_TYPES.some(t => perDay[t] > caps[t])) {
+      warnings.push({
+        subjectId: s.subjectId, totalItems: items.length,
+        notesPerDay: Math.ceil(perDay.notes * 10) / 10, exercisesPerDay: Math.ceil(perDay.exercise * 10) / 10, passagesPerDay: Math.ceil(perDay.passage * 10) / 10,
+      });
     }
     built.push({ subjectId: s.subjectId, chapterIds: s.chapterIds || [], items });
   }
@@ -130,7 +155,7 @@ async function createPlan({ studentUserId, studentCode, batchId, examName, targe
   const plan = await StudyPlan.create({
     studentUserId, studentCode, batchId, examName,
     startDate: strToDate(startStr), targetDate: strToDate(targetDateStr),
-    offDaysOfWeek, revisionSharePercent, maxItemsPerDay,
+    offDaysOfWeek, revisionSharePercent, maxItemsPerDay, maxNotesPerDay, maxPassagesPerDay,
     subjects: built.map(s => ({ subjectId: s.subjectId, chapterIds: s.chapterIds, totalItems: s.items.length })),
     totalItemsOverall,
     status: 'active',
@@ -147,13 +172,22 @@ async function createPlan({ studentUserId, studentCode, batchId, examName, targe
 // ── daily generation (idempotent — safe to call any number of times for any date) ──────────────
 
 /**
- * For each subject: tops today up to `plan.maxItemsPerDay`, oldest overdue-pending items first
- * (catch-up), then new items at a rate of (items left) / (new-content study-days left) — so falling
- * behind raises tomorrow's pace automatically instead of losing content. The cap is enforced on the
- * catch-up side too: if a student ignores the app for several days, the backlog drains at most
- * `maxItemsPerDay` per subject per day, never dumping every missed day onto the one day they return
- * (that pile-up was the actual bug behind "5 exercises in one day isn't doable" — the old code only
- * capped *new* item generation, not carried-forward backlog, which could stack unbounded).
+ * For each subject: tops today up to its per-TYPE caps (notes vs exercise — notes are just reading,
+ * so they get a looser daily ceiling than exercises, which need actually solving), oldest
+ * overdue-pending items first (catch-up), then new items at a rate of (items left of that type) /
+ * (new-content study-days left) — so falling behind raises tomorrow's pace automatically instead of
+ * losing content. The per-type cap is enforced on the catch-up side too: if a student ignores the
+ * app for several days, each type's backlog drains at most its own daily cap, never dumping every
+ * missed day onto the one day they return (that pile-up was the actual bug behind "5 exercises in
+ * one day isn't doable" — the old code only capped *new* item generation, not carried-forward
+ * backlog, which could stack unbounded).
+ * Selection is "smart" in one more way: within a subject's item sequence (notes then exercises per
+ * chapter, chapter by chapter), a type hitting its cap for the day does not block the other type —
+ * scanning continues past it and keeps taking whatever type still has room, so a notes-heavy day
+ * doesn't get stuck behind a capped-out exercise slot (or vice versa). The one thing that must stay
+ * in order is items of the SAME type, since nextItemIndex only remembers "how far into this type's
+ * portion of the list have we gone" per type (skippedExerciseIdx/skippedNotesIdx below) — never take
+ * a later same-type item before an earlier one you skipped over.
  * Leftover overdue items simply stay pending with their old date and get reconsidered next call.
  * During the plan's last revisionSharePercent of days, no new items are added (revision-only).
  */
@@ -164,7 +198,7 @@ async function generateTasksForDate(plan, dateStr) {
   const revisionDays = Math.max(0, Math.round(totalStudyDays * (plan.revisionSharePercent / 100)));
   const newContentCutoffStr = revisionDays > 0 ? addDaysStr(targetStr, -revisionDays) : targetStr;
   const inRevisionPhase = dateStr > newContentCutoffStr;
-  const maxPerDay = plan.maxItemsPerDay || DEFAULT_MAX_ITEMS_PER_DAY;
+  const caps = _perDayCaps(plan);
 
   for (const cursor of cursors) {
     if (!isStudyDay(dateStr, plan.offDaysOfWeek)) {
@@ -172,28 +206,54 @@ async function generateTasksForDate(plan, dateStr) {
       continue;
     }
 
-    let usedToday = await StudyTask.countDocuments({ studyPlanId: plan._id, subjectId: cursor.subjectId, date: dateStr });
-    let slotsLeft = Math.max(0, maxPerDay - usedToday);
+    const usedTodayByType = Object.fromEntries(ITEM_TYPES.map(t => [t, 0]));
+    for (const row of await StudyTask.aggregate([
+      { $match: { studyPlanId: plan._id, subjectId: cursor.subjectId, date: dateStr } },
+      { $group: { _id: '$itemType', n: { $sum: 1 } } },
+    ])) usedTodayByType[row._id] = row.n;
+    let usedToday = ITEM_TYPES.reduce((t, k) => t + usedTodayByType[k], 0);
+    const slotsLeft = Object.fromEntries(ITEM_TYPES.map(t => [t, Math.max(0, caps[t] - usedTodayByType[t])]));
 
-    // Catch-up: pull the oldest overdue-pending items onto today first, capped at slotsLeft.
-    if (slotsLeft > 0) {
-      const overdue = await StudyTask.find({ studyPlanId: plan._id, subjectId: cursor.subjectId, status: 'pending', date: { $lt: dateStr } })
-        .sort({ date: 1, sequence: 1 }).limit(slotsLeft).select('_id');
+    // Catch-up: pull the oldest overdue-pending items onto today first, per type, capped at that type's slotsLeft.
+    for (const type of ITEM_TYPES) {
+      if (slotsLeft[type] <= 0) continue;
+      const overdue = await StudyTask.find({ studyPlanId: plan._id, subjectId: cursor.subjectId, itemType: type, status: 'pending', date: { $lt: dateStr } })
+        .sort({ date: 1, sequence: 1 }).limit(slotsLeft[type]).select('_id');
       if (overdue.length) {
         await StudyTask.updateMany({ _id: { $in: overdue.map(o => o._id) } }, { $set: { date: dateStr } });
         usedToday += overdue.length;
-        slotsLeft -= overdue.length;
+        slotsLeft[type] -= overdue.length;
       }
     }
 
     if (cursor.lastGeneratedDate === dateStr) continue; // new items for this date already added this run
 
-    const remaining = cursor.items.length - cursor.nextItemIndex;
-    let take = [];
-    if (remaining > 0 && !inRevisionPhase && slotsLeft > 0) {
+    const take = [];
+    if (!inRevisionPhase && ITEM_TYPES.some(t => slotsLeft[t] > 0)) {
       const daysLeftForNewContent = Math.max(1, countStudyDays(dateStr, newContentCutoffStr, plan.offDaysOfWeek));
-      const quota = Math.min(slotsLeft, Math.ceil(remaining / daysLeftForNewContent));
-      take = cursor.items.slice(cursor.nextItemIndex, cursor.nextItemIndex + quota);
+      const remainingItems = cursor.items.slice(cursor.nextItemIndex);
+      const remainingByType = Object.fromEntries(ITEM_TYPES.map(t => [t, remainingItems.filter(it => it.itemType === t).length]));
+      const takeCap = Object.fromEntries(ITEM_TYPES.map(t => [t, Math.min(slotsLeft[t], Math.ceil(remainingByType[t] / daysLeftForNewContent))]));
+      const takenByType = Object.fromEntries(ITEM_TYPES.map(t => [t, 0]));
+      // Track, per type, the highest cursor.items index consumed so far in this scan — same-type
+      // order is preserved even though other types may be skipped over freely.
+      const maxIdxByType = Object.fromEntries(ITEM_TYPES.map(t => [t, -1]));
+      for (let i = cursor.nextItemIndex; i < cursor.items.length; i++) {
+        const it = cursor.items[i];
+        if (takenByType[it.itemType] >= takeCap[it.itemType]) continue; // this type is full for today — skip, keep scanning
+        take.push(it);
+        takenByType[it.itemType]++;
+        maxIdxByType[it.itemType] = i;
+      }
+      // nextItemIndex must remain a single contiguous pointer, so it can only advance to just past
+      // the last item taken OF EITHER type that leaves no un-taken same-type item behind it.
+      // Since we never skip forward within a type (continue above), the safe new pointer is one past
+      // the highest index actually taken, provided every item before it was either taken or belongs
+      // to a type that was skipped in full (i.e. its own maxIdx is behind). In practice — because a
+      // type is either "not yet full" (everything of it up to now was taken) or "full" (skipped from
+      // its first cap-exceeding item onward) — the boundary is simply the highest taken index + 1;
+      // anything of the skipped type beyond that point stays for tomorrow, correctly not double-taken
+      // since it's still >= nextItemIndex next time.
     }
 
     if (take.length) {
@@ -209,7 +269,8 @@ async function generateTasksForDate(plan, dateStr) {
         // a concurrent call already created some of these — harmless, nextItemIndex still advances.
         if (!/E11000/.test(err.message || '')) throw err;
       }
-      cursor.nextItemIndex += take.length;
+      const lastIdx = cursor.nextItemIndex + cursor.items.slice(cursor.nextItemIndex).findIndex(it => it === take[take.length - 1]);
+      cursor.nextItemIndex = lastIdx + 1;
     }
     cursor.lastGeneratedDate = dateStr;
     await cursor.save();
@@ -272,5 +333,5 @@ async function getProgress(plan) {
 module.exports = {
   todayStr, dateToStr, strToDate, addDaysStr, countStudyDays, calendarDaysBetween,
   materializeSubjectItems, createPlan, generateTasksForDate, getTodayTasks, getProgress,
-  DEFAULT_MAX_ITEMS_PER_DAY,
+  DEFAULT_MAX_ITEMS_PER_DAY, DEFAULT_MAX_NOTES_PER_DAY, DEFAULT_MAX_PASSAGES_PER_DAY,
 };
