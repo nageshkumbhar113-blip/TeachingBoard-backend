@@ -264,6 +264,15 @@ exports.selfRegister = asyncHandler(async (req, res) => {
   if (!mobile)                        throw new AppError('Mobile number is required', 400);
   if (!isValidMobile(mobile))         throw new AppError('Invalid mobile number', 400);
 
+  // Same person registering again (forgot the code, reinstalled, double-tapped) must not spawn a
+  // duplicate account. Siblings sharing a parent's number are legitimate, so only the exact same
+  // mobile + same name counts as a duplicate; a different name on the same mobile is allowed.
+  const sameMobile = await User.find({ role: 'student', mobile }).select('name student_code').lean();
+  const dupe = sameMobile.find(s => String(s.name || '').trim().toLowerCase().replace(/\s+/g, ' ') === name.toLowerCase().replace(/\s+/g, ' '));
+  if (dupe) {
+    throw new AppError(`This student is already registered. Log in with Student Code ${dupe.student_code} and your PIN. If you forgot the PIN, ask your teacher/admin to reset it.`, 409);
+  }
+
   // Optional batch the student wants to study — lets them open that batch's
   // free chapters right away. Older app versions don't send one.
   const requestedBatch = String(req.body.batch || '').trim();
