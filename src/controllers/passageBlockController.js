@@ -28,7 +28,7 @@ function validateBlock(raw, idx) {
   const doc = {
     type, batchId, subjectId, chapterId, language, title,
     passage: '', passageImage: '', subQuestions: [],
-    format: '', marks: 0, wordLimit: '', scenario: '', points: [], rubric: [],
+    format: '', marks: 0, wordLimit: '', scenario: '', modelAnswer: '', points: [], rubric: [],
   };
 
   if (type === 'writing') {
@@ -42,6 +42,7 @@ function validateBlock(raw, idx) {
     doc.marks = marks;
     doc.wordLimit = _str(raw.wordLimit, 40);
     doc.scenario = scenario;
+    doc.modelAnswer = _str(raw.modelAnswer, 4000);
     doc.points = (Array.isArray(raw.points) ? raw.points : []).map(p => _str(p, 300)).filter(Boolean).slice(0, 20);
     doc.rubric = (Array.isArray(raw.rubric) ? raw.rubric : []).map(p => _str(p, 100)).filter(Boolean).slice(0, 20);
     return { doc };
