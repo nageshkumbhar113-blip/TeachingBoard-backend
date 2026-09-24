@@ -12,6 +12,19 @@ const WRITING_FORMATS = ['', 'formal_letter', 'informal_letter', 'speech', 'stor
 
 function _str(v, max) { return String(v ?? '').trim().slice(0, max); }
 
+// Empty-diagram skeleton for writing blocks; anything malformed is dropped rather than failing the import.
+function _diagram(d) {
+  if (!d || typeof d !== 'object') return null;
+  const boxes = a => (Array.isArray(a) ? a : []).slice(0, 8).map(x => _str(x, 80));
+  if (d.kind === 'web') return { kind: 'web', center: _str(d.center, 80), boxes: boxes(d.boxes) };
+  if (d.kind === 'tree' || d.kind === 'flow') {
+    const levels = (Array.isArray(d.levels) ? d.levels : []).slice(0, 8)
+      .map(l => ({ label: _str(l?.label, 40), boxes: boxes(l?.boxes).length ? boxes(l.boxes) : [''], lines: l?.lines === true }));
+    return levels.length ? { kind: d.kind, levels } : null;
+  }
+  return null;
+}
+
 function validateBlock(raw, idx) {
   const at = `Block ${idx + 1}`;
   const type = _str(raw.type, 20);
@@ -43,6 +56,7 @@ function validateBlock(raw, idx) {
     doc.wordLimit = _str(raw.wordLimit, 40);
     doc.scenario = scenario;
     doc.modelAnswer = _str(raw.modelAnswer, 4000);
+    doc.diagram = _diagram(raw.diagram);
     doc.passageImage = _str(raw.passageImage, 500); // e.g. the empty diagram skeleton to be filled in
     doc.passage = _str(raw.passage, 8000); // source material shown in a box (advertisement / notice / table / headline / given paragraph)
     doc.points = (Array.isArray(raw.points) ? raw.points : []).map(p => _str(p, 300)).filter(Boolean).slice(0, 20);

@@ -64,6 +64,7 @@ const passageBlockSchema = new mongoose.Schema(
     marks: { type: Number, default: 0, min: 0 },
     wordLimit: { type: String, default: '', trim: true },
     scenario: { type: String, default: '', trim: true },
+    diagram: { type: mongoose.Schema.Types.Mixed, default: null }, // writing: empty tree/flow/web skeleton to fill in (see core/diagramSkeleton.js)
     modelAnswer: { type: String, default: '', trim: true }, // writing: a full sample answer (e.g. a model letter), shown only on the answer sheet / after reveal
     points: { type: [String], default: [] },
     rubric: { type: [String], default: [] },
