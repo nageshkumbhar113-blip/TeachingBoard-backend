@@ -58,7 +58,7 @@ const passageBlockSchema = new mongoose.Schema(
     // writing
     format: {
       type: String,
-      enum: ['', 'formal_letter', 'informal_letter', 'speech', 'story', 'news_report', 'essay', 'dialogue', 'ad'],
+      enum: ['', 'formal_letter', 'informal_letter', 'speech', 'story', 'news_report', 'essay', 'dialogue', 'ad', 'summary', 'information_transfer'],
       default: '',
     },
     marks: { type: Number, default: 0, min: 0 },

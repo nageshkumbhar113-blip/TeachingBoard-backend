@@ -6,7 +6,7 @@ const { canAccessChapterId, chapterLockedBody, hasFullAccess, invalidateContentA
 
 const TYPES = ['comprehension', 'poetry', 'nonverbal', 'writing'];
 const FORMATS = ['fill_blanks', 'true_false', 'web_diagram', 'tree_diagram', 'match', 'short_answer', 'rearrange'];
-const WRITING_FORMATS = ['', 'formal_letter', 'informal_letter', 'speech', 'story', 'news_report', 'essay', 'dialogue', 'ad'];
+const WRITING_FORMATS = ['', 'formal_letter', 'informal_letter', 'speech', 'story', 'news_report', 'essay', 'dialogue', 'ad', 'summary', 'information_transfer'];
 
 // ── shared validation (used by both the single-create form and JSON import) ──
 
