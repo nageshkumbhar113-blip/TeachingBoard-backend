@@ -43,6 +43,7 @@ function validateBlock(raw, idx) {
     doc.wordLimit = _str(raw.wordLimit, 40);
     doc.scenario = scenario;
     doc.modelAnswer = _str(raw.modelAnswer, 4000);
+    doc.passageImage = _str(raw.passageImage, 500); // e.g. the empty diagram skeleton to be filled in
     doc.passage = _str(raw.passage, 8000); // source material shown in a box (advertisement / notice / table / headline / given paragraph)
     doc.points = (Array.isArray(raw.points) ? raw.points : []).map(p => _str(p, 300)).filter(Boolean).slice(0, 20);
     doc.rubric = (Array.isArray(raw.rubric) ? raw.rubric : []).map(p => _str(p, 100)).filter(Boolean).slice(0, 20);
