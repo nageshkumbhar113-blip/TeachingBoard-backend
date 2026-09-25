@@ -3,6 +3,8 @@ const User = require('../models/User');
 const Attempt = require('../models/Attempt');
 const FeeRecord = require('../models/FeeRecord');
 const FeeConfig  = require('../models/FeeConfig');
+const StudyPlan = require('../models/StudyPlan');
+const sp = require('../utils/studyPlan');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 
@@ -249,4 +251,22 @@ exports.updateDeviceToken = asyncHandler(async (req, res) => {
 
   await User.updateOne({ user_id: req.user.id }, { $set: { device_token: token } });
   res.json({ success: true, message: 'Device token updated' });
+});
+
+// ── Parent: child's Study Plan progress (read-only) ─────────────────────────
+exports.getChildStudyPlan = asyncHandler(async (req, res) => {
+  const parentDoc = req.userDoc || await User.findOne({ user_id: req.user.id }).lean();
+  if (!parentDoc) throw new AppError('Parent not found', 404);
+  const studentCode = normalizeCode(req.params.code);
+  if (!studentCode) throw new AppError('student_code is required', 400);
+  if (!_resolveChildCodes(parentDoc).includes(studentCode)) throw new AppError('Student is not your child', 403);
+
+  const plan = await StudyPlan.findOne({ studentCode, status: 'active' });
+  if (!plan) return res.json({ success: true, data: null });
+  const [progress, tasks] = await Promise.all([sp.getProgress(plan), sp.getTodayTasks(plan)]);
+  res.json({ success: true, data: {
+    examName: plan.examName, startDate: sp.dateToStr(plan.startDate), targetDate: sp.dateToStr(plan.targetDate),
+    progress,
+    today: tasks.map(t => ({ label: t.label, subjectId: t.subjectId, chapterName: t.chapterName, itemType: t.itemType, status: t.status })),
+  } });
 });

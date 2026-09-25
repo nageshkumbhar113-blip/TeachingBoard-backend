@@ -8,6 +8,7 @@ const {
   getMyChildren,
   getChildAttempts,
   getChildFee,
+  getChildStudyPlan,
   updateDeviceToken,
 } = require('../controllers/parentController');
 
@@ -23,6 +24,7 @@ const parentRouter = express.Router();
 parentRouter.get('/children',                requireParent, getMyChildren);
 parentRouter.get('/children/:code/attempts', requireParent, getChildAttempts);
 parentRouter.get('/children/:code/fee',      requireParent, getChildFee);
+parentRouter.get('/children/:code/study-plan', requireParent, getChildStudyPlan);
 parentRouter.patch('/device-token',          requireParent, updateDeviceToken);
 
 module.exports = { adminRouter, parentRouter };
