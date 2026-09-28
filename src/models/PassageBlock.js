@@ -35,6 +35,10 @@ const subQuestionSchema = new mongoose.Schema(
       default: 'short_answer',
     },
     prompt: { type: String, default: '', trim: true },
+    // e.g. "B" - printed as "(B)" before the prompt when a combined block's sub-question is really
+    // a separate lettered part of the real paper (Q4's "(B) Summary Writing" inside the Q4(A) block
+    // that also holds the comprehension activities) - see utils/paperSections.js's Q4 comment.
+    partLabel: { type: String, default: '', trim: true, maxlength: 10 },
     center: { type: String, default: '', trim: true },      // web_diagram
     items: { type: [subQuestionItemSchema], default: [] },
   },

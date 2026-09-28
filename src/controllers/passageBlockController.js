@@ -90,7 +90,7 @@ function validateBlock(raw, idx) {
       }
       cleanItems.push({ text, answer, given });
     }
-    subQuestions.push({ marks, format, prompt: _str(sq.prompt, 400), center: _str(sq.center, 200), items: cleanItems });
+    subQuestions.push({ marks, format, prompt: _str(sq.prompt, 400), partLabel: _str(sq.partLabel, 10), center: _str(sq.center, 200), items: cleanItems });
   }
 
   doc.passage = passage;
