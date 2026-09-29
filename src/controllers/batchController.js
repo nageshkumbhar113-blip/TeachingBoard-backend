@@ -18,6 +18,7 @@ const YoutubeTeacherTeachingArea = require('../models/YoutubeTeacherTeachingArea
 const SLSQuestion = require('../models/SLSQuestion');
 const Concept      = require('../models/Concept');
 const PracticePaper = require('../models/PracticePaper');
+const PassageBlock = require('../models/PassageBlock');
 // Same composite chapterId scheme as SLS concepts/exercises — reused here
 // (not reimplemented) so a subject/chapter rename can correctly remap it.
 const { makeChapterId } = require('./youtubeTeacherController');
@@ -371,6 +372,9 @@ exports.renameBatch = asyncHandler(async (req, res) => {
       // this a renamed batch could no longer save papers ("does not belong to this batch").
       SLSQuestion.updateMany({ batchId: oldName }, { $set: { batchId: newName } }),
       PracticePaper.updateMany({ batchId: oldName }, { $set: { batchId: newName } }),
+      // Admin > Passages content (comprehension/poetry/nonverbal/writing) - same batchId-embeds-the-name
+      // problem as SLSQuestion/Concept above; was missing here until a rename orphaned 112 real blocks.
+      PassageBlock.updateMany({ batchId: oldName }, { $set: { batchId: newName } }),
       Quiz.updateMany({ batch: oldName }, { $set: { batch: newName } }),
       YoutubeTeacherVideo.updateMany({ batch_name: oldName }, { $set: { batch_name: newName } }),
       YoutubeTeacherTeachingArea.updateMany({ batch_name: oldName }, { $set: { batch_name: newName } }),
@@ -403,7 +407,8 @@ function _remapChapterIdsForBatch(oldBatchName, newBatchName, batchDoc) {
       const newChapterId = makeChapterId(newBatchName, subjectDoc.name, ch.name);
       promises.push(
         SLSQuestion.updateMany({ chapterId: oldChapterId }, { $set: { chapterId: newChapterId } }),
-        Concept.updateMany({ chapterId: oldChapterId }, { $set: { chapterId: newChapterId } })
+        Concept.updateMany({ chapterId: oldChapterId }, { $set: { chapterId: newChapterId } }),
+        PassageBlock.updateMany({ chapterId: oldChapterId }, { $set: { chapterId: newChapterId } })
       );
     }
   }
@@ -458,36 +463,41 @@ exports.repairBatchChapterIds = asyncHandler(async (req, res) => {
   const newPrefix = `${norm(currentName)}::`;
   // Batch NAME references (SLSQuestion.batchId, PracticePaper.batchId, Quiz.batch) that
   // an older rename left on the previous name.
-  const [exRepair, paperRepair, quizRepair] = await Promise.all([
+  const [exRepair, paperRepair, quizRepair, passageRepair] = await Promise.all([
     SLSQuestion.updateMany({ batchId: oldName }, { $set: { batchId: currentName } }),
     PracticePaper.updateMany({ batchId: oldName }, { $set: { batchId: currentName } }),
     Quiz.updateMany({ batch: oldName }, { $set: { batch: currentName } }),
+    PassageBlock.updateMany({ batchId: oldName }, { $set: { batchId: currentName } }),
   ]);
   const nameRefs = {
     exercise_questions_renamed: exRepair.modifiedCount,
     papers_renamed: paperRepair.modifiedCount,
     quizzes_renamed: quizRepair.modifiedCount,
+    passage_blocks_batch_renamed: passageRepair.modifiedCount,
   };
 
   if (oldPrefix === newPrefix) {
-    return res.json({ success: true, message: 'old_batch_name normalizes the same as the current name — chapter ids need no repair', concepts_repaired: 0, questions_repaired: 0, ...nameRefs });
+    return res.json({ success: true, message: 'old_batch_name normalizes the same as the current name — chapter ids need no repair', concepts_repaired: 0, questions_repaired: 0, passage_blocks_repaired: 0, ...nameRefs });
   }
 
   const escaped = oldPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const regex = new RegExp('^' + escaped);
 
-  const [concepts, questions] = await Promise.all([
+  const [concepts, questions, passages] = await Promise.all([
     Concept.find({ chapterId: regex }, '_id chapterId').lean(),
     SLSQuestion.find({ chapterId: regex }, '_id chapterId').lean(),
+    PassageBlock.find({ chapterId: regex }, '_id chapterId').lean(),
   ]);
   const rewrite = id => newPrefix + id.slice(oldPrefix.length);
 
   await Promise.all([
     ...concepts.map(c => Concept.updateOne({ _id: c._id }, { $set: { chapterId: rewrite(c.chapterId) } })),
     ...questions.map(q => SLSQuestion.updateOne({ _id: q._id }, { $set: { chapterId: rewrite(q.chapterId) } })),
+    ...passages.map(p => PassageBlock.updateOne({ _id: p._id }, { $set: { chapterId: rewrite(p.chapterId) } })),
   ]);
+  if (passages.length || passageRepair.modifiedCount) invalidateContentAccessCache();
 
-  res.json({ success: true, concepts_repaired: concepts.length, questions_repaired: questions.length, ...nameRefs });
+  res.json({ success: true, concepts_repaired: concepts.length, questions_repaired: questions.length, passage_blocks_repaired: passages.length, ...nameRefs });
 });
 
 /**
