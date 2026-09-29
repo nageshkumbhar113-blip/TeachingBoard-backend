@@ -7,6 +7,7 @@ const SLSQuestion = require('../models/SLSQuestion');
 const Question = require('../models/Question');
 const Quiz = require('../models/Quiz');
 const Note = require('../models/Note');
+const PassageBlock = require('../models/PassageBlock');
 const ImportJob = require('../models/ImportJob');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
@@ -20,7 +21,7 @@ const { makeChapterId, invalidateContentAccessCache } = require('../utils/conten
 // it came from (importedFrom) and which job made it (importJobId) so a repeat
 // import skips what is already there and a whole job can be undone.
 
-const TYPES = ['notes', 'exercises', 'mcq', 'quizzes', 'pdf'];
+const TYPES = ['notes', 'exercises', 'mcq', 'quizzes', 'pdf', 'passages'];
 
 const slug = s => String(s || '').trim().toLowerCase().replace(/\s+/g, '-');
 const normText = s => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -55,20 +56,21 @@ async function loadSource(batch, subject) {
   const bRx = looseRx(batch);
   const sRx = looseRx(subject);
 
-  const [batchDoc, concepts, sls, questions, quizzes, notes] = await Promise.all([
+  const [batchDoc, concepts, sls, questions, quizzes, notes, passages] = await Promise.all([
     Batch.findOne({ name: batch }).lean(),
     Concept.find({ chapterId: idRx, status: { $ne: 'archived' } }).sort({ order: 1 }).lean(),
     SLSQuestion.find({ chapterId: idRx, status: { $ne: 'archived' } }).sort({ exerciseNo: 1, created_at: 1 }).lean(),
     Question.find({ batch: bRx, subject: sRx }).lean(),
     Quiz.find({ batch: bRx, subject: sRx }).lean(),
     Note.find({ batch: bRx, subject: sRx, status: 'active' }).lean(),
+    PassageBlock.find({ chapterId: idRx }).lean(),
   ]);
 
   const chapters = new Map(); // slug -> group
   const group = (name, order) => {
     const k = slug(name);
     if (!k) return null;
-    if (!chapters.has(k)) chapters.set(k, { key: k, name, order: order ?? null, concepts: [], sls: [], questions: [], quizzes: [], notes: [] });
+    if (!chapters.has(k)) chapters.set(k, { key: k, name, order: order ?? null, concepts: [], sls: [], questions: [], quizzes: [], notes: [], passages: [] });
     const g = chapters.get(k);
     if (g.order == null && order != null) g.order = order;
     return g;
@@ -90,6 +92,11 @@ async function loadSource(batch, subject) {
   for (const q of questions) group(q.chapter)?.questions.push(q);
   for (const q of quizzes) group(q.chapter)?.quizzes.push(q);
   for (const n of notes) group(n.chapter)?.notes.push(n);
+  for (const p of passages) {
+    const k = p.chapterId.split('::')[2];
+    const g = chapters.get(k) || group(prettify(k));
+    g?.passages.push(p);
+  }
 
   return { batchDoc, chapters };
 }
@@ -109,12 +116,13 @@ async function loadTargetExisting(batch, subject) {
   const bRx = looseRx(batch);
   const sRx = looseRx(subject);
 
-  const [concepts, sls, questions, quizzes, notes] = await Promise.all([
+  const [concepts, sls, questions, quizzes, notes, passages] = await Promise.all([
     Concept.find({ chapterId: idRx }, 'chapterId title.english order importedFrom.id').lean(),
     SLSQuestion.find({ chapterId: idRx }, 'chapterId exerciseNo questionText.english importedFrom.id').lean(),
     Question.find({ batch: bRx, subject: sRx }, 'chapter question importedFrom.id').lean(),
     Quiz.find({ batch: bRx, subject: sRx }, 'chapter title importedFrom.id').lean(),
     Note.find({ batch: bRx, subject: sRx }, 'chapter title importedFrom.id').lean(),
+    PassageBlock.find({ chapterId: idRx }, 'chapterId type title importedFrom.id').lean(),
   ]);
 
   const seen = new Set();
@@ -135,6 +143,7 @@ async function loadTargetExisting(batch, subject) {
   for (const q of questions) add('mcq', slug(q.chapter), normText(q.question), q.importedFrom?.id);
   for (const q of quizzes) add('quizzes', slug(q.chapter), normText(q.title), q.importedFrom?.id);
   for (const n of notes) add('pdf', slug(n.chapter), normText(n.title), n.importedFrom?.id);
+  for (const p of passages) add('passages', p.chapterId.split('::')[2], `${p.type}|${normText(p.title)}`, p.importedFrom?.id);
 
   return { seen, conceptIdByImported, maxOrder };
 }
@@ -172,7 +181,7 @@ async function buildPlan(reqInfo) {
     const isDup = (type, key, importedId) =>
       existing.seen.has(`${type}|${tgtKey}|k:${key}`) || existing.seen.has(`${type}|${tgtKey}|i:${importedId}`);
 
-    const items = { notes: [], exercises: [], mcq: [], quizzes: [], pdf: [] };
+    const items = { notes: [], exercises: [], mcq: [], quizzes: [], pdf: [], passages: [] };
     const counts = {};
     for (const t of TYPES) counts[t] = { total: 0, fresh: 0, duplicate: 0 };
     let mixedSkipped = 0;
@@ -202,6 +211,11 @@ async function buildPlan(reqInfo) {
       counts.pdf.total++;
       if (isDup('pdf', normText(n.title), n.note_id)) counts.pdf.duplicate++;
       else { counts.pdf.fresh++; items.pdf.push(n); }
+    }
+    if (types.includes('passages')) for (const p of g.passages) {
+      counts.passages.total++;
+      if (isDup('passages', `${p.type}|${normText(p.title)}`, String(p._id))) counts.passages.duplicate++;
+      else { counts.passages.fresh++; items.passages.push(p); }
     }
 
     plans.push({
@@ -249,6 +263,7 @@ exports.listSourceChapters = asyncHandler(async (req, res) => {
         mcq: g.questions.length,
         quizzes: g.quizzes.filter(q => !isMixedQuiz(q)).length,
         pdf: g.notes.length,
+        passages: g.passages.length,
       },
     }));
   res.json({ success: true, data });
@@ -459,6 +474,29 @@ exports.run = asyncHandler(async (req, res) => {
       results.pdf.created = await insertChunks(Note, docs);
     }
 
+    // 7) Passage blocks (comprehension/poetry/nonverbal/writing) — chapter-tied ones only, see
+    // loadSource's own comment; a chapterless "unseen pool" block has no single chapter to import
+    // it under, so it is out of scope for this per-chapter flow.
+    if (types.includes('passages')) {
+      const docs = [];
+      for (const p of plans) for (const b of p.items.passages) {
+        const d = { ...b };
+        delete d._id;
+        d.chapterId = p.tgtChapterId;
+        d.batchId = target.batch;
+        d.subjectId = tgtSubjectName;
+        d.status = asDraft ? 'draft' : b.status;
+        d.usageCount = 0;
+        d.created_at = now;
+        d.updated_at = now;
+        d.importedFrom = { id: String(b._id), batch: source.batch };
+        Object.assign(d, tag);
+        docs.push(d);
+      }
+      results.passages.created = await insertChunks(PassageBlock, docs);
+      if (results.passages.created) invalidateContentAccessCache();
+    }
+
     for (const t of TYPES) results[t].skipped = plans.reduce((sum, p) => sum + p.counts[t].duplicate, 0);
     job.results = { ...results, mixed_quizzes_skipped: plans.reduce((s, p) => s + p.mixedSkipped, 0) };
     job.created_subject = createdSubject;
@@ -507,7 +545,7 @@ exports.undo = asyncHandler(async (req, res) => {
 
   const filter = { importJobId: jobId };
   const copiedFiles = [...new Set((await Note.find(filter, 'cloudinary_public_id').lean()).map(n => n.cloudinary_public_id).filter(Boolean))];
-  const [c, s, q, z, n] = await Promise.all([
+  const [c, s, q, z, n, pb] = await Promise.all([
     Concept.deleteMany(filter),
     SLSQuestion.deleteMany(filter),
     Question.deleteMany(filter),
@@ -515,7 +553,9 @@ exports.undo = asyncHandler(async (req, res) => {
     // PDF copies share the original file, so only the database rows go — the
     // stored file is never touched here.
     Note.deleteMany(filter),
+    PassageBlock.deleteMany(filter),
   ]);
+  if (pb.deletedCount) invalidateContentAccessCache();
 
   // A copied PDF shares the original's stored file: remove the file only if no
   // note (original or copy) still uses it.
@@ -535,14 +575,15 @@ exports.undo = asyncHandler(async (req, res) => {
     if (sub) {
       for (const name of job.created_chapters || []) {
         const idRx = makeChapterId(tBatch, tSubject, name);
-        const [k1, k2, k3, k4, k5] = await Promise.all([
+        const [k1, k2, k3, k4, k5, k6] = await Promise.all([
           Concept.countDocuments({ chapterId: idRx }),
           SLSQuestion.countDocuments({ chapterId: idRx }),
           Question.countDocuments({ batch: looseRx(tBatch), subject: looseRx(tSubject), chapter: looseRx(name) }),
           Quiz.countDocuments({ batch: looseRx(tBatch), subject: looseRx(tSubject), chapter: looseRx(name) }),
           Note.countDocuments({ batch: looseRx(tBatch), subject: looseRx(tSubject), chapter: looseRx(name) }),
+          PassageBlock.countDocuments({ chapterId: idRx }),
         ]);
-        if (k1 + k2 + k3 + k4 + k5 === 0) {
+        if (k1 + k2 + k3 + k4 + k5 + k6 === 0) {
           sub.chapters = sub.chapters.filter(ch => ch.name !== name);
           catalogRemoved.push(name);
         }
@@ -565,7 +606,7 @@ exports.undo = asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: {
-      deleted: { notes: c.deletedCount, exercises: s.deletedCount, mcq: q.deletedCount, quizzes: z.deletedCount, pdf: n.deletedCount },
+      deleted: { notes: c.deletedCount, exercises: s.deletedCount, mcq: q.deletedCount, quizzes: z.deletedCount, pdf: n.deletedCount, passages: pb.deletedCount },
       catalog_removed: catalogRemoved,
     },
   });
