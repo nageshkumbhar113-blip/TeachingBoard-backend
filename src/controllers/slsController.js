@@ -135,7 +135,14 @@ exports.getQuestions = async (req, res) => {
     if (status) filter.status = status;
     // 'true'/'false' only - omitted (undefined) means "either", used by every caller that
     // doesn't care (plain Exercise Manager browsing, MCQ-style sections with no activity concept).
-    if (isActivity === 'true' || isActivity === 'false') filter.isActivity = isActivity === 'true';
+    // Real bug found live: every question created before this field existed has no isActivity key
+    // in its stored document at all (the schema's default:false only applies to NEW inserts, never
+    // retroactively) - a strict {isActivity:false} query matches NONE of them, since Mongo requires
+    // the field to be present and equal, not merely absent. That silently emptied every "Solve"
+    // section (Q1B/Q2B/Q3B/Q4/Q5) on the whole pre-existing exercise bank. $ne:true treats a missing
+    // field the same as false, matching the schema's own default.
+    if (isActivity === 'true') filter.isActivity = true;
+    else if (isActivity === 'false') filter.isActivity = { $ne: true };
     if (q && q.trim()) {
       const re = new RegExp(q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       filter.$or = [
