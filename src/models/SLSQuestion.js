@@ -135,6 +135,17 @@ const slsQuestionSchema = new mongoose.Schema(
       required: true
     },
 
+    // Board-paper "Complete and write the activity" format - a partially worked
+    // solution with blanks to fill in, printed as a DIFFERENT question from a
+    // plain "Solve the following subquestion" (which starts from scratch, no
+    // given steps). Paper Builder's Auto-fill uses this to keep the two apart -
+    // without it, an activity-shaped section could get a plain solve question
+    // (and vice versa), which never matches what the real paper prints there.
+    isActivity: {
+      type: Boolean,
+      default: false
+    },
+
     // Board Frequency (for exam preparation)
     boardFrequency: {
       type: String,

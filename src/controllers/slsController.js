@@ -40,7 +40,7 @@ exports.createQuestion = async (req, res) => {
     const {
       conceptId, exerciseNo, chapterId, subjectId, batchId,
       questionText, answerText, marks, questionType,
-      difficulty, boardFrequency, questionDiagrams, answerDiagrams, status
+      difficulty, boardFrequency, questionDiagrams, answerDiagrams, status, isActivity
     } = req.body;
 
     // conceptId is no longer required — Exercise questions are scoped by
@@ -82,6 +82,7 @@ exports.createQuestion = async (req, res) => {
       boardFrequency,
       questionDiagrams: questionDiagrams || [],
       answerDiagrams: answerDiagrams || [],
+      isActivity: !!isActivity,
       status: ['draft', 'published', 'archived'].includes(status) ? status : 'draft',
       createdBy: req.user?.id || 'system'
     });
@@ -111,7 +112,7 @@ exports.getQuestions = async (req, res) => {
   try {
     const {
       conceptId, exerciseNo, chapterId, batchId, marks, questionType,
-      difficulty, boardFrequency, status = 'published', q,
+      difficulty, boardFrequency, status = 'published', q, isActivity,
       page = 1, limit = 20
     } = req.query;
 
@@ -132,6 +133,9 @@ exports.getQuestions = async (req, res) => {
     if (difficulty) filter.difficulty = difficulty;
     if (boardFrequency) filter.boardFrequency = boardFrequency;
     if (status) filter.status = status;
+    // 'true'/'false' only - omitted (undefined) means "either", used by every caller that
+    // doesn't care (plain Exercise Manager browsing, MCQ-style sections with no activity concept).
+    if (isActivity === 'true' || isActivity === 'false') filter.isActivity = isActivity === 'true';
     if (q && q.trim()) {
       const re = new RegExp(q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       filter.$or = [
@@ -309,7 +313,7 @@ exports.updateQuestion = async (req, res) => {
     const ALLOWED = [
       'conceptId', 'chapterId', 'subjectId', 'batchId',
       'questionText', 'answerText', 'marks', 'questionType',
-      'difficulty', 'boardFrequency', 'questionDiagrams', 'answerDiagrams', 'status'
+      'difficulty', 'boardFrequency', 'questionDiagrams', 'answerDiagrams', 'status', 'isActivity'
     ];
     const updates = {};
     for (const key of ALLOWED) {
