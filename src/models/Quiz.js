@@ -29,6 +29,13 @@ const quizQuestionSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.Mixed,
       default: {}
     },
+    // Optional explanation shown to the student after they answer (practice
+    // mode feedback bar + exam-mode wrong-answer review). Empty = no solution.
+    explanation: {
+      type: String,
+      trim: true,
+      default: ''
+    },
     // Denormalized per-question marks. Optional/undefined means "legacy" —
     // absence, not a default, is what keeps old quiz docs byte-identical.
     marks: {
