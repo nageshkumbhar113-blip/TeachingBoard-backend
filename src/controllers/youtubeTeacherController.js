@@ -5,6 +5,7 @@ const YoutubeTeacherSubscription  = require('../models/YoutubeTeacherSubscriptio
 const Batch      = require('../models/Batch');
 const SLSQuestion = require('../models/SLSQuestion');
 const Concept     = require('../models/Concept');
+const Question    = require('../models/Question');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const { serializePartner } = require('./youtubeTeacherAuthController');
@@ -49,6 +50,8 @@ function serializeVideo(v) {
     exercise_no: v.exercise_no || '',
     concept_id: v.concept_id || '',
     concept_title: v.concept_title || '',
+    question_id: v.question_id || '',
+    question_text: v.question_text || '',
     part_label: v.part_label || '',
     live_video_id: v.live_video_id || '',
     live_part_label: v.live_part_label || '',
@@ -160,6 +163,29 @@ exports.getConceptsForChapter = asyncHandler(async (req, res) => {
   });
 });
 
+// GET /api/youtube-teacher/quiz-questions?batch=&subject=&chapter=
+// Bank MCQ/Quiz questions for the teacher's Add-Video "Quiz Question" picker
+// — same bank Question.q_id a published Quiz/paper carries through unchanged
+// (see plan), so attaching a video here by q_id shows up in every quiz/paper
+// that reuses that question, not just one.
+exports.getQuizQuestionsForChapter = asyncHandler(async (req, res) => {
+  const batch = String(req.query.batch || '').trim();
+  const subject = String(req.query.subject || '').trim();
+  const chapter = String(req.query.chapter || '').trim();
+  if (!batch || !subject || !chapter) throw new AppError('batch, subject and chapter are required', 400);
+
+  const questions = await Question.find({ batch, subject, chapter }, 'q_id question type')
+    .sort({ created_at: 1 }).limit(500).lean();
+  res.json({
+    success: true,
+    data: questions.map(q => ({
+      q_id: q.q_id,
+      question: String(q.question || '').slice(0, 140),
+      type: q.type || 'mcq',
+    })),
+  });
+});
+
 // GET /api/youtube-teacher/content-overview?batch=&subject=
 // Everything a teacher could make a video for, across every chapter of one
 // Batch+Subject, in a single call (used by My Teaching Areas' "View
@@ -248,7 +274,9 @@ exports.listMyVideos = asyncHandler(async (req, res) => {
 // instead of creating a duplicate (see model's unique index).
 exports.upsertVideo = asyncHandler(async (req, res) => {
   const contentType  = String(req.body.content_type || 'exercise').trim();
-  if (!['exercise', 'concept'].includes(contentType)) throw new AppError('content_type must be exercise or concept', 400);
+  if (!['exercise', 'concept', 'quiz_question'].includes(contentType)) {
+    throw new AppError('content_type must be exercise, concept or quiz_question', 400);
+  }
 
   const batchName   = String(req.body.batch_name || '').trim();
   const subjectName = String(req.body.subject_name || '').trim();
@@ -260,11 +288,14 @@ exports.upsertVideo = asyncHandler(async (req, res) => {
     throw new AppError('batch_name, subject_name and chapter_name are required', 400);
   }
 
-  const exerciseNo   = contentType === 'exercise' ? String(req.body.exercise_no || '').trim() : '';
-  const conceptId    = contentType === 'concept'  ? String(req.body.concept_id || '').trim()  : '';
-  const conceptTitle = contentType === 'concept'  ? String(req.body.concept_title || '').trim() : '';
+  const exerciseNo    = contentType === 'exercise'      ? String(req.body.exercise_no || '').trim()    : '';
+  const conceptId     = contentType === 'concept'       ? String(req.body.concept_id || '').trim()     : '';
+  const conceptTitle  = contentType === 'concept'       ? String(req.body.concept_title || '').trim()  : '';
+  const questionId    = contentType === 'quiz_question' ? String(req.body.question_id || '').trim()    : '';
+  const questionText  = contentType === 'quiz_question' ? String(req.body.question_text || '').trim()  : '';
   if (contentType === 'exercise' && !exerciseNo) throw new AppError('exercise_no is required', 400);
   if (contentType === 'concept' && !conceptId) throw new AppError('concept_id is required', 400);
+  if (contentType === 'quiz_question' && !questionId) throw new AppError('question_id is required', 400);
 
   const videoId = extractVideoId(youtubeUrl);
   if (!videoId) throw new AppError('Could not read a valid YouTube video ID from that URL', 400);
@@ -274,7 +305,7 @@ exports.upsertVideo = asyncHandler(async (req, res) => {
   let video = await YoutubeTeacherVideo.findOne({
     youtube_teacher_id: req.user.id, content_type: contentType,
     batch_name: batchName, subject_name: subjectName, chapter_name: chapterName,
-    exercise_no: exerciseNo, concept_id: conceptId, part_key: partKey,
+    exercise_no: exerciseNo, concept_id: conceptId, question_id: questionId, part_key: partKey,
   });
 
   if (video) {
@@ -285,6 +316,7 @@ exports.upsertVideo = asyncHandler(async (req, res) => {
     video.pending_submitted_at = new Date();
     video.status = 'pending';
     if (contentType === 'concept' && conceptTitle) video.concept_title = conceptTitle; // refresh snapshot
+    if (contentType === 'quiz_question' && questionText) video.question_text = questionText; // refresh snapshot
     await video.save();
     return res.json({ success: true, message: 'Edit submitted for approval', data: serializeVideo(video) });
   }
@@ -293,6 +325,7 @@ exports.upsertVideo = asyncHandler(async (req, res) => {
     youtube_teacher_id: req.user.id, content_type: contentType,
     batch_name: batchName, subject_name: subjectName, chapter_name: chapterName,
     exercise_no: exerciseNo, concept_id: conceptId, concept_title: conceptTitle,
+    question_id: questionId, question_text: questionText,
     part_key: partKey, part_label: partLabel,
     pending_video_id: videoId,
     pending_part_label: partLabel,
@@ -349,11 +382,16 @@ exports.listMissingVideos = asyncHandler(async (req, res) => {
 exports.videosForExerciseStep1 = asyncHandler(async (req, res) => {
   const contentType = String(req.query.content_type || 'exercise').trim();
   const conceptId = String(req.query.concept_id || '').trim();
+  const questionId = String(req.query.question_id || '').trim();
 
   let filter;
   if (contentType === 'concept') {
     if (!conceptId) throw new AppError('concept_id is required', 400);
     filter = { content_type: 'concept', concept_id: conceptId, status: 'approved', live_video_id: { $ne: '' } };
+  } else if (contentType === 'quiz_question') {
+    if (!questionId) throw new AppError('question_id is required', 400);
+    // q_id alone is globally unique in the bank — no batch/subject/chapter needed.
+    filter = { content_type: 'quiz_question', question_id: questionId, status: 'approved', live_video_id: { $ne: '' } };
   } else {
     const batch = String(req.query.batch || '').trim();
     const subject = String(req.query.subject || '').trim();
@@ -427,6 +465,10 @@ exports.videosForExerciseStep2 = asyncHandler(async (req, res) => {
     const conceptId = String(req.query.concept_id || '').trim();
     if (!conceptId) throw new AppError('concept_id is required', 400);
     filter = { youtube_teacher_id: teacherId, content_type: 'concept', concept_id: conceptId, status: 'approved', live_video_id: { $ne: '' } };
+  } else if (contentType === 'quiz_question') {
+    const questionId = String(req.query.question_id || '').trim();
+    if (!questionId) throw new AppError('question_id is required', 400);
+    filter = { youtube_teacher_id: teacherId, content_type: 'quiz_question', question_id: questionId, status: 'approved', live_video_id: { $ne: '' } };
   } else {
     const { batch, subject, chapter, exercise } = req.query;
     if (!batch || !subject || !chapter || !exercise) {

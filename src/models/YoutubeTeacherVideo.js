@@ -14,9 +14,10 @@ const youtubeTeacherVideoSchema = new mongoose.Schema(
   {
     youtube_teacher_id: { type: mongoose.Schema.Types.ObjectId, ref: 'YoutubeTeacherPartner', required: true, index: true },
 
-    // 'exercise' (default, backward-compatible with every existing record) or
-    // 'concept' — a Notes/SLS concept video instead of an exercise video.
-    content_type: { type: String, enum: ['exercise', 'concept'], default: 'exercise', index: true },
+    // 'exercise' (default, backward-compatible with every existing record),
+    // 'concept' — a Notes/SLS concept video, or 'quiz_question' — a video for
+    // one MCQ/Quiz bank question (see question_id/question_text below).
+    content_type: { type: String, enum: ['exercise', 'concept', 'quiz_question'], default: 'exercise', index: true },
 
     batch_name:   { type: String, required: true, trim: true },
     subject_name: { type: String, required: true, trim: true },
@@ -34,6 +35,14 @@ const youtubeTeacherVideoSchema = new mongoose.Schema(
     // entry keeps showing the title as it was when submitted).
     concept_id:    { type: String, default: '', trim: true },
     concept_title: { type: String, default: '', trim: true },
+
+    // question_id/question_text are the quiz-question-side equivalent —
+    // question_id is the bank Question's own globally-unique q_id (NOT scoped
+    // to one Quiz document), so one attachment automatically shows up in
+    // every quiz/paper that happens to reuse that question. question_text is
+    // a truncated display SNAPSHOT (same convention as concept_title).
+    question_id:   { type: String, default: '', trim: true },
+    question_text: { type: String, default: '', trim: true },
 
     // normalized (lowercase/hyphenated) — used for the duplicate-check index
     // so "Part 1" and "part 1" don't create two separate videos by accident.
@@ -70,7 +79,7 @@ const youtubeTeacherVideoSchema = new mongoose.Schema(
 // concept_id '') and a concept doc in the same chapter (exercise_no '',
 // concept_id set) never collide on the all-empty-string case.
 youtubeTeacherVideoSchema.index(
-  { youtube_teacher_id: 1, content_type: 1, batch_name: 1, subject_name: 1, chapter_name: 1, exercise_no: 1, concept_id: 1, part_key: 1 },
+  { youtube_teacher_id: 1, content_type: 1, batch_name: 1, subject_name: 1, chapter_name: 1, exercise_no: 1, concept_id: 1, question_id: 1, part_key: 1 },
   { unique: true }
 );
 
@@ -79,6 +88,10 @@ youtubeTeacherVideoSchema.index({ batch_name: 1, subject_name: 1, chapter_name: 
 
 // Student-facing lookup: "all approved videos for this concept".
 youtubeTeacherVideoSchema.index({ concept_id: 1, status: 1 });
+
+// Student-facing lookup: "all approved videos for this quiz/MCQ question" —
+// q_id alone is enough (globally unique in the bank), no batch/chapter needed.
+youtubeTeacherVideoSchema.index({ question_id: 1, status: 1 });
 
 module.exports = mongoose.models.YoutubeTeacherVideo ||
   mongoose.model('YoutubeTeacherVideo', youtubeTeacherVideoSchema);
