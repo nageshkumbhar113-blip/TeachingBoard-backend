@@ -183,6 +183,14 @@ exports.getConceptsForChapter = asyncHandler(async (req, res) => {
 // before) — confirmed unchanged across every quiz/section that reuses it
 // (core/sync.js never mints a fresh id per quiz), so one video attachment
 // still shows up in every quiz/paper that reuses that exact question.
+// Response is GROUPED by quiz/test (title + its matching questions), not a
+// single flat list — found live: a chapter can have a dozen+ separate Tests
+// at ~20 questions each, so a flat list of 200+ bare question lines was
+// unusable. The teacher now sees "Chapter 1: परिमेय व अपरिमेय संख्या test 1"
+// etc. as a group, with that test's own questions under it. The SAME q_id
+// can legitimately appear under more than one test (shared/reused bank
+// questions) — shown under each, since attaching is idempotent either way
+// (same q_id -> same YoutubeTeacherVideo row, see model's unique index).
 exports.getQuizQuestionsForChapter = asyncHandler(async (req, res) => {
   const batch = String(req.query.batch || '').trim();
   const subject = String(req.query.subject || '').trim();
@@ -196,26 +204,23 @@ exports.getQuizQuestionsForChapter = asyncHandler(async (req, res) => {
       { subject, chapter },
       { sections: { $elemMatch: { subject, chapter } } },
     ],
-  }, 'subject chapter questions sections').limit(300).lean();
+  }, 'title subject chapter questions sections').sort({ title: 1 }).limit(300).lean();
 
-  const seen = new Map(); // q_id -> question text (first one wins)
+  const groups = [];
   for (const quiz of quizzes) {
     const directMatch = quiz.subject === subject && quiz.chapter === chapter;
     const matchingSections = (quiz.sections || []).filter(s => s.subject === subject && s.chapter === chapter);
     const allowedQIds = directMatch ? null // null = every question in this quiz applies
       : new Set(matchingSections.flatMap(s => s.question_ids || []));
 
-    for (const q of (quiz.questions || [])) {
-      if (!q.q_id || seen.has(q.q_id)) continue;
-      if (!directMatch && !allowedQIds.has(q.q_id)) continue;
-      seen.set(q.q_id, String(q.question || '').slice(0, 140));
-    }
+    const questions = (quiz.questions || [])
+      .filter(q => q.q_id && (directMatch || allowedQIds.has(q.q_id)))
+      .map(q => ({ q_id: q.q_id, question: String(q.question || '').slice(0, 140) }));
+
+    if (questions.length) groups.push({ quiz_title: quiz.title || '(untitled test)', questions });
   }
 
-  res.json({
-    success: true,
-    data: [...seen.entries()].map(([q_id, question]) => ({ q_id, question, type: 'mcq' })),
-  });
+  res.json({ success: true, data: groups });
 });
 
 // GET /api/youtube-teacher/content-overview?batch=&subject=
