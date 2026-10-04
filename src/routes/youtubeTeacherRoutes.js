@@ -76,6 +76,7 @@ adminRouter.get('/youtube-teacher-partners',  requireAdmin, adminCtrl.listPartne
 adminRouter.post('/youtube-teacher-partners/:id/suspend',        requireAdmin, adminCtrl.suspendPartner);
 adminRouter.post('/youtube-teacher-partners/:id/activate',       requireAdmin, adminCtrl.activatePartner);
 adminRouter.post('/youtube-teacher-partners/:id/verify-channel', requireAdmin, adminCtrl.verifyChannel);
+adminRouter.post('/youtube-teacher-partners/:id/reset-password', requireAdmin, adminCtrl.resetPartnerPassword);
 
 adminRouter.get('/youtube-teacher-videos',                requireAdmin, adminCtrl.listVideos);
 adminRouter.post('/youtube-teacher-videos/:id/approve',   requireAdmin, adminCtrl.approveVideo);

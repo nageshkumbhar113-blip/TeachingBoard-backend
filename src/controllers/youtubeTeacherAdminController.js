@@ -32,6 +32,21 @@ exports.activatePartner = asyncHandler(async (req, res) => {
   res.json({ success: true, data: serializePartner(partner) });
 });
 
+// POST /api/admin/youtube-teacher-partners/:id/reset-password  { new_password }
+// No self-serve "forgot password" exists for this account type (no email
+// infra in the backend to send a reset link) - this is the escape hatch for
+// a locked-out teacher: admin sets a new password directly and shares it
+// with them (WhatsApp/call), same trust model as sharing a student PIN.
+exports.resetPartnerPassword = asyncHandler(async (req, res) => {
+  const newPassword = String(req.body.new_password || '').trim();
+  if (newPassword.length < 6) throw new AppError('Password must be at least 6 characters', 400);
+  const partner = await YoutubeTeacherPartner.findById(req.params.id);
+  if (!partner) throw new AppError('Partner not found', 404);
+  partner.password_hash = YoutubeTeacherPartner.hashPassword(newPassword);
+  await partner.save();
+  res.json({ success: true, message: 'Password reset' });
+});
+
 // POST /api/admin/youtube-teacher-partners/:id/verify-channel
 exports.verifyChannel = asyncHandler(async (req, res) => {
   const partner = await YoutubeTeacherPartner.findByIdAndUpdate(
