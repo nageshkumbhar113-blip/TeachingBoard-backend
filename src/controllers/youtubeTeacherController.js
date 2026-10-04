@@ -5,7 +5,7 @@ const YoutubeTeacherSubscription  = require('../models/YoutubeTeacherSubscriptio
 const Batch      = require('../models/Batch');
 const SLSQuestion = require('../models/SLSQuestion');
 const Concept     = require('../models/Concept');
-const Question    = require('../models/Question');
+const Quiz        = require('../models/Quiz');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const { serializePartner } = require('./youtubeTeacherAuthController');
@@ -164,25 +164,57 @@ exports.getConceptsForChapter = asyncHandler(async (req, res) => {
 });
 
 // GET /api/youtube-teacher/quiz-questions?batch=&subject=&chapter=
-// Bank MCQ/Quiz questions for the teacher's Add-Video "Quiz Question" picker
-// — same bank Question.q_id a published Quiz/paper carries through unchanged
-// (see plan), so attaching a video here by q_id shows up in every quiz/paper
-// that reuses that question, not just one.
+// MCQ/Quiz questions for the teacher's Add-Video "Quiz Question" picker.
+//
+// CORRECTED (found live — the first version queried the standalone Question
+// collection, which turns out to hold only 3 legacy rows app-wide and is NOT
+// where real Quiz content lives): admin's Paper Builder keeps its working
+// question bank purely local (IndexedDB) and only ever publishes finished
+// papers — individual questions reach the server solely as embedded
+// quizQuestionSchema entries inside published Quiz documents (core/sync.js's
+// publish path), never as standalone Question docs. So the real list for a
+// chapter has to come from those Quiz documents: either a quiz whose own
+// top-level subject/chapter matches directly (a simple, single-chapter
+// quiz), or — far more common in practice — a quiz with `sections[]` (a
+// mixed/multi-chapter paper) where one section's subject/chapter matches;
+// only that section's question_ids apply, not the whole quiz.
+//
+// The attachment key stays the embedded question's own q_id (same as
+// before) — confirmed unchanged across every quiz/section that reuses it
+// (core/sync.js never mints a fresh id per quiz), so one video attachment
+// still shows up in every quiz/paper that reuses that exact question.
 exports.getQuizQuestionsForChapter = asyncHandler(async (req, res) => {
   const batch = String(req.query.batch || '').trim();
   const subject = String(req.query.subject || '').trim();
   const chapter = String(req.query.chapter || '').trim();
   if (!batch || !subject || !chapter) throw new AppError('batch, subject and chapter are required', 400);
 
-  const questions = await Question.find({ batch, subject, chapter }, 'q_id question type')
-    .sort({ created_at: 1 }).limit(500).lean();
+  const quizzes = await Quiz.find({
+    batch,
+    status: 'published',
+    $or: [
+      { subject, chapter },
+      { sections: { $elemMatch: { subject, chapter } } },
+    ],
+  }, 'subject chapter questions sections').limit(300).lean();
+
+  const seen = new Map(); // q_id -> question text (first one wins)
+  for (const quiz of quizzes) {
+    const directMatch = quiz.subject === subject && quiz.chapter === chapter;
+    const matchingSections = (quiz.sections || []).filter(s => s.subject === subject && s.chapter === chapter);
+    const allowedQIds = directMatch ? null // null = every question in this quiz applies
+      : new Set(matchingSections.flatMap(s => s.question_ids || []));
+
+    for (const q of (quiz.questions || [])) {
+      if (!q.q_id || seen.has(q.q_id)) continue;
+      if (!directMatch && !allowedQIds.has(q.q_id)) continue;
+      seen.set(q.q_id, String(q.question || '').slice(0, 140));
+    }
+  }
+
   res.json({
     success: true,
-    data: questions.map(q => ({
-      q_id: q.q_id,
-      question: String(q.question || '').slice(0, 140),
-      type: q.type || 'mcq',
-    })),
+    data: [...seen.entries()].map(([q_id, question]) => ({ q_id, question, type: 'mcq' })),
   });
 });
 
