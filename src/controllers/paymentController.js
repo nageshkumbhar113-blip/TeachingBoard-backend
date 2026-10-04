@@ -1,6 +1,6 @@
 const User = require('../models/User');
 const Batch = require('../models/Batch');
-const { recordCommissionForPayment } = require('../utils/partnerCommission');
+const { recordCommissionForPayment, getConfig: getPartnerConfig } = require('../utils/partnerCommission');
 const StudentSubscription = require('../models/StudentSubscription');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
@@ -41,6 +41,34 @@ async function resolvePaidBatch(batchName, period) {
   return { batch, price };
 }
 
+// YouTube-subscriber discount (plan: 50% Discount via Self-Claim + Teacher
+// Manual Approval) — applies only when: the student has an APPROVED
+// SubscriberClaim (student.youtube_sub_verified_for_partner), the global
+// toggle is on, the batch has no conflicting legacy Batch.discount already
+// set (no stacking), and — if configured first-payment-only — this is the
+// student's first-ever paid (non-trial) subscription.
+async function resolveStudentDiscount(student, batch, basePrice) {
+  const none = { percent: 0, amount: basePrice, source: '' };
+  if (!student?.youtube_sub_verified_for_partner) return none;
+  if (batch?.discount) return none; // no stacking with an admin batch-wide discount
+
+  const cfg = await getPartnerConfig();
+  if (!cfg.student_discount_enabled || !(cfg.student_discount_percent > 0)) return none;
+
+  if (cfg.student_discount_first_payment_only !== false) {
+    const priorPaid = await StudentSubscription.exists({
+      student_user_id: student.user_id,
+      payment_verified: true,
+      is_trial: false,
+    });
+    if (priorPaid) return none;
+  }
+
+  const percent = cfg.student_discount_percent;
+  const amount = Math.round(basePrice * (1 - percent / 100));
+  return { percent, amount, source: 'youtube_subscriber_approved' };
+}
+
 // Extend access: active status, ensure batch assigned, push expiry forward.
 async function activateStudentForBatch(student, batchName, newExpiry) {
   student.status = 'active';
@@ -72,6 +100,29 @@ exports.getConfig = asyncHandler(async (_req, res) => {
   });
 });
 
+// ── Price preview, with any YouTube-subscriber discount applied ──────────────
+// Body: { student_code, pin, batch, period } — same auth pattern as every
+// other student-facing payment route. Lets the plan-select screen show the
+// discounted price (with a badge) BEFORE the student commits to createOrder.
+
+exports.previewPrice = asyncHandler(async (req, res) => {
+  const period = String(req.body.period || '').trim();
+  if (!['monthly', 'yearly'].includes(period)) {
+    throw new AppError('period must be "monthly" or "yearly"', 400);
+  }
+
+  const student = await authStudentByPin(req.body.student_code, req.body.pin);
+  const { batch, price } = await resolvePaidBatch(req.body.batch, period);
+  const discount = await resolveStudentDiscount(student, batch, price);
+
+  res.json({
+    success: true,
+    original_price: price,
+    discounted_price: discount.amount,
+    discount_percent: discount.percent,
+  });
+});
+
 // ── Create a Razorpay order (student_code + PIN authenticated) ────────────────
 // Body: { student_code, pin, batch, period: 'monthly' | 'yearly' }
 
@@ -85,8 +136,10 @@ exports.createOrder = asyncHandler(async (req, res) => {
   const { batch, price } = await resolvePaidBatch(req.body.batch, period);
 
   // Server computes the amount — never trust the client.
+  const discount = await resolveStudentDiscount(student, batch, price);
+
   const order = await razorpay.createOrder({
-    amount: price * 100, // paise
+    amount: discount.amount * 100, // paise
     currency: 'INR',
     receipt: `tb_${student.student_code}_${Date.now()}`,
     notes: {
@@ -102,11 +155,13 @@ exports.createOrder = asyncHandler(async (req, res) => {
     student_code: student.student_code,
     batch: batch.name,
     period,
-    amount: price,
+    amount: discount.amount,
     currency: 'INR',
     razorpay_order_id: order.id,
     status: 'created',
     is_trial: false,
+    discount_applied_percent: discount.percent,
+    discount_source: discount.source,
   });
 
   res.status(201).json({
@@ -117,6 +172,8 @@ exports.createOrder = asyncHandler(async (req, res) => {
     key_id: razorpay.getKeyId(),
     batch: batch.name,
     period,
+    original_price: price,
+    discount_percent: discount.percent,
     prefill: { name: student.name, contact: student.mobile || '' },
   });
 });

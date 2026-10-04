@@ -65,6 +65,9 @@ const configView = cfg => ({
   hold_days: cfg.hold_days, min_payout: cfg.min_payout, youtube_flat: cfg.youtube_flat, school_percent: cfg.school_percent,
   prize_delivery_days: cfg.prize_delivery_days || 10,
   prizes: (cfg.prizes || []).map(p => ({ count: p.count, title: p.title })),
+  student_discount_enabled: cfg.student_discount_enabled !== false,
+  student_discount_percent: cfg.student_discount_percent ?? 50,
+  student_discount_first_payment_only: cfg.student_discount_first_payment_only !== false,
 });
 
 exports.getPartnerConfig = asyncHandler(async (_req, res) => {
@@ -85,6 +88,9 @@ exports.setPartnerConfig = asyncHandler(async (req, res) => {
   num('youtube_flat', 0, 10000);
   num('school_percent', 0, 100);
   num('prize_delivery_days', 1, 90);
+  num('student_discount_percent', 0, 100);
+  if (req.body.student_discount_enabled !== undefined) patch.student_discount_enabled = !!req.body.student_discount_enabled;
+  if (req.body.student_discount_first_payment_only !== undefined) patch.student_discount_first_payment_only = !!req.body.student_discount_first_payment_only;
   if (req.body.prizes !== undefined) {
     if (!Array.isArray(req.body.prizes) || req.body.prizes.length > 8) throw new AppError('prizes must be a list of at most 8 items', 400);
     const seen = new Set();

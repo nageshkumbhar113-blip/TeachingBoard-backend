@@ -65,6 +65,12 @@ const userSchema = new mongoose.Schema(
     referred_by_teacher: { type: String, default: '', trim: true },
     // Student side: the friend (student code) who shared the app with this student (set once).
     referred_by_student: { type: String, default: '', trim: true },
+    // Student side: set when a YouTube Teacher Partner approves this student's
+    // subscriber claim (SubscriberClaim) — gates the student-discount in
+    // paymentController's resolvePaidBatch(). Kept separate from
+    // referred_by_teacher (a different, commission-only referral system).
+    youtube_sub_verified_for_partner: { type: mongoose.Schema.Types.ObjectId, ref: 'YoutubeTeacherPartner', default: null },
+    youtube_sub_verified_at:          { type: Date, default: null },
     // YouTube partner registration details, and the IP the terms were accepted from.
     channel_name: { type: String, default: '', trim: true },
     channel_url:  { type: String, default: '', trim: true },

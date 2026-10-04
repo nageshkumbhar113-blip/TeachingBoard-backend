@@ -10,6 +10,11 @@ const partnerConfigSchema = new mongoose.Schema(
     youtube_flat: { type: Number, default: 30, min: 0 },
     school_percent: { type: Number, default: 15, min: 0, max: 100 },
     prize_delivery_days: { type: Number, default: 10, min: 1, max: 90 }, // "you will get it within N days"
+    // Student subscription discount for approved YouTube-subscriber claims
+    // (see SubscriberClaim) — paymentController.resolvePaidBatch applies this.
+    student_discount_enabled: { type: Boolean, default: true },
+    student_discount_percent: { type: Number, default: 50, min: 0, max: 100 },
+    student_discount_first_payment_only: { type: Boolean, default: true },
     // Friend-referral prizes for students: reached when that many referred friends have paid.
     prizes: {
       type: [{ count: { type: Number, min: 1 }, title: { type: String, trim: true }, _id: false }],

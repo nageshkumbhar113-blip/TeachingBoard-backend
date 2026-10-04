@@ -5,6 +5,7 @@ const authCtrl    = require('../controllers/youtubeTeacherAuthController');
 const ctrl        = require('../controllers/youtubeTeacherController');
 const payCtrl      = require('../controllers/youtubeTeacherPaymentController');
 const adminCtrl    = require('../controllers/youtubeTeacherAdminController');
+const claimCtrl    = require('../controllers/subscriberClaimController');
 
 const authLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
@@ -35,6 +36,12 @@ teacherRouter.post('/videos',         requireYoutubeTeacher, ctrl.upsertVideo);
 teacherRouter.delete('/videos/:id',   requireYoutubeTeacher, ctrl.deleteVideo);
 teacherRouter.get('/missing-videos',  requireYoutubeTeacher, ctrl.listMissingVideos);
 
+// Student-discount subscriber claims (plan: 50% Discount via Self-Claim +
+// Teacher Manual Approval) — teacher reviews/approves their own claims here.
+teacherRouter.get('/subscriber-claims',              requireYoutubeTeacher, claimCtrl.listMyClaims);
+teacherRouter.post('/subscriber-claims/:id/approve', requireYoutubeTeacher, claimCtrl.approveClaim);
+teacherRouter.post('/subscriber-claims/:id/reject',  requireYoutubeTeacher, claimCtrl.rejectClaim);
+
 teacherRouter.post('/subscription/create',      requireYoutubeTeacher, payCtrl.createSubscriptionOrder);
 teacherRouter.post('/subscription/verify',      requireYoutubeTeacher, payCtrl.verifySubscription);
 teacherRouter.post('/subscription/start-trial', requireYoutubeTeacher, payCtrl.startTrial);
@@ -56,6 +63,10 @@ teacherRouter.get('/videos-for-exercise', requireStudent, (req, res, next) => {
   return req.query.teacher_id ? ctrl.videosForExerciseStep2(req, res, next) : ctrl.videosForExerciseStep1(req, res, next);
 });
 teacherRouter.post('/video-open/:videoId', requireStudent, ctrl.recordVideoOpen);
+
+teacherRouter.get('/subscriber-search',       requireStudent, claimCtrl.searchPartners);
+teacherRouter.get('/subscriber-claim/status', requireStudent, claimCtrl.getMyClaimStatus);
+teacherRouter.post('/subscriber-claim',       requireStudent, claimCtrl.claimSubscriber);
 
 // ── Admin-facing: /api/admin/youtube-teacher-* ───────────────────────────────
 const adminRouter = express.Router();

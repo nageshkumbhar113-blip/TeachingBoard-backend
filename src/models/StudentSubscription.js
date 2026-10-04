@@ -40,6 +40,12 @@ const studentSubscriptionSchema = new mongoose.Schema(
     // paying) stays status:'created' forever — dedupe flag for the
     // one-time "complete your payment" nudge (see notificationScheduler.js).
     payment_reminder_sent: { type: Boolean, default: false },
+
+    // Audit trail when a YouTube-subscriber discount was applied to `amount`
+    // at order-creation time (paymentController.resolvePaidBatch) — empty/0
+    // for every ordinary full-price order.
+    discount_applied_percent: { type: Number, default: 0, min: 0, max: 100 },
+    discount_source:          { type: String, default: '', trim: true }, // e.g. 'youtube_subscriber_approved'
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },

@@ -12,6 +12,7 @@ const {
   getPendingPayments,
   getRevenueSummary,
   processExpiryReminders,
+  previewPrice,
 } = require('../controllers/paymentController');
 
 const router = express.Router();
@@ -33,6 +34,7 @@ const payLimiter = createRateLimiter({
 });
 
 router.get('/config', getConfig);
+router.post('/preview', payLimiter, previewPrice);
 router.post('/order',  payLimiter, createOrder);
 router.post('/trial',  payLimiter, startTrial);
 router.post('/status', payLimiter, getStatus);
