@@ -59,6 +59,7 @@ async function resolveStudentDiscount(student, batch, basePrice) {
   // student_discount_* fields at all, so they must be defaulted here the
   // same way configView does, or this silently reads them as undefined and
   // the discount never applies even though Admin's screen shows it as on.
+  const cfg = await getPartnerConfig();
   const discountEnabled = cfg.student_discount_enabled !== false;
   const discountPercent = cfg.student_discount_percent ?? 50;
   const firstPaymentOnly = cfg.student_discount_first_payment_only !== false;
