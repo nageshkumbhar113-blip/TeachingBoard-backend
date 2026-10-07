@@ -52,10 +52,19 @@ async function resolveStudentDiscount(student, batch, basePrice) {
   if (!student?.youtube_sub_verified_for_partner) return none;
   if (batch?.discount) return none; // no stacking with an admin batch-wide discount
 
-  const cfg = await getPartnerConfig();
-  if (!cfg.student_discount_enabled || !(cfg.student_discount_percent > 0)) return none;
+  // cfg comes from a .lean() read, which does NOT apply Mongoose schema
+  // defaults for fields missing on the stored document (unlike
+  // partnerController.js's configView, which the Admin settings screen goes
+  // through) — a PartnerConfig doc saved before this feature existed has no
+  // student_discount_* fields at all, so they must be defaulted here the
+  // same way configView does, or this silently reads them as undefined and
+  // the discount never applies even though Admin's screen shows it as on.
+  const discountEnabled = cfg.student_discount_enabled !== false;
+  const discountPercent = cfg.student_discount_percent ?? 50;
+  const firstPaymentOnly = cfg.student_discount_first_payment_only !== false;
+  if (!discountEnabled || !(discountPercent > 0)) return none;
 
-  if (cfg.student_discount_first_payment_only !== false) {
+  if (firstPaymentOnly) {
     const priorPaid = await StudentSubscription.exists({
       student_user_id: student.user_id,
       payment_verified: true,
@@ -64,7 +73,7 @@ async function resolveStudentDiscount(student, batch, basePrice) {
     if (priorPaid) return none;
   }
 
-  const percent = cfg.student_discount_percent;
+  const percent = discountPercent;
   const amount = Math.round(basePrice * (1 - percent / 100));
   return { percent, amount, source: 'youtube_subscriber_approved' };
 }
