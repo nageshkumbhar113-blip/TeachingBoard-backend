@@ -33,6 +33,14 @@ const { createRateLimiter }             = require("./middleware/rateLimiter");
 
 const app = express();
 
+// Render sits behind a reverse proxy — without this, req.ip resolves to the
+// proxy's own address for every request, so every per-IP rate limiter in
+// this app (login, registration, payment preview/order, etc.) ends up
+// keying on the SAME value for all users and becomes one shared global
+// budget instead of a per-user one. `1` trusts exactly one hop (Render's own
+// proxy), which is correct for Render's single-proxy setup.
+app.set('trust proxy', 1);
+
 // ── Security headers ─────────────────────────────────────────
 app.disable('x-powered-by');
 app.use((_req, res, next) => {
