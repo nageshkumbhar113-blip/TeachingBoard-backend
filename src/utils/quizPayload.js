@@ -144,6 +144,7 @@ function normalizeQuestions(questions) {
         question.image === undefined || question.image === null || question.image === ""
           ? null
           : normalizeString(question.image, `questions[${index}].image`),
+      explanation: question.explanation ? normalizeString(question.explanation, `questions[${index}].explanation`, { required: false }) : '',
       // Omit entirely when absent so legacy submissions round-trip byte-identical.
       ...(marks !== undefined ? { marks } : {}),
       ...(negativeMarks !== undefined ? { negative_marks: negativeMarks } : {})
@@ -279,7 +280,7 @@ function sanitizeQuestions(questions, includeAnswers) {
     options: question.options,
     image: question.image || null,
     option_images: question.option_images || {},
-    ...(includeAnswers ? { answer: question.answer } : {}),
+    ...(includeAnswers ? { answer: question.answer, explanation: question.explanation || '' } : {}),
     ...(question.marks !== undefined && question.marks !== null ? { marks: question.marks } : {}),
     ...(question.negative_marks !== undefined && question.negative_marks !== null
       ? { negative_marks: question.negative_marks }
