@@ -392,18 +392,31 @@ async function _getTeacherStudentCodes(req) {
     : [];
 }
 
+// Analytics are shown to Indian teachers: calendar days are IST days.
+const IST_TZ = 'Asia/Kolkata';
+const IST_MS = 5.5 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const _istDateStr = ms => new Date(ms + IST_MS).toISOString().slice(0, 10);
+const _istDayStart = dateStr => {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d) - IST_MS);
+};
+
 // GET /api/teacher/analytics/weekly — attempts per day for last 7 days
 exports.getWeeklyAnalytics = asyncHandler(async (req, res) => {
   const studentCodes = await _getTeacherStudentCodes(req);
   if (!studentCodes.length) return res.json({ success: true, data: [] });
 
-  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  // Days are Indian calendar days. Grouping by the UTC date put every test
+  // taken between midnight and 5:30 am IST on the previous day's bar.
+  const today = _istDateStr(Date.now());
+  const since = _istDayStart(_istDateStr(Date.now() - 6 * DAY_MS));
 
   const raw = await Attempt.aggregate([
     { $match: { student_code: { $in: studentCodes }, submitted_at: { $gte: since } } },
     {
       $group: {
-        _id: { $dateToString: { format: '%Y-%m-%d', date: '$submitted_at' } },
+        _id: { $dateToString: { format: '%Y-%m-%d', date: '$submitted_at', timezone: IST_TZ } },
         count:           { $sum: 1 },
         total_score:     { $sum: OBTAINED },
         total_questions: { $sum: MAXIMUM },
@@ -416,12 +429,12 @@ exports.getWeeklyAnalytics = asyncHandler(async (req, res) => {
   const byDay = new Map(raw.map(r => [r._id, r]));
   const data = [];
   for (let i = 6; i >= 0; i--) {
-    const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
-    const key = d.toISOString().slice(0, 10);
+    const d = new Date(_istDayStart(today).getTime() - i * DAY_MS + 12 * 60 * 60 * 1000); // midday of that IST day
+    const key = _istDateStr(d.getTime());
     const r = byDay.get(key);
     data.push({
       date:    key,
-      label:   d.toLocaleDateString('mr-IN', { weekday: 'short' }),
+      label:   d.toLocaleDateString('mr-IN', { weekday: 'short', timeZone: IST_TZ }),
       count:   r?.count || 0,
       avg_pct: r && r.total_questions > 0
         ? Math.round((r.total_score / r.total_questions) * 100)
@@ -437,36 +450,36 @@ exports.getMonthlyAnalytics = asyncHandler(async (req, res) => {
   const studentCodes = await _getTeacherStudentCodes(req);
   if (!studentCodes.length) return res.json({ success: true, data: [] });
 
-  const since = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000);
+  // Four rolling 7-day windows ending now (W4 = the last 7 days). Each attempt
+  // is put straight into its window by age. Previously attempts were grouped
+  // by ISO calendar week and the whole week was then dropped into whichever
+  // rolling window held its earliest attempt — counts landed in the wrong
+  // bar, and two calendar weeks meeting one window lost one of them.
+  const MS_WEEK = 7 * DAY_MS;
+  const now = new Date();
+  const since = new Date(now.getTime() - 4 * MS_WEEK);
 
   const raw = await Attempt.aggregate([
-    { $match: { student_code: { $in: studentCodes }, submitted_at: { $gte: since } } },
+    { $match: { student_code: { $in: studentCodes }, submitted_at: { $gte: since, $lte: now } } },
     {
       $group: {
-        _id: {
-          year: { $isoWeekYear: '$submitted_at' },
-          week: { $isoWeek:     '$submitted_at' },
-        },
+        _id: { $floor: { $divide: [{ $subtract: [now, '$submitted_at'] }, MS_WEEK] } }, // 0 = last 7 days … 3
         count:           { $sum: 1 },
         total_score:     { $sum: OBTAINED },
         total_questions: { $sum: MAXIMUM },
-        week_start:      { $min: '$submitted_at' },
       },
     },
-    { $sort: { week_start: 1 } },
   ]);
+  const byWindow = new Map(raw.map(r => [Math.min(3, r._id), r]));
 
   // Ensure exactly 4 buckets (fill empty weeks with 0)
-  const MS_WEEK = 7 * 24 * 60 * 60 * 1000;
-  const now = Date.now();
   const data = [];
   for (let w = 3; w >= 0; w--) {
-    const weekStart = new Date(now - (w + 1) * MS_WEEK);
-    const weekEnd   = new Date(now - w       * MS_WEEK);
-    const match = raw.find(r => r.week_start >= weekStart && r.week_start < weekEnd);
+    const weekStart = new Date(now.getTime() - (w + 1) * MS_WEEK);
+    const match = byWindow.get(w);
     data.push({
       label:   `W${4 - w}`,
-      week_of: weekStart.toLocaleDateString('mr-IN', { day: 'numeric', month: 'short' }),
+      week_of: weekStart.toLocaleDateString('mr-IN', { day: 'numeric', month: 'short', timeZone: IST_TZ }),
       count:   match?.count || 0,
       avg_pct: match && match.total_questions > 0
         ? Math.round((match.total_score / match.total_questions) * 100)
