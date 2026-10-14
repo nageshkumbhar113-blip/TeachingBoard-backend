@@ -6,6 +6,7 @@ const asyncHandler = require("../utils/asyncHandler");
 const AppError = require("../utils/AppError");
 const { sendToUser } = require("../utils/fcm");
 const { parentTokensFor } = require("../utils/parentTokens");
+const { computeMarks } = require("../utils/attemptScore");
 const { isQuizLocked, chapterLockedBody } = require("../utils/contentAccess");
 
 function normalizeAnswerValue(value) {
@@ -127,6 +128,8 @@ exports.createAttempt = asyncHandler(async (req, res) => {
           correct_answers: existing.correct_answers,
           wrong_answers: existing.wrong_answers,
           skipped_answers: existing.skipped_answers,
+          marks_obtained: existing.marks_obtained,
+          max_marks: existing.max_marks,
           submitted_at: existing.submitted_at,
         },
       });
@@ -135,6 +138,7 @@ exports.createAttempt = asyncHandler(async (req, res) => {
 
   const studentCode = req.user?.student_code || '';
   if (!studentCode) throw new AppError('Student code missing from session — please log in again', 401);
+  const { marks_obtained, max_marks } = computeMarks(quiz, evaluatedAnswers);
   const attempt = await Attempt.create({
     attempt_id: clientAttemptId || `attempt_${randomUUID()}`,
     quiz_id: quiz.quiz_id,
@@ -151,12 +155,14 @@ exports.createAttempt = asyncHandler(async (req, res) => {
     correct_answers: correctAnswers,
     wrong_answers: wrongAnswers,
     skipped_answers: skippedAnswers,
+    marks_obtained,
+    max_marks,
     submitted_at: new Date()
   });
 
   // Notify assigned teachers via FCM (non-blocking)
   if (studentCode) {
-    _notifyTeachers(studentCode, studentName, quiz.title, correctAnswers, totalQuestions)
+    _notifyTeachers(studentCode, studentName, quiz.title, marks_obtained, max_marks) // same marks the student sees
       .catch(err => console.warn('FCM teacher notify failed:', err.message));
   }
 
@@ -171,6 +177,8 @@ exports.createAttempt = asyncHandler(async (req, res) => {
       correct_answers: attempt.correct_answers,
       wrong_answers: attempt.wrong_answers,
       skipped_answers: attempt.skipped_answers,
+      marks_obtained: attempt.marks_obtained,
+      max_marks: attempt.max_marks,
       submitted_at: attempt.submitted_at
     }
   });

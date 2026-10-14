@@ -6,6 +6,8 @@ const FeeConfig  = require('../models/FeeConfig');
 const StudyPlan = require('../models/StudyPlan');
 const sp = require('../utils/studyPlan');
 const asyncHandler = require('../utils/asyncHandler');
+// Marks-based % that matches what the student saw (falls back for old attempts)
+const { OBTAINED, MAXIMUM } = require('../utils/attemptScore');
 const AppError = require('../utils/AppError');
 
 function normalizeCode(value) {
@@ -144,8 +146,8 @@ exports.getMyChildren = asyncHandler(async (req, res) => {
       $group: {
         _id: '$student_code',
         total_attempts: { $sum: 1 },
-        total_score: { $sum: '$score' },
-        total_questions: { $sum: '$total_questions' },
+        total_score: { $sum: OBTAINED },
+        total_questions: { $sum: MAXIMUM },
         last_attempt: { $max: '$submitted_at' },
       }
     }

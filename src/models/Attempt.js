@@ -82,6 +82,18 @@ const attemptSchema = new mongoose.Schema(
       required: true,
       min: 0
     },
+    // Marks-based result, computed the same way the student app shows it
+    // (per-question marks, negative marking; never below 0). Absent on
+    // attempts saved before this existed — readers fall back to
+    // score / total_questions (utils/attemptScore.js).
+    marks_obtained: {
+      type: Number,
+      min: 0
+    },
+    max_marks: {
+      type: Number,
+      min: 0
+    },
     submitted_at: {
       type: Date,
       required: true,

@@ -2,6 +2,8 @@ const { randomUUID } = require('crypto');
 const User = require('../models/User');
 const Attempt = require('../models/Attempt');
 const asyncHandler = require('../utils/asyncHandler');
+// Marks-based % that matches what the student saw (falls back for old attempts)
+const { OBTAINED, MAXIMUM } = require('../utils/attemptScore');
 const AppError = require('../utils/AppError');
 const { isValidMobile } = require('../utils/mobile');
 const { isWeakPin } = require('../utils/pin');
@@ -326,8 +328,8 @@ exports.getMyStudents = asyncHandler(async (req, res) => {
       $group: {
         _id: '$student_code',
         total_attempts: { $sum: 1 },
-        total_score: { $sum: '$score' },
-        total_questions: { $sum: '$total_questions' },
+        total_score: { $sum: OBTAINED },
+        total_questions: { $sum: MAXIMUM },
         last_attempt: { $max: '$submitted_at' },
       }
     }
@@ -403,8 +405,8 @@ exports.getWeeklyAnalytics = asyncHandler(async (req, res) => {
       $group: {
         _id: { $dateToString: { format: '%Y-%m-%d', date: '$submitted_at' } },
         count:           { $sum: 1 },
-        total_score:     { $sum: '$score' },
-        total_questions: { $sum: '$total_questions' },
+        total_score:     { $sum: OBTAINED },
+        total_questions: { $sum: MAXIMUM },
       },
     },
     { $sort: { _id: 1 } },
@@ -446,8 +448,8 @@ exports.getMonthlyAnalytics = asyncHandler(async (req, res) => {
           week: { $isoWeek:     '$submitted_at' },
         },
         count:           { $sum: 1 },
-        total_score:     { $sum: '$score' },
-        total_questions: { $sum: '$total_questions' },
+        total_score:     { $sum: OBTAINED },
+        total_questions: { $sum: MAXIMUM },
         week_start:      { $min: '$submitted_at' },
       },
     },
@@ -555,8 +557,8 @@ exports.getRanking = asyncHandler(async (req, res) => {
       $group: {
         _id:             '$student_code',
         total_attempts:  { $sum: 1 },
-        total_score:     { $sum: '$score' },
-        total_questions: { $sum: '$total_questions' },
+        total_score:     { $sum: OBTAINED },
+        total_questions: { $sum: MAXIMUM },
         student_name:    { $last: '$student_name' },
       },
     },
