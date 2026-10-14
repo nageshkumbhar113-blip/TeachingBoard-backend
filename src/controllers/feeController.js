@@ -8,6 +8,7 @@ const User         = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError     = require('../utils/AppError');
 const { sendToMany } = require('../utils/fcm');
+const { parentTokensFor } = require('../utils/parentTokens');
 
 // UPI payment deep link config — fallback env vars; teachers can override per-account
 const _DEFAULT_UPI_ID   = process.env.UPI_ID   || '';
@@ -327,13 +328,7 @@ exports.processReminders = asyncHandler(async (req, res) => {
       const remaining = Math.max(0, record.total_amount - record.paid_amount);
       const body      = getBody(record.student_name, remaining);
 
-      const parents = await User.find({
-        role:         'parent',
-        children:     record.student_code,
-        device_token: { $exists: true, $nin: [null, ''] },
-      }).select('device_token').lean();
-
-      const tokens = [...new Set(parents.map(p => p.device_token).filter(Boolean))];
+      const tokens = await parentTokensFor([record.student_code]);
       if (tokens.length) {
         await sendToMany(tokens, title, body, {
           type:          'fee_reminder',

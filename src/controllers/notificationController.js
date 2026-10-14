@@ -2,6 +2,7 @@ const { randomUUID }   = require('crypto');
 const User             = require('../models/User');
 const Notification     = require('../models/Notification');
 const { sendToMany }   = require('../utils/fcm');
+const { parentTokensFor } = require('../utils/parentTokens');
 const asyncHandler     = require('../utils/asyncHandler');
 const AppError         = require('../utils/AppError');
 
@@ -52,14 +53,9 @@ exports.sendNotification = asyncHandler(async (req, res) => {
     return res.json({ success: true, recipient_count: 0, message: 'No students found in this batch' });
   }
 
-  // Find parents of target students
-  const parents = await User.find({
-    role: 'parent',
-    children: { $in: targetStudentCodes },
-    device_token: { $exists: true, $nin: [null, ''] },
-  }).select('device_token').lean();
-
-  const tokens = [...new Set(parents.map(p => p.device_token).filter(Boolean))];
+  // Parents of the target students — both real Parent accounts and parents
+  // using the child's own code (utils/parentTokens.js)
+  const tokens = await parentTokensFor(targetStudentCodes);
 
   if (tokens.length) {
     const data = {

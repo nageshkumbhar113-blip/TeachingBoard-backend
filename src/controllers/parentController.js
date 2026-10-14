@@ -249,7 +249,12 @@ exports.updateDeviceToken = asyncHandler(async (req, res) => {
   const token = String(req.body.device_token || '').trim();
   if (!token) throw new AppError('device_token is required', 400);
 
-  await User.updateOne({ user_id: req.user.id }, { $set: { device_token: token } });
+  // Parent view opened with the child's own code+PIN: this session is backed
+  // by the STUDENT document. Writing device_token there replaced the child's
+  // phone token, so the child stopped getting pushes and the parent's phone got
+  // the child's instead. Store the parent's phone separately.
+  const field = req.userDoc?.role === 'student' ? 'parent_device_token' : 'device_token';
+  await User.updateOne({ user_id: req.user.id }, { $set: { [field]: token } });
   res.json({ success: true, message: 'Device token updated' });
 });
 

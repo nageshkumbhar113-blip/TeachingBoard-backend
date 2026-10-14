@@ -95,6 +95,11 @@ const userSchema = new mongoose.Schema(
 
     // Shared: FCM device token for push notifications
     device_token: { type: String, default: null, trim: true },
+    // Student-specific: the phone a parent uses when logged into the Parent
+    // view with the CHILD's own code+PIN (no separate Parent account). Kept
+    // apart from device_token so the parent's phone never replaces the
+    // child's — see utils/parentTokens.js.
+    parent_device_token: { type: String, default: null, trim: true },
 
     // Student-specific: dedupe for the "haven't studied in N days" reminder
     // job (jobs/notificationScheduler.js) — without this it would re-fire

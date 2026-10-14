@@ -5,6 +5,7 @@ const User = require("../models/User");
 const asyncHandler = require("../utils/asyncHandler");
 const AppError = require("../utils/AppError");
 const { sendToUser } = require("../utils/fcm");
+const { parentTokensFor } = require("../utils/parentTokens");
 const { isQuizLocked, chapterLockedBody } = require("../utils/contentAccess");
 
 function normalizeAnswerValue(value) {
@@ -182,16 +183,12 @@ async function _notifyTeachers(studentCode, studentName, quizTitle, score, total
     device_token: { $exists: true, $nin: [null, ''] }
   }).select('device_token').lean();
 
-  const parents = await User.find({
-    role: 'parent',
-    children: studentCode,
-    device_token: { $exists: true, $nin: [null, ''] }
-  }).select('device_token').lean();
+  const parentTokens = await parentTokensFor([studentCode]);
 
-  const tokens = [
+  const tokens = [...new Set([
     ...teachers.map(t => t.device_token),
-    ...parents.map(p => p.device_token),
-  ].filter(Boolean);
+    ...parentTokens,
+  ].filter(Boolean))];
 
   if (!tokens.length) return;
 
