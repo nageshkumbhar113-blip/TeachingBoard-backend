@@ -8,6 +8,7 @@ if (!process.env.JWT_SECRET && !process.env.AUTH_SECRET) {
 const path    = require("path");
 const express = require("express");
 const cors    = require("cors");
+const compression = require("compression");
 
 const authRoutes     = require("./routes/authRoutes");
 const quizRoutes     = require("./routes/quizRoutes");
@@ -50,6 +51,19 @@ app.use((_req, res, next) => {
   res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
   next();
 });
+
+// ── Response compression (gzip) ─────────────────────────────
+// JSON only: the student sync payloads (full quiz lists with questions) are
+// the bulk of our bandwidth and shrink ~70-80%. Everything else — the
+// streamed Notes PDF (already compressed, and it forwards Content-Length),
+// images, static files — is left exactly as before. Kill switch:
+// DISABLE_COMPRESSION=1 in the Render env turns this off without a deploy.
+if (process.env.DISABLE_COMPRESSION !== '1') {
+  app.use(compression({
+    threshold: 1024,
+    filter: (_req, res) => /^application\/json\b/i.test(String(res.getHeader('Content-Type') || '')),
+  }));
+}
 
 // ── CORS ────────────────────────────────────────────────────
 // Set CORS_ORIGIN in env: comma-separated list of allowed origins.
