@@ -51,6 +51,11 @@ async function resolveStudentDiscount(student, batch, basePrice) {
   const none = { percent: 0, amount: basePrice, source: '' };
   if (!student?.youtube_sub_verified_for_partner) return none;
   if (batch?.discount) return none; // no stacking with an admin batch-wide discount
+  // The discount comes from that teacher's verification — it ends if the
+  // admin suspends the teacher (suspension previously left it running).
+  const YoutubeTeacherPartner = require('../models/YoutubeTeacherPartner');
+  const partnerActive = await YoutubeTeacherPartner.exists({ _id: student.youtube_sub_verified_for_partner, status: 'active' }).catch(() => null);
+  if (!partnerActive) return none;
 
   // cfg comes from a .lean() read, which does NOT apply Mongoose schema
   // defaults for fields missing on the stored document (unlike

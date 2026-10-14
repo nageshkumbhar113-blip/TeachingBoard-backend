@@ -5,6 +5,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const { sendToUser } = require('../utils/fcm');
 const { invalidateUserCache } = require('../middleware/auth');
+const { getConfig: getPartnerConfig } = require('../utils/partnerCommission');
 
 function serializeClaim(c, partner) {
   return {
@@ -129,10 +130,13 @@ exports.approveClaim = asyncHandler(async (req, res) => {
     await student.save();
     invalidateUserCache('student', student.user_id);
 
+    // Use the admin-configured percent (it was hard-coded as 50%).
+    const cfg = await getPartnerConfig().catch(() => ({}));
+    const pct = cfg.student_discount_percent ?? 50;
     await sendToUser(
       student.device_token,
-      '🎉 50% Discount Unlocked!',
-      'तुमचं YouTube subscription verify झालं — आता subscription वर 50% सूट लागू आहे.',
+      `🎉 ${pct}% Discount Unlocked!`,
+      `तुमचं YouTube subscription verify झालं — आता subscription वर ${pct}% सूट लागू आहे.`,
       { type: 'youtube_subscriber_discount' }
     ).catch(err => console.warn('Discount-approval FCM error:', err.message));
   }
