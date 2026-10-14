@@ -8,6 +8,7 @@ const Concept = require('../models/Concept');
 const SLSQuestion = require('../models/SLSQuestion');
 const PassageBlock = require('../models/PassageBlock');
 const Question = require('../models/Question');
+const Quiz = require('../models/Quiz');
 const StudyPlan = require('../models/StudyPlan');
 const StudyPlanCursor = require('../models/StudyPlanCursor');
 const StudyTask = require('../models/StudyTask');
@@ -85,10 +86,21 @@ async function _chapterList(batchId, subjectId, chapterIds) {
 // catalog chapter order — matches how a student naturally studies a lesson (learn it, read/practice
 // the passage, drill the exercises, then a quick MCQ check at the end). Passage blocks only count
 // here when tagged to one of the plan's own chapters — the chapterId-blank "unseen pool" used for
-// paper generation isn't lesson-scoped, so it's excluded. MCQs aren't grouped by anything in the bank
-// (unlike Exercise's exerciseNo), so one chapter's whole MCQ pool becomes a single StudyItem.
+// paper generation isn't lesson-scoped, so it's excluded. MCQs: each published chapter Quiz (the
+// admin's "Test 1", "Test 2"...) is its own StudyItem (refId = quiz_id). Only when a chapter has no
+// published quiz does its Question-bank pool (ungrouped, unlike Exercise's exerciseNo) become a
+// single practice StudyItem (refId = chapterId). Mixed papers span chapters, so they're left out.
 async function materializeSubjectItems(batchId, subjectId, chapterIds) {
+  const norm = s => String(s || '').trim().toLowerCase().replace(/\s+/g, '-');
   const chapters = await _chapterList(batchId, subjectId, chapterIds);
+  const quizzesByChapter = new Map();
+  const quizzes = await Quiz.find({ status: 'published', batch: batchId, subject: subjectId, paper_mode: { $ne: 'mixed' } })
+    .select('quiz_id title chapter').lean();
+  for (const q of quizzes) {
+    const key = norm(q.chapter);
+    if (!quizzesByChapter.has(key)) quizzesByChapter.set(key, []);
+    quizzesByChapter.get(key).push(q);
+  }
   const items = [];
   for (const ch of chapters) {
     const concepts = await Concept.find({ chapterId: ch.chapterId, status: 'published' }).sort({ order: 1, created_at: 1 }).lean();
@@ -104,8 +116,11 @@ async function materializeSubjectItems(batchId, subjectId, chapterIds) {
     for (const no of exerciseNos) {
       items.push({ itemType: 'exercise', chapterId: ch.chapterId, chapterName: ch.name, refId: no, label: `Exercise ${no}` });
     }
-    const hasMcq = await Question.exists({ batch: batchId, subject: subjectId, chapter: ch.name });
-    if (hasMcq) {
+    const chapterQuizzes = (quizzesByChapter.get(norm(ch.name)) || []).sort((a, b) => _naturalCompare(a.title, b.title));
+    for (const q of chapterQuizzes) {
+      items.push({ itemType: 'mcq', chapterId: ch.chapterId, chapterName: ch.name, refId: q.quiz_id, label: q.title || 'MCQ Test' });
+    }
+    if (!chapterQuizzes.length && await Question.exists({ batch: batchId, subject: subjectId, chapter: ch.name })) {
       items.push({ itemType: 'mcq', chapterId: ch.chapterId, chapterName: ch.name, refId: ch.chapterId, label: `MCQ Practice — ${ch.name}` });
     }
   }
