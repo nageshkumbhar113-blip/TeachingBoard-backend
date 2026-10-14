@@ -234,10 +234,22 @@ function _isoWeekKey(d = new Date()) {
   return `${date.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
 }
 
+// "Evening" means evening in India. The old gate used the server's local hour,
+// and Render runs in UTC, so 18:00 there was 23:30 IST — and if the free-tier
+// instance was asleep at that hour the push was skipped for the whole day.
+// Hour and date are both taken in IST. STUDY_PLAN_EVENING_HOUR_IST tunes it.
+const EVENING_HOUR_IST = Number(process.env.STUDY_PLAN_EVENING_HOUR_IST) || 18;
+
+function _istNow(now = new Date()) {
+  const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+  return { hour: ist.getUTCHours(), date: ist.toISOString().slice(0, 10) };
+}
+
 async function _runStudyPlanEveningJobsIfNeeded() {
-  if (new Date().getHours() < 18) return; // server local time — "evening" gate
+  const ist = _istNow();
+  if (ist.hour < EVENING_HOUR_IST) return;
   const KEY = 'study_plan_evening';
-  const today = _todayStr();
+  const today = ist.date;
   const state = await SchedulerState.findOne({ key: KEY }).lean();
   if (state?.last_run_date === today) return;
   await SchedulerState.updateOne({ key: KEY }, { $set: { last_run_date: today } }, { upsert: true });
@@ -291,4 +303,4 @@ function start() {
   console.log('notificationScheduler: started (poll every', QUEUE_POLL_MS / 1000, 's)');
 }
 
-module.exports = { start };
+module.exports = { start, _internals: { _istNow, _runStudyPlanEveningJobsIfNeeded } };
