@@ -13,8 +13,9 @@
  *               (free-chapter config, subscription expiry).
  *   questions — mirrors GET /api/questions (student): same filter, sort, 1000
  *               cap and free-chapter filtering, by q_id + updated_at.
- *   access    — full/free + expiry, so the app can force a full sync the moment
- *               a payment or expiry changes what the student may see.
+ *   access    — full/free + expiry + assigned batches, so the app can force a
+ *               full sync the moment a payment, expiry or class change alters
+ *               what the student may see.
  * Results are memoised for 30 s per (batches, access level) — identical for
  * every student sharing them — so a whole class checking at once is one query.
  *
@@ -77,7 +78,9 @@ exports.getSyncState = asyncHandler(async (req, res) => {
   const batches = (Array.isArray(userDoc.assigned_batches) ? userDoc.assigned_batches : [])
     .map(b => String(b || '').trim()).filter(Boolean).sort();
   const full = hasFullAccess(userDoc);
-  const access = `${full ? 'full' : 'free'}|${userDoc.expiry_date ? new Date(userDoc.expiry_date).toISOString().slice(0, 10) : ''}`;
+  // Batches are part of `access` so assigning/removing a class (which also
+  // changes the profile the app shows) forces a full sync including /auth/me.
+  const access = `${full ? 'full' : 'free'}|${userDoc.expiry_date ? new Date(userDoc.expiry_date).toISOString().slice(0, 10) : ''}|${batches.join(',')}`;
 
   let fp = { quizzes: '0:', questions: '0:' };
   if (batches.length) {
