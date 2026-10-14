@@ -136,12 +136,7 @@ app.get("/student-app/",            _sendFrontend("student-app/index.html"));
 app.get("/student-app/index.html",  _sendFrontend("student-app/index.html"));
 app.get("/favicon.ico",  (_req, res) => res.status(204).end());
 
-// ── Rate limiting on auth ────────────────────────────────────
-const authLimiter = createRateLimiter({
-  windowMs: 15 * 60 * 1000,  // 15 minutes
-  max:      30,               // 30 login attempts per IP per window
-  message:  'Too many login attempts — please try again later',
-});
+// Login rate limiting lives in routes/authRoutes.js (POST /login only).
 
 const vocabLimiter = createRateLimiter({
   windowMs: 60 * 1000,  // 1 minute
@@ -150,7 +145,7 @@ const vocabLimiter = createRateLimiter({
 });
 
 // ── API routes ───────────────────────────────────────────────
-app.use("/api/auth",      authLimiter, authRoutes);
+app.use("/api/auth",      authRoutes);
 app.use("/api/quizzes",   quizRoutes);
 app.use("/api/quiz-patterns", quizPatternRoutes);
 app.use("/api/attempts",  attemptRoutes);
