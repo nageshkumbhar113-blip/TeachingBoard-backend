@@ -140,6 +140,11 @@ exports.login = asyncHandler(async (req, res) => {
     if (!parent || !parent.verifyPin(pin)) {
       const student = await User.findOne({ student_code: parentCode, role: 'student' });
       if (student && student.verifyPin(pin)) {
+        // A blocked student's own code must not keep working through the
+        // Parent view either.
+        if (student.status === 'blocked') {
+          return res.status(403).json({ success: false, message: 'Student access is blocked', code: 'ACCOUNT_BLOCKED' });
+        }
         parent = student;
         viaStudent = true;
       } else {

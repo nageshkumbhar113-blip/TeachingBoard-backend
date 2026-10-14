@@ -142,6 +142,11 @@ async function requireParent(req, res, next) {
   const payload = await _attachResolvedUser(req);
   if (!payload) return res.status(401).json({ success: false, message: 'Authentication required' });
   if (payload.role !== 'parent') return res.status(403).json({ success: false, message: 'Parent access required' });
+  // Parent view opened with the child's own code is backed by the student
+  // document — if that student gets blocked, the session stops too.
+  if (req.userDoc?.role === 'student' && req.userDoc.status === 'blocked') {
+    return res.status(403).json({ success: false, message: 'Student access is blocked', code: 'ACCOUNT_BLOCKED' });
+  }
   next();
 }
 
