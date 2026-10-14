@@ -10,6 +10,7 @@ const {
   selfRegister,
   updateOwnDeviceToken,
 } = require('../controllers/studentController');
+const { getSyncState } = require('../controllers/syncStateController');
 
 const router = express.Router();
 
@@ -30,5 +31,6 @@ router.post('/:id/reset-device', requireAdmin, resetDevice);
 // ── Student: /api/student (self-service, own account only) ──────────────────
 const selfRouter = express.Router();
 selfRouter.patch('/device-token', requireStudent, updateOwnDeviceToken);
+selfRouter.get('/sync-state', requireStudent, getSyncState);
 
 module.exports = { router, selfRouter };
