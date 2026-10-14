@@ -386,6 +386,14 @@ exports.listMissingVideos = asyncHandler(async (req, res) => {
 // Step 1 — teacher cards only (no exercise video id yet, see plan Section 15).
 // Max 5: Premium (eligible = active+approved+≥1 live video) sorted by
 // open_count, then non-Premium sorted by open_count.
+// What students see is the LIVE (last approved) video, whatever the record's
+// review status: editing an approved video puts the new version 'pending'
+// and a rejected edit marks it 'rejected', but in both cases the previously
+// approved live_video_id must keep showing (see upsertVideo / rejectVideo).
+// Filtering on status:'approved' hid the live video for the whole review,
+// and for good after a rejected edit.
+const LIVE = { $nin: ['', null] };
+
 exports.videosForExerciseStep1 = asyncHandler(async (req, res) => {
   const contentType = String(req.query.content_type || 'exercise').trim();
   const conceptId = String(req.query.concept_id || '').trim();
@@ -394,10 +402,10 @@ exports.videosForExerciseStep1 = asyncHandler(async (req, res) => {
   let filter;
   if (contentType === 'concept') {
     if (!conceptId) throw new AppError('concept_id is required', 400);
-    filter = { content_type: 'concept', concept_id: conceptId, status: 'approved', live_video_id: { $ne: '' } };
+    filter = { content_type: 'concept', concept_id: conceptId, live_video_id: LIVE };
   } else if (contentType === 'quiz_test') {
     if (!quizId) throw new AppError('quiz_id is required', 400);
-    filter = { content_type: 'quiz_test', quiz_id: quizId, status: 'approved', live_video_id: { $ne: '' } };
+    filter = { content_type: 'quiz_test', quiz_id: quizId, live_video_id: LIVE };
   } else {
     const batch = String(req.query.batch || '').trim();
     const subject = String(req.query.subject || '').trim();
@@ -409,7 +417,7 @@ exports.videosForExerciseStep1 = asyncHandler(async (req, res) => {
     filter = {
       content_type: 'exercise',
       batch_name: batch, subject_name: subject, chapter_name: chapter, exercise_no: exercise,
-      status: 'approved', live_video_id: { $ne: '' },
+      live_video_id: LIVE,
     };
   }
 
@@ -470,11 +478,11 @@ exports.videosForExerciseStep2 = asyncHandler(async (req, res) => {
   if (contentType === 'concept') {
     const conceptId = String(req.query.concept_id || '').trim();
     if (!conceptId) throw new AppError('concept_id is required', 400);
-    filter = { youtube_teacher_id: teacherId, content_type: 'concept', concept_id: conceptId, status: 'approved', live_video_id: { $ne: '' } };
+    filter = { youtube_teacher_id: teacherId, content_type: 'concept', concept_id: conceptId, live_video_id: LIVE };
   } else if (contentType === 'quiz_test') {
     const quizId = String(req.query.quiz_id || '').trim();
     if (!quizId) throw new AppError('quiz_id is required', 400);
-    filter = { youtube_teacher_id: teacherId, content_type: 'quiz_test', quiz_id: quizId, status: 'approved', live_video_id: { $ne: '' } };
+    filter = { youtube_teacher_id: teacherId, content_type: 'quiz_test', quiz_id: quizId, live_video_id: LIVE };
   } else {
     const { batch, subject, chapter, exercise } = req.query;
     if (!batch || !subject || !chapter || !exercise) {
@@ -483,9 +491,17 @@ exports.videosForExerciseStep2 = asyncHandler(async (req, res) => {
     filter = {
       youtube_teacher_id: teacherId, content_type: 'exercise',
       batch_name: batch, subject_name: subject, chapter_name: chapter, exercise_no: exercise,
-      status: 'approved', live_video_id: { $ne: '' },
+      live_video_id: LIVE,
     };
   }
+
+  // Same "is this teacher live" rule as Step 1: a suspended teacher, or one
+  // whose plan has lapsed, must not be reachable by passing teacher_id directly.
+  const [partnerLive, subLive] = await Promise.all([
+    YoutubeTeacherPartner.exists({ _id: teacherId, status: 'active' }).catch(() => null),
+    YoutubeTeacherSubscription.exists({ youtube_teacher_id: teacherId, status: 'active', expiry_date: { $gt: new Date() } }).catch(() => null),
+  ]);
+  if (!partnerLive || !subLive) return res.json({ success: true, data: [] });
 
   const videos = await YoutubeTeacherVideo.find(filter).sort({ created_at: 1 }).lean();
 
@@ -498,7 +514,7 @@ exports.videosForExerciseStep2 = asyncHandler(async (req, res) => {
 // POST /api/youtube-teacher/video-open/:videoId — public counter increment,
 // called by the student app when a video actually starts playing.
 exports.recordVideoOpen = asyncHandler(async (req, res) => {
-  await YoutubeTeacherVideo.updateOne({ _id: req.params.videoId, status: 'approved' }, { $inc: { open_count: 1 } });
+  await YoutubeTeacherVideo.updateOne({ _id: req.params.videoId, live_video_id: LIVE }, { $inc: { open_count: 1 } });
   res.json({ success: true });
 });
 

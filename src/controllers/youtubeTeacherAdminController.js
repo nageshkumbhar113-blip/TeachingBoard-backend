@@ -151,7 +151,7 @@ exports.videoGaps = asyncHandler(async (req, res) => {
   if (!subjectDoc) return res.json({ success: true, data: [] });
 
   const covered = new Set(
-    (await YoutubeTeacherVideo.find({ batch_name: batchName, subject_name: subjectName, status: 'approved' })
+    (await YoutubeTeacherVideo.find({ batch_name: batchName, subject_name: subjectName, live_video_id: { $nin: ['', null] } }) // covered = students can watch one now
       .select('chapter_name exercise_no').lean())
       .map(v => `${v.chapter_name}::${v.exercise_no}`)
   );
