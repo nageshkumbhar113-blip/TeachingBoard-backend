@@ -27,6 +27,7 @@ const StudyTask = require('../models/StudyTask');
 const studyPlan = require('../utils/studyPlan');
 const { notifyBatch, notifyStudent } = require('../utils/studentNotify');
 const { sendToMany } = require('../utils/fcm');
+const { parentTokensFor } = require('../utils/parentTokens');
 
 const QUEUE_POLL_MS       = 5 * 60 * 1000;   // check the debounce queue every 5 min
 const QUEUE_QUIET_MS      = 2 * 60 * 1000;   // ...but only send once a batch/chapter has been quiet 2 min
@@ -186,8 +187,10 @@ async function _sendStudyPlanEveningJobs() {
           `आज अजून ${pending} Study Items बाकी आहेत — पूर्ण करा.`, { type: 'study_plan_pending', planId: String(plan._id) });
       }
 
-      const parents = await User.find({ role: 'parent', student_code: plan.studentCode, device_token: { $exists: true, $nin: [null, ''] } }).select('device_token').lean();
-      const tokens = [...new Set(parents.map(p => p.device_token).filter(Boolean))];
+      // Parent accounts keep their children in `children` (they have no
+      // student_code), so the old { role:'parent', student_code } query never
+      // matched anyone and this report was never delivered.
+      const tokens = await parentTokensFor([plan.studentCode]);
       if (tokens.length) {
         const percent = tasks.length ? Math.round((completed / tasks.length) * 100) : 0;
         await sendToMany(tokens, '📖 आजचा अभ्यास अहवाल',
@@ -303,4 +306,4 @@ function start() {
   console.log('notificationScheduler: started (poll every', QUEUE_POLL_MS / 1000, 's)');
 }
 
-module.exports = { start, _internals: { _istNow, _runStudyPlanEveningJobsIfNeeded } };
+module.exports = { start, _internals: { _istNow, _runStudyPlanEveningJobsIfNeeded, _sendStudyPlanEveningJobs } };
