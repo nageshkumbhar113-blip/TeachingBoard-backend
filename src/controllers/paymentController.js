@@ -328,8 +328,9 @@ exports.webhook = asyncHandler(async (req, res) => {
       ytSub.razorpay_payment_id = paymentId;
       ytSub.payment_verified = true;
       ytSub.status = 'active';
-      ytSub.start_date = new Date();
-      ytSub.expiry_date = YoutubeTeacherSubscription.computeExpiry(ytSub.plan_type, new Date());
+      const startsAt = await YoutubeTeacherSubscription.renewalStart(ytSub.youtube_teacher_id, ytSub._id);
+      ytSub.start_date = startsAt;
+      ytSub.expiry_date = YoutubeTeacherSubscription.computeExpiry(ytSub.plan_type, startsAt);
       await ytSub.save();
 
       return res.status(200).json({ success: true, message: 'Payment processed' });

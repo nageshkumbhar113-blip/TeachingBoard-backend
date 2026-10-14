@@ -49,5 +49,19 @@ youtubeTeacherSubscriptionSchema.statics.computeExpiry = function (planType, fro
   return d;
 };
 
+// Where a newly paid plan starts: at the end of the teacher's current
+// still-running plan (paid or trial), or now if none — so renewing early
+// adds the new period instead of throwing away the days left. Same rule as
+// student renewals (paymentController: base = expiry_date if in the future).
+youtubeTeacherSubscriptionSchema.statics.renewalStart = async function (teacherId, excludeId) {
+  const current = await this.findOne({
+    youtube_teacher_id: teacherId,
+    status: 'active',
+    expiry_date: { $gt: new Date() },
+    ...(excludeId ? { _id: { $ne: excludeId } } : {}),
+  }).sort({ expiry_date: -1 }).lean();
+  return current?.expiry_date ? new Date(current.expiry_date) : new Date();
+};
+
 module.exports = mongoose.models.YoutubeTeacherSubscription ||
   mongoose.model('YoutubeTeacherSubscription', youtubeTeacherSubscriptionSchema);

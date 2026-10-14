@@ -87,8 +87,9 @@ exports.verifySubscription = asyncHandler(async (req, res) => {
   sub.razorpay_signature = signature;
   sub.payment_verified = true;
   sub.status = 'active';
-  sub.start_date = new Date();
-  sub.expiry_date = YoutubeTeacherSubscription.computeExpiry(sub.plan_type, new Date());
+  const startsAt = await YoutubeTeacherSubscription.renewalStart(sub.youtube_teacher_id, sub._id);
+  sub.start_date = startsAt;
+  sub.expiry_date = YoutubeTeacherSubscription.computeExpiry(sub.plan_type, startsAt);
   await sub.save();
 
   res.json({ success: true, message: 'Payment verified', expiry_date: sub.expiry_date });
