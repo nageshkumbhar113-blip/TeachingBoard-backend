@@ -13,6 +13,7 @@ router.get('/batches', c.listBatches);
 router.post('/session', sessionLimiter, attachUserIfPresent, c.createSession);
 router.post('/event',   writeLimiter, attachUserIfPresent, c.requireGuest, c.recordEvent);
 router.post('/contact', writeLimiter, attachUserIfPresent, c.requireGuest, c.saveContact);
+router.post('/device-token', writeLimiter, attachUserIfPresent, c.requireGuest, c.saveDeviceToken);
 router.post('/offer',   writeLimiter, attachUserIfPresent, c.requireGuest, c.claimOffer);
 router.get('/public/:gid', writeLimiter, c.publicSummary);
 router.post('/checkout', writeLimiter, attachUserIfPresent, c.checkout);

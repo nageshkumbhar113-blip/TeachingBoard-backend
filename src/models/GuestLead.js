@@ -27,6 +27,10 @@ const guestLeadSchema = new mongoose.Schema(
       expires_at: { type: Date, default: null },
       month:      { type: String, default: '' },   // IST 'YYYY-MM'
     },
+    // App only: push token for the evening "next free test" reminder (max 7, then stops).
+    device_token:   { type: String, default: '', trim: true },
+    reminders_sent: { type: Number, default: 0 },
+    last_reminder_date: { type: String, default: '' },   // IST 'YYYY-MM-DD'
     converted_code: { type: String, default: '', trim: true },
     converted_at:   { type: Date, default: null },
     last_seen_at:   { type: Date, default: Date.now },

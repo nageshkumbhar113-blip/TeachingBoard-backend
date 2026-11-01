@@ -157,6 +157,14 @@ exports.saveContact = asyncHandler(async (req, res) => {
   res.json({ success: true, profile: _profile(lead) });
 });
 
+// POST /api/guest/device-token { device_token } — app only, for the evening reminder.
+exports.saveDeviceToken = asyncHandler(async (req, res) => {
+  const token = String(req.body?.device_token || '').trim().slice(0, 400);
+  if (!token) throw new AppError('device_token is required', 400);
+  await GuestLead.updateOne({ gid: _gidOf(req) }, { $set: { device_token: token } });
+  res.json({ success: true });
+});
+
 // GET /api/guest/rank/:quizId — live rank of this guest on a test.
 exports.getRank = asyncHandler(async (req, res) => {
   const quizId = _clean(req.params.quizId, 80);

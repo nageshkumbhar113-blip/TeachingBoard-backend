@@ -259,6 +259,19 @@ async function _runStudyPlanEveningJobsIfNeeded() {
   await _sendStudyPlanEveningJobs().catch(err => console.warn('study plan evening job failed:', err.message));
 }
 
+// Free-part visitors with the app (utils/guestReminders.js): once a day, in
+// the IST evening. GUEST_REMINDERS=off switches it off without a deploy.
+async function _runGuestRemindersIfNeeded() {
+  if (String(process.env.GUEST_REMINDERS || '').toLowerCase() === 'off') return;
+  const ist = _istNow();
+  if (ist.hour < EVENING_HOUR_IST) return;
+  const KEY = 'guest_reminders';
+  const state = await SchedulerState.findOne({ key: KEY }).lean();
+  if (state?.last_run_date === ist.date) return;
+  await SchedulerState.updateOne({ key: KEY }, { $set: { last_run_date: ist.date } }, { upsert: true });
+  await require('../utils/guestReminders').sendGuestReminders(ist.date).catch(err => console.warn('guest reminders failed:', err.message));
+}
+
 async function _runStudyPlanTeacherDigestIfNeeded() {
   const KEY = 'study_plan_teacher_weekly';
   const week = _isoWeekKey();
@@ -301,6 +314,7 @@ function start() {
     _runDailyJobsIfNeeded().catch(err => console.warn('daily jobs check failed:', err.message));
     _runStudyPlanEveningJobsIfNeeded().catch(err => console.warn('study plan evening check failed:', err.message));
     _runStudyPlanTeacherDigestIfNeeded().catch(err => console.warn('study plan teacher digest check failed:', err.message));
+    _runGuestRemindersIfNeeded().catch(err => console.warn('guest reminders check failed:', err.message));
   }, QUEUE_POLL_MS);
 
   console.log('notificationScheduler: started (poll every', QUEUE_POLL_MS / 1000, 's)');
