@@ -25,11 +25,59 @@ function invalidateUserCache(role, id) {
   _userCache.delete(`${role}:${id}`);
 }
 
+// Guest visitor of the free part (no login, no User row — utils/token.js
+// createGuestToken). Always on the free tier of the one batch they chose, so
+// the normal contentAccess rules never give them paid content.
+function _guestUserDoc(payload) {
+  return {
+    user_id: payload.id,
+    name: payload.name || 'Guest',
+    role: 'student',
+    student_code: payload.student_code,
+    status: 'active',
+    free_tier: true,
+    assigned_batches: Array.isArray(payload.batches) ? payload.batches : [],
+    expiry_date: null,
+    is_guest: true,
+  };
+}
+
+// The only routes a guest token may use: reading the free content of their
+// batch, submitting a test, and the guest endpoints themselves. Everything
+// else (profile, payments, study plan, referrals, words, device tokens…)
+// assumes a real student account and answers GUEST_SIGNUP_REQUIRED.
+const _GUEST_ALLOWED = [
+  ['GET',  /^\/api\/auth\/me$/],
+  ['GET',  /^\/api\/quizzes(\/[^/]+)?$/],
+  ['GET',  /^\/api\/questions$/],
+  ['GET',  /^\/api\/student\/sync-state$/],
+  ['GET',  /^\/api\/batches\/student\/(hierarchy|free-chapters)$/],
+  ['GET',  /^\/api\/sls\/(chapters|chapters\/[^/]+\/concepts|full-sync|search|[^/]+\/view|student\/exercise-questions|student\/search-exercise-questions)$/],
+  ['GET',  /^\/api\/passage-blocks\/student$/],
+  ['GET',  /^\/api\/banners\/(for-student|default-quotes)$/],
+  ['POST', /^\/api\/attempts$/],
+  ['ANY',  /^\/api\/guest\//],
+];
+
+function _guestDenied(req, res) {
+  if (!req.user?.guest) return false;
+  const path = String(req.originalUrl || '').split('?')[0];
+  const ok = _GUEST_ALLOWED.some(([m, re]) => (m === 'ANY' || m === req.method) && re.test(path));
+  if (ok) return false;
+  res.status(403).json({ success: false, code: 'GUEST_SIGNUP_REQUIRED', message: 'Please register to use this.' });
+  return true;
+}
+
 async function _attachResolvedUser(req) {
   const payload = decodeTokenFromHeader(req.headers.authorization);
   if (!payload) return null;
 
   req.user = payload;
+
+  if (payload.guest) {
+    req.userDoc = _guestUserDoc(payload);
+    return payload;
+  }
 
   const now = Date.now();
   const cacheKey = `${payload.role}:${payload.id}`;
@@ -57,8 +105,9 @@ async function _attachResolvedUser(req) {
   return payload;
 }
 
-async function attachUserIfPresent(req, _res, next) {
+async function attachUserIfPresent(req, res, next) {
   await _attachResolvedUser(req);
+  if (_guestDenied(req, res)) return;
   req.authDenied = _studentDenial(req.userDoc);
   next();
 }
@@ -68,6 +117,7 @@ async function requireAuth(req, res, next) {
   if (!payload) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
+  if (_guestDenied(req, res)) return;
   next();
 }
 
@@ -83,6 +133,7 @@ async function requireStudent(req, res, next) {
   if (!payload || payload.role !== 'student') {
     return res.status(401).json({ success: false, message: 'Student login required' });
   }
+  if (_guestDenied(req, res)) return;
 
   const denial = _studentDenial(req.userDoc);
   if (denial) {

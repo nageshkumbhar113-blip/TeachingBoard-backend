@@ -8,6 +8,7 @@ const { sendToUser } = require("../utils/fcm");
 const { parentTokensFor } = require("../utils/parentTokens");
 const { computeMarks } = require("../utils/attemptScore");
 const { isQuizLocked, chapterLockedBody } = require("../utils/contentAccess");
+const { noteGuestAttempt } = require("./guestController");
 
 function normalizeAnswerValue(value) {
   return String(value || "").trim();
@@ -160,8 +161,12 @@ exports.createAttempt = asyncHandler(async (req, res) => {
     submitted_at: new Date()
   });
 
-  // Notify assigned teachers via FCM (non-blocking)
-  if (studentCode) {
+  if (req.user?.guest) {
+    // Free-part visitor: funnel stats; no teachers / parents to notify.
+    const pct = max_marks > 0 ? (marks_obtained / max_marks) * 100 : (totalQuestions ? (correctAnswers / totalQuestions) * 100 : 0);
+    noteGuestAttempt(studentCode, quiz.title, pct).catch(err => console.warn('guest attempt note failed:', err.message));
+  } else if (studentCode) {
+    // Notify assigned teachers via FCM (non-blocking)
     _notifyTeachers(studentCode, studentName, quiz.title, marks_obtained, max_marks) // same marks the student sees
       .catch(err => console.warn('FCM teacher notify failed:', err.message));
   }
@@ -236,6 +241,8 @@ exports.getAttempts = asyncHandler(async (req, res) => {
   if (req.query.student_name) filter.student_name = String(req.query.student_name).trim();
   if (req.query.batch)        filter.batch        = String(req.query.batch).trim();
   if (req.query.student_code) filter.student_code = String(req.query.student_code).trim();
+  // Free-part guests (GUEST-…) are leads, not students — Admin > Leads shows them.
+  else filter.student_code = { $not: /^GUEST-/ };
 
   const limit = Math.min(Math.max(parseInt(req.query.limit) || 200, 1), 1000);
   const skip  = Math.max(parseInt(req.query.skip) || 0, 0);

@@ -53,6 +53,24 @@ function createToken(user) {
   return `${encodedPayload}.${signature}`;
 }
 
+// Guest (no-login) visitor of the free part. Carries everything the server
+// needs (no User row exists): see middleware/auth.js _guestUserDoc.
+const GUEST_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
+
+function createGuestToken({ gid, name, batch }) {
+  const payload = {
+    id: `guest:${gid}`,
+    name: name || "",
+    role: "student",
+    guest: true,
+    student_code: `GUEST-${gid}`,
+    batches: batch ? [batch] : [],
+    exp: Math.floor(Date.now() / 1000) + GUEST_TOKEN_TTL_SECONDS
+  };
+  const encodedPayload = toBase64Url(JSON.stringify(payload));
+  return `${encodedPayload}.${sign(encodedPayload)}`;
+}
+
 function verifyToken(token) {
   const [encodedPayload, signature] = String(token || "").split(".");
 
@@ -91,6 +109,7 @@ function decodeTokenFromHeader(headerValue) {
 
 module.exports = {
   createToken,
+  createGuestToken,
   verifyToken,
   decodeTokenFromHeader
 };

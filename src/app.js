@@ -170,6 +170,7 @@ app.post("/api/payment/webhook", paymentWebhook); // raw-body signature verify i
 app.use("/api/payment",          paymentRoutes);
 app.use("/api/partners",         require("./routes/partnerRoutes"));
 app.use("/api/referrals",        require("./routes/referralRoutes"));
+app.use("/api/guest",            require("./routes/guestRoutes"));
 app.use("/api/passage-blocks",   require("./routes/passageBlockRoutes"));
 app.use("/api/study-plan",       require("./routes/studyPlanRoutes"));
 app.use("/api/admin/notes",     noteAdminRouter);

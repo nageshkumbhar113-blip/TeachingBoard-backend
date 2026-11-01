@@ -244,6 +244,26 @@ exports.me = asyncHandler(async (req, res) => {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
 
+  if (req.user.guest) {
+    const g = req.userDoc;
+    return res.json({
+      success: true,
+      user: {
+        id: g.user_id,
+        name: g.name,
+        role: 'student',
+        guest: true,
+        student_code: g.student_code,
+        mobile: '',
+        status: 'active',
+        assigned_batches: g.assigned_batches,
+        expiry_date: '',
+        shared_device: false,
+        access_level: 'free',
+      },
+    });
+  }
+
   const userDoc = await User.findOne({ user_id: req.user.id });
   if (!userDoc) {
     return res.status(404).json({ success: false, message: 'User not found' });
