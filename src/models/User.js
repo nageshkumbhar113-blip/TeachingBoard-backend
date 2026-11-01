@@ -62,6 +62,9 @@ const userSchema = new mongoose.Schema(
     // Percent on later payments of the same student when first_payment_only is on (0 = nothing).
     commission_renewal_value: { type: Number, default: 0, min: 0, max: 100 },
     shop_area:          { type: String, default: '', trim: true },   // shop: village / area
+    // Student / parent chose not to show the name on महा-Test toppers banner and rank board.
+    hide_in_toppers:    { type: Boolean, default: false },
+    toppers_consent_at: { type: Date, default: null },   // parent's one-time tick at महा-Test registration
     payout_upi_id:      { type: String, default: '', trim: true },
     payout_name:        { type: String, default: '', trim: true },
     pan:                { type: String, default: '', trim: true },

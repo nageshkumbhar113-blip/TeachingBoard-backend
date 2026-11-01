@@ -5,6 +5,22 @@ const Quiz = require('../models/Quiz');
 const WeeklySchedule = require('../models/WeeklySchedule');
 const WeeklyEvent = require('../models/WeeklyEvent');
 const WeeklyEntry = require('../models/WeeklyEntry');
+const User = require('../models/User');
+const GuestLead = require('../models/GuestLead');
+
+// Codes (student codes / GUEST-<gid>) whose name must not be shown publicly:
+// no parent consent yet, or the name was hidden later.
+async function hiddenCodes(codes) {
+  const students = codes.filter(c => !c.startsWith('GUEST-'));
+  const gids = codes.filter(c => c.startsWith('GUEST-')).map(c => c.slice(6));
+  const ok = { toppers_consent_at: { $ne: null }, hide_in_toppers: { $ne: true } };
+  const [u, g] = await Promise.all([
+    students.length ? User.find({ role: 'student', student_code: { $in: students }, ...ok }, 'student_code').lean() : [],
+    gids.length ? GuestLead.find({ gid: { $in: gids }, ...ok }, 'gid').lean() : [],
+  ]);
+  const visible = new Set([...u.map(x => x.student_code), ...g.map(x => `GUEST-${x.gid}`)]);
+  return new Set(codes.filter(c => !visible.has(c)));
+}
 
 // महा-Test automation (owner's design 2026-11-01): set up once per class,
 // then every week a new test of the next subject is made automatically —
@@ -181,7 +197,16 @@ async function finalizeIfDue(event, now = new Date()) {
     return { updateOne: { filter: { _id: e._id }, update: { $set: { rank } } } };
   });
   if (ops.length) await WeeklyEntry.bulkWrite(ops);
-  await WeeklyEvent.updateOne({ _id: event._id }, { $set: { participants: entries.length } });
+  // top 10 for the Home banner, saved once
+  let r = 0, p = null;
+  const ranked = entries.map((e, i) => { const k = `${e.score}|${e.time_taken}`; if (k !== p) { r = i + 1; p = k; } return { e, rank: r }; });
+  const top = ranked.filter(x => x.rank <= 10).slice(0, 10);
+  const hidden = await hiddenCodes(top.map(x => x.e.student_code));
+  const toppers = top.map(({ e, rank }) => ({
+    rank, name: String(e.name || '').trim().slice(0, 40) || 'Student', score: e.score, total: e.total,
+    code: e.student_code, hidden: hidden.has(e.student_code),
+  }));
+  await WeeklyEvent.updateOne({ _id: event._id }, { $set: { participants: entries.length, toppers } });
   return WeeklyEvent.findById(event._id);
 }
 
@@ -190,4 +215,4 @@ async function finalizeDue(now = new Date()) {
   for (const e of due) if (revealOf(e) <= now) await finalizeIfDue(e, now).catch(err => console.warn('weekly finalize failed:', err.message));
 }
 
-module.exports = { revealAt, revealOf, nextStart, questionPool, generateEvent, ensureUpcoming, encryptPaper, grade, isCorrect, finalizeIfDue, finalizeDue };
+module.exports = { hiddenCodes, revealAt, revealOf, nextStart, questionPool, generateEvent, ensureUpcoming, encryptPaper, grade, isCorrect, finalizeIfDue, finalizeDue };

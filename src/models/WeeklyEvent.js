@@ -35,6 +35,12 @@ const weeklyEventSchema = new mongoose.Schema(
     results_at:       { type: Date, default: null },
     reveal_at:        { type: Date, default: null },   // rank list time (>= ends_at); null = ends_at
     participants:     { type: Number, default: 0 },
+    // Top 10 saved once when the rank list opens — the Home banner shows it
+    // (batch-wise) until the next महा-Test starts. `code` is never sent out.
+    toppers: {
+      type: [{ rank: Number, name: String, score: Number, total: Number, code: String, hidden: Boolean, _id: false }],
+      default: [],
+    },
     is_trial:         { type: Boolean, default: false },   // admin "try now" event
     // The paper is downloaded days ahead, encrypted with this key; the key is
     // handed out only from starts_at (a ~50-byte call), so the test itself

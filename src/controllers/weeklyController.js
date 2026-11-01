@@ -6,6 +6,9 @@ const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const { hasFullAccess } = require('../utils/contentAccess');
 const W = require('../utils/weeklyTests');
+const User = require('../models/User');
+const GuestLead = require('../models/GuestLead');
+const { invalidateUserCache } = require('../middleware/auth');
 
 // महा-Test (weekly automatic test). Student / free-visitor endpoints are all
 // tiny except the paper download, which phones do ahead of time.
@@ -21,6 +24,7 @@ function _me(req) {
     guest: !!req.user.guest,
     batches: Array.isArray(req.userDoc.assigned_batches) ? req.userDoc.assigned_batches : [],
     full: hasFullAccess(req.userDoc),
+    hide: req.userDoc.hide_in_toppers === true,
   };
 }
 
@@ -33,15 +37,22 @@ async function _eventFor(req, me, { withKey = false } = {}) {
   return ev;
 }
 
-function _view(ev, entry, registered = 0, now = _now()) {
+const HIDDEN_NAME = 'नाव लपवलेलं';
+
+function _view(ev, entry, registered = 0, now = _now(), bannerUntil = null) {
   const state = now < ev.starts_at ? 'upcoming' : now < ev.ends_at ? 'live' : 'closed';
   const reveal = W.revealOf(ev);
+  const results = now >= reveal;
   return {
     event_id: String(ev._id), batch: ev.batch, subject: ev.subject, title: ev.title,
     starts_at: ev.starts_at, ends_at: ev.ends_at, reveal_at: reveal, duration_minutes: ev.duration_minutes,
     question_count: ev.questions?.length || 0, open_to: ev.open_to, state,
-    results: now >= reveal,
+    results,
     registered_count: registered,
+    participants: ev.participants || 0,
+    // Home banner: top 10 of this class until the next महा-Test starts
+    toppers: results ? (ev.toppers || []).map(t => ({ rank: t.rank, name: t.hidden ? HIDDEN_NAME : t.name, score: t.score, total: t.total })) : [],
+    banner_until: results ? (bannerUntil || new Date(reveal.getTime() + 7 * 864e5)) : null,
     me: entry ? {
       registered: true, submitted: !!entry.submitted_at, score: entry.submitted_at ? entry.score : null,
       total: entry.total || null, rank: entry.rank ?? null,
@@ -62,15 +73,39 @@ exports.my = asyncHandler(async (req, res) => {
   const byEvent = new Map(entries.map(e => [e.event_id, e]));
   const counts = await WeeklyEntry.aggregate([{ $match: { event_id: { $in: all.map(e => String(e._id)) } } }, { $group: { _id: '$event_id', n: { $sum: 1 } } }]);
   const countBy = new Map(counts.map(c => [c._id, c.n]));
-  const data = all.filter(e => e.open_to !== 'paid' || me.full).map(e => _view(e, byEvent.get(String(e._id)), countBy.get(String(e._id)) || 0));
-  res.json({ success: true, data });
+  // the toppers banner of a class stays until that class's next महा-Test starts
+  const nextOf = e => all.filter(x => x.schedule_id === e.schedule_id && !x.is_trial && x.starts_at > e.starts_at)
+    .sort((a, b) => a.starts_at - b.starts_at)[0]?.starts_at || null;
+  const now = _now();
+  const data = all.filter(e => e.open_to !== 'paid' || me.full).map(e => _view(e, byEvent.get(String(e._id)), countBy.get(String(e._id)) || 0, now, e.is_trial ? null : nextOf(e)));
+  res.json({ success: true, data, consent: await _consented(req, me) });
 });
 
 // POST /api/weekly/:id/register
+// "माझं नाव दाखवा" is asked once, at the first महा-Test registration. Has this
+// student / visitor already answered it? (toppers_consent_at = when they answered;
+// hide_in_toppers = they chose not to show the name.)
+async function _consented(req, me) {
+  if (me.guest) return !!(await GuestLead.exists({ gid: me.code.replace(/^GUEST-/, ''), toppers_consent_at: { $ne: null } }));
+  return !!req.userDoc.toppers_consent_at;
+}
+
+async function _saveConsent(req, me, show) {
+  const set = { toppers_consent_at: _now(), hide_in_toppers: !show };
+  if (me.guest) await GuestLead.updateOne({ gid: me.code.replace(/^GUEST-/, '') }, { $set: set });
+  else {
+    await User.updateOne({ role: 'student', student_code: me.code }, { $set: set });
+    invalidateUserCache('student', req.userDoc.user_id);
+  }
+  await WeeklyEvent.updateMany({ 'toppers.code': me.code }, { $set: { 'toppers.$[t].hidden': !show } }, { arrayFilters: [{ 't.code': me.code }] });
+}
+
 exports.register = asyncHandler(async (req, res) => {
   const me = _me(req);
   const ev = await _eventFor(req, me);
   if (_now() >= ev.ends_at) throw new AppError('हा महा-Test संपला', 400);
+  // "माझं नाव दाखवा" — asked only the first time (not ticked = name hidden)
+  if (!(await _consented(req, me))) await _saveConsent(req, me, req.body?.show_name === true);
   await WeeklyEntry.updateOne(
     { event_id: String(ev._id), student_code: me.code },
     { $setOnInsert: { name: me.name, is_guest: me.guest, registered_at: _now() } },
@@ -133,16 +168,30 @@ exports.result = asyncHandler(async (req, res) => {
   const mine = await WeeklyEntry.findOne({ event_id: String(ev._id), student_code: me.code }).lean();
   // Rank board: the top 50 (first names only); the student's own row is added below if outside it.
   const top = await WeeklyEntry.find({ event_id: String(ev._id), submitted_at: { $ne: null } }).sort({ rank: 1, score: -1 }).limit(50).select('name score total rank time_taken student_code').lean();
+  const hidden = await W.hiddenCodes(top.map(t => t.student_code));
   const given = new Map((mine?.answers || []).map(a => [a.q_id, a.given]));
   res.json({
     success: true,
     data: {
       event_id: String(ev._id), subject: ev.subject, participants: ev.participants,
       me: mine?.submitted_at ? { score: mine.score, total: mine.total, correct: mine.correct, wrong: mine.wrong, skipped: mine.skipped, rank: mine.rank, time_taken: mine.time_taken } : null,
-      top: top.map(t => ({ name: String(t.name || '').split(/\s+/)[0] || 'Student', score: t.score, total: t.total, rank: t.rank, me: t.student_code === me.code })),
+      top: top.map(t => ({ name: hidden.has(t.student_code) && t.student_code !== me.code ? HIDDEN_NAME : (String(t.name || '').trim().slice(0, 40) || 'Student'), score: t.score, total: t.total, rank: t.rank, me: t.student_code === me.code })),
+      hide_in_toppers: me.hide,
       review: ev.questions.map(q => ({ q_id: q.q_id, type: q.type, question: q.question, options: q.options, answer: q.answer, explanation: q.explanation, image: q.image, given: given.get(q.q_id) || '' })),
     },
   });
+});
+
+// POST /api/weekly/toppers/privacy { hide } — show / hide my name on toppers and rank boards.
+exports.toppersPrivacy = asyncHandler(async (req, res) => {
+  const me = _me(req);
+  const hide = req.body?.hide === true;
+  if (me.guest) await GuestLead.updateOne({ gid: me.code.replace(/^GUEST-/, '') }, { $set: { hide_in_toppers: hide } });
+  else await User.updateOne({ role: 'student', student_code: me.code }, { $set: { hide_in_toppers: hide } });
+  invalidateUserCache('student', req.userDoc.user_id);
+  // banners already saved
+  await WeeklyEvent.updateMany({ 'toppers.code': me.code }, { $set: { 'toppers.$[t].hidden': hide } }, { arrayFilters: [{ 't.code': me.code }] });
+  res.json({ success: true, hide });
 });
 
 // ── Admin ────────────────────────────────────────────────────────────────────
