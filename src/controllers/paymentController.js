@@ -81,7 +81,7 @@ async function resolveStudentDiscount(student, batch, basePrice) {
 
   const percent = discountPercent;
   const amount = Math.round(basePrice * (1 - percent / 100));
-  return { percent, amount, source: 'youtube_subscriber_approved' };
+  return { percent, amount, source: 'youtube_subscriber_approved', first_payment_only: firstPaymentOnly };
 }
 
 // Extend access: active status, ensure batch assigned, push expiry forward.
@@ -135,6 +135,9 @@ exports.previewPrice = asyncHandler(async (req, res) => {
     original_price: price,
     discounted_price: discount.amount,
     discount_percent: discount.percent,
+    // eligibility disclosure for the plan screen
+    discount_reason: discount.source,
+    discount_first_payment_only: discount.first_payment_only === true,
   });
 });
 
