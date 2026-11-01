@@ -177,7 +177,10 @@ exports.adminSaveSchedule = asyncHandler(async (req, res) => {
 exports.adminDeleteSchedule = asyncHandler(async (req, res) => {
   const s = await WeeklySchedule.findByIdAndDelete(req.params.id).catch(() => null);
   if (!s) throw new AppError('Not found', 404);
-  await WeeklyEvent.deleteMany({ schedule_id: String(s._id), starts_at: { $gt: new Date() } });
+  // its future tests and every trial go with it; finished real tests (with results) stay
+  const gone = await WeeklyEvent.find({ schedule_id: String(s._id), $or: [{ starts_at: { $gt: new Date() } }, { is_trial: true }] }, '_id').lean();
+  await WeeklyEntry.deleteMany({ event_id: { $in: gone.map(e => String(e._id)) } });
+  await WeeklyEvent.deleteMany({ _id: { $in: gone.map(e => e._id) } });
   res.json({ success: true });
 });
 
@@ -185,6 +188,11 @@ exports.adminDeleteSchedule = asyncHandler(async (req, res) => {
 exports.adminTrial = asyncHandler(async (req, res) => {
   const s = await WeeklySchedule.findById(req.params.id).lean().catch(() => null);
   if (!s) throw new AppError('Not found', 404);
+  // one trial at a time: pressing the button again returns the running one
+  const running = await WeeklyEvent.findOne({ schedule_id: String(s._id), is_trial: true, ends_at: { $gt: new Date() } }).lean();
+  if (running) {
+    return res.json({ success: true, existing: true, data: { event_id: String(running._id), subject: running.subject, starts_at: running.starts_at, ends_at: running.ends_at, questions: running.questions.length } });
+  }
   const raw = Number(req.body?.start_in_minutes);
   const startIn = Math.min(Math.max(Number.isFinite(raw) ? raw : 2, 0), 120);
   const windowMin = Math.min(Math.max(Number(req.body?.window_minutes) || 30, 10), 240);
@@ -192,6 +200,14 @@ exports.adminTrial = asyncHandler(async (req, res) => {
   if (!ev) throw new AppError('या class ला विषय नाहीत', 400);
   if (ev.status === 'skipped') throw new AppError(ev.skip_reason, 400);
   res.status(201).json({ success: true, data: { event_id: String(ev._id), subject: ev.subject, starts_at: ev.starts_at, ends_at: ev.ends_at, questions: ev.questions.length } });
+});
+
+// DELETE /api/weekly/admin/events/:id — remove one test (e.g. trials) and its entries.
+exports.adminDeleteEvent = asyncHandler(async (req, res) => {
+  const ev = await WeeklyEvent.findByIdAndDelete(req.params.id).catch(() => null);
+  if (!ev) throw new AppError('Not found', 404);
+  await WeeklyEntry.deleteMany({ event_id: String(ev._id) });
+  res.json({ success: true });
 });
 
 // GET /api/weekly/admin/pool?batch=&types=mcq,tf&source=both — how many questions each subject has.

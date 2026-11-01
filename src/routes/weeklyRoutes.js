@@ -15,6 +15,7 @@ router.post('/admin/schedules/:id/trial', requireAdmin, c.adminTrial);
 router.get('/admin/pool', requireAdmin, c.adminPool);
 router.get('/admin/events', requireAdmin, c.adminEvents);
 router.get('/admin/events/:id', requireAdmin, c.adminEventResults);
+router.delete('/admin/events/:id', requireAdmin, c.adminDeleteEvent);
 
 router.get('/my', attachUserIfPresent, c.my);
 router.post('/:id/register', small, attachUserIfPresent, c.register);
