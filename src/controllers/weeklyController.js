@@ -240,5 +240,16 @@ exports.adminEventResults = asyncHandler(async (req, res) => {
   if (!ev) throw new AppError('Not found', 404);
   ev = await W.finalizeIfDue(ev);
   const entries = await WeeklyEntry.find({ event_id: String(ev._id) }).sort({ rank: 1, score: -1 }).select('-answers').lean();
+  // mobile for follow-up: the parent's (free visitors) or the student's own
+  const GuestLead = require('../models/GuestLead');
+  const User = require('../models/User');
+  const gids = entries.filter(e => e.is_guest).map(e => String(e.student_code).replace(/^GUEST-/, ''));
+  const codes = entries.filter(e => !e.is_guest).map(e => e.student_code);
+  const [leads, users] = await Promise.all([
+    gids.length ? GuestLead.find({ gid: { $in: gids } }, 'gid parent_mobile').lean() : [],
+    codes.length ? User.find({ role: 'student', student_code: { $in: codes } }, 'student_code mobile').lean() : [],
+  ]);
+  const mob = new Map([...leads.map(l => [`GUEST-${l.gid}`, l.parent_mobile]), ...users.map(u => [u.student_code, u.mobile])]);
+  entries.forEach(e => { e.mobile = mob.get(e.student_code) || ''; });
   res.json({ success: true, data: { event: { _id: ev._id, batch: ev.batch, subject: ev.subject, starts_at: ev.starts_at, ends_at: ev.ends_at, status: ev.status }, entries } });
 });
