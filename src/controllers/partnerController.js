@@ -8,7 +8,7 @@ const YoutubeTeacherSubscription = require('../models/YoutubeTeacherSubscription
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const {
-  getConfig, monthKey, monthRange, previousMonthKey, reverseEntry, closeMonth, ensurePreviousMonthClosed,
+  getConfig, monthKey, monthRange, previousMonthKey, reverseEntry, closeMonth, settlePartnerNow, ensurePreviousMonthClosed,
 } = require('../utils/partnerCommission');
 const { invalidateUserCache } = require('../middleware/auth');
 
@@ -200,9 +200,10 @@ exports.settlementOverview = asyncHandler(async (req, res) => {
   const fyStart = monthRange(fyFrom).start, fyEnd = monthRange(`${fy + 1}-04`).start;
   const cfg = await getConfig();
 
+  const PARTNER_FIELDS = 'user_id name teacher_code partner_type mobile institute_name shop_area status payout_upi_id payout_name pan commission_mode commission_value';
   const [partners, open, stmts, fyEntries, lifeAgg, claims] = await Promise.all([
     User.find({ role: 'teacher', $or: [{ commission_enabled: true }, { partner_type: { $in: ['school', 'youtube', 'shop'] } }] })
-      .select('user_id name teacher_code partner_type mobile institute_name shop_area status payout_upi_id payout_name pan commission_mode commission_value').lean(),
+      .select(PARTNER_FIELDS).lean(),
     CommissionEntry.find({ status: 'active', statement_id: '' }, 'partner_user_id type amount payable_at').lean(),
     PayoutStatement.find({}).lean(),
     CommissionEntry.find({ status: 'active', paid_at: { $gte: fyStart, $lt: fyEnd } }, 'partner_user_id type amount').lean(),
@@ -248,6 +249,17 @@ exports.settlementOverview = asyncHandler(async (req, res) => {
   const sum = (rows, f = x => x.amount) => r2(rows.reduce((t, x) => t + f(x), 0));
 
   const lifeOf = new Map(lifeAgg.map(x => [x._id, x.total]));
+  // Anyone with money in the ledger is shown, even if commission was later turned off.
+  const known = new Set(partners.map(t => t.user_id));
+  const extraIds = [...new Set([...lifeAgg.map(x => x._id), ...stmts.map(st => st.partner_user_id)])].filter(id => id && !known.has(id));
+  if (extraIds.length) {
+    partners.push(...await User.find({ user_id: { $in: extraIds } }).select(PARTNER_FIELDS).lean());
+    const found = new Set(partners.map(t => t.user_id));
+    extraIds.filter(id => !found.has(id)).forEach(id => {
+      const st = stmts.find(x => x.partner_user_id === id);
+      partners.push({ user_id: id, name: `${st?.partner_name || 'Partner'} (account हटवलेलं)`, teacher_code: st?.partner_code || '', status: 'deleted' });
+    });
+  }
   const rows = partners.map(t => {
     const id = t.user_id;
     const mine = stmts.filter(st => st.partner_user_id === id);
@@ -337,6 +349,16 @@ exports.settlementOverview = asyncHandler(async (req, res) => {
       students,
     },
   });
+});
+
+// POST /api/partners/settlement/:id/settle-now — pay one partner before the 1st
+// (everything past the hold). Returns the new statement to pay.
+exports.settleNow = asyncHandler(async (req, res) => {
+  const t = await User.findOne({ user_id: req.params.id, role: 'teacher' }).select('user_id').lean();
+  if (!t) throw new AppError('Partner not found', 404);
+  const r = await settlePartnerNow(t.user_id, String(req.user?.id || 'admin'));
+  if (!r.ok) throw new AppError(r.message, 400);
+  res.json({ success: true, data: serializeStatement(r.statement) });
 });
 
 // GET /api/partners/settlement/:id — one person's history: every monthly

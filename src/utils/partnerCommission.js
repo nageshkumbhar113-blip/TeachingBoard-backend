@@ -157,6 +157,45 @@ async function reverseEntry(entryId, reason = '') {
  *   counted  = active commission/adjustment lines, not yet in a statement, payable before month end
  *   carried  = earlier statements that stayed below the minimum
  */
+// Builds and locks one partner's statement for `month` from its open lines and
+// its earlier carried statements. `pay = true` (admin settles early) makes it
+// payable even below the minimum payout.
+async function _lockStatement(pid, month, mine, carriedFrom, cfg, closedBy, pay = false) {
+  const teacher = await User.findOne({ user_id: pid, role: 'teacher' }).lean();
+  const commissions = mine.filter(e => e.type === 'commission');
+  const adjustments = mine.filter(e => e.type === 'adjustment');
+  const newAmount = round2(commissions.reduce((t, e) => t + e.amount, 0));
+  const adjustAmount = round2(adjustments.reduce((t, e) => t + e.amount, 0));
+  const carriedIn = round2(carriedFrom.reduce((t, s) => t + s.net, 0));
+  const net = round2(newAmount + adjustAmount + carriedIn);
+
+  const stmt = await PayoutStatement.create({
+    partner_user_id: pid,
+    partner_code: teacher?.teacher_code || '',
+    partner_name: teacher?.partner_type === 'shop' ? (teacher?.institute_name || teacher?.name || '') : (teacher?.name || ''),
+    month,
+    new_count: commissions.length,
+    new_amount: newAmount,
+    adjust_count: adjustments.length,
+    adjust_amount: adjustAmount,
+    carried_in: carriedIn,
+    net,
+    min_payout: cfg.min_payout,
+    status: net > 0 && (pay || net >= cfg.min_payout) ? 'closed' : 'carried',
+    upi_id: teacher?.payout_upi_id || '',
+    upi_name: teacher?.payout_name || '',
+    closed_at: new Date(),
+    paid_by: closedBy === 'system' ? '' : String(closedBy),
+  });
+  if (mine.length) {
+    await CommissionEntry.updateMany({ _id: { $in: mine.map(e => e._id) } }, { $set: { statement_id: String(stmt._id) } });
+  }
+  if (carriedFrom.length) {
+    await PayoutStatement.updateMany({ _id: { $in: carriedFrom.map(s => s._id) } }, { $set: { carried_to: month } });
+  }
+  return stmt;
+}
+
 async function closeMonth(month, closedBy = 'system') {
   const { end } = monthRange(month);
   const cfg = await getConfig();
@@ -171,45 +210,32 @@ async function closeMonth(month, closedBy = 'system') {
 
   for (const pid of partnerIds) {
     if (await PayoutStatement.findOne({ partner_user_id: pid, month }).lean()) continue;
-    const teacher = await User.findOne({ user_id: pid, role: 'teacher' }).lean();
     const mine = open.filter(e => e.partner_user_id === pid);
-    const commissions = mine.filter(e => e.type === 'commission');
-    const adjustments = mine.filter(e => e.type === 'adjustment');
     const carriedFrom = carriedRows.filter(s => s.partner_user_id === pid);
-
-    const newAmount = round2(commissions.reduce((t, e) => t + e.amount, 0));
-    const adjustAmount = round2(adjustments.reduce((t, e) => t + e.amount, 0));
-    const carriedIn = round2(carriedFrom.reduce((t, s) => t + s.net, 0));
-    const net = round2(newAmount + adjustAmount + carriedIn);
     if (!mine.length && !carriedFrom.length) continue;
-
-    const stmt = await PayoutStatement.create({
-      partner_user_id: pid,
-      partner_code: teacher?.teacher_code || '',
-      partner_name: teacher?.name || '',
-      month,
-      new_count: commissions.length,
-      new_amount: newAmount,
-      adjust_count: adjustments.length,
-      adjust_amount: adjustAmount,
-      carried_in: carriedIn,
-      net,
-      min_payout: cfg.min_payout,
-      status: net >= cfg.min_payout && net > 0 ? 'closed' : 'carried',
-      upi_id: teacher?.payout_upi_id || '',
-      upi_name: teacher?.payout_name || '',
-      closed_at: new Date(),
-      paid_by: closedBy === 'system' ? '' : String(closedBy),
-    });
-    if (mine.length) {
-      await CommissionEntry.updateMany({ _id: { $in: mine.map(e => e._id) } }, { $set: { statement_id: String(stmt._id) } });
-    }
-    if (carriedFrom.length) {
-      await PayoutStatement.updateMany({ _id: { $in: carriedFrom.map(s => s._id) } }, { $set: { carried_to: month } });
-    }
-    created.push(stmt);
+    created.push(await _lockStatement(pid, month, mine, carriedFrom, cfg, closedBy));
   }
   return created;
+}
+
+/**
+ * Admin pays one partner before the 1st: everything past the hold (and any
+ * carried balance) goes into this month's statement, payable at once even below
+ * the minimum. Lines still in hold stay open and are counted when the next
+ * month is closed. One early settlement per partner per month.
+ */
+async function settlePartnerNow(pid, closedBy = 'admin') {
+  const now = new Date();
+  const month = monthKey(now);
+  if (await PayoutStatement.findOne({ partner_user_id: pid, month }).lean()) {
+    return { ok: false, message: 'या महिन्याचा हिशोब या व्यक्तीसाठी आधीच केला आहे. उरलेलं पुढच्या महिन्याच्या हिशोबात येईल.' };
+  }
+  const cfg = await getConfig();
+  const mine = await CommissionEntry.find({ partner_user_id: pid, status: 'active', statement_id: '', payable_at: { $lte: now } }).lean();
+  const carriedFrom = await PayoutStatement.find({ partner_user_id: pid, status: 'carried', carried_to: '' }).lean();
+  const net = round2(mine.reduce((t, e) => t + e.amount, 0) + carriedFrom.reduce((t, s) => t + s.net, 0));
+  if (!(net > 0)) return { ok: false, message: 'आत्ता द्यायला काही नाही (hold संपलेली रक्कम ₹0).' };
+  return { ok: true, statement: await _lockStatement(pid, month, mine, carriedFrom, cfg, closedBy, true) };
 }
 
 // Lazy safety net: whenever the admin looks at statements, the previous month is closed if it was missed.
@@ -220,5 +246,5 @@ async function ensurePreviousMonthClosed() {
 
 module.exports = {
   getConfig, monthKey, monthRange, previousMonthKey,
-  recordCommissionForPayment, reverseEntry, closeMonth, ensurePreviousMonthClosed,
+  recordCommissionForPayment, reverseEntry, closeMonth, settlePartnerNow, ensurePreviousMonthClosed,
 };
