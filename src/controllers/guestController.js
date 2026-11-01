@@ -98,11 +98,20 @@ exports.listBatches = asyncHandler(async (_req, res) => {
 // New guest, or (with a guest token) the same guest choosing another batch /
 // giving their name. Returns a fresh token for that batch.
 exports.createSession = asyncHandler(async (req, res) => {
-  const batchName = _clean(req.body?.batch, 120);
+  let lead = req.user?.guest ? await GuestLead.findOne({ gid: _gidOf(req) }) : null;
+  // App installed from the website ("continue in the app"): the Play referrer
+  // carries the visitor's id, so the same lead (and their tests) continues.
+  // A lead that already became an account cannot be resumed this way.
+  const resumeGid = String(req.body?.resume_gid || '').trim().toUpperCase();
+  if (!lead && /^[0-9A-F]{10}$/.test(resumeGid)) {
+    lead = await GuestLead.findOne({ gid: resumeGid, converted_code: '' });
+    if (!lead) throw new AppError('Guest session not found', 404);
+  }
+
+  const batchName = _clean(req.body?.batch, 120) || lead?.batch || '';
   const batch = batchName ? await Batch.findOne({ name: batchName, is_active: { $ne: false } }, 'name').lean() : null;
   if (!batch) throw new AppError('Please choose a valid class', 400);
 
-  let lead = req.user?.guest ? await GuestLead.findOne({ gid: _gidOf(req) }) : null;
   if (!lead) {
     const src = _clean(req.body?.src, 20);
     lead = new GuestLead({
