@@ -1,6 +1,6 @@
 const express = require('express');
 const c = require('../controllers/guestController');
-const { attachUserIfPresent } = require('../middleware/auth');
+const { attachUserIfPresent, requireAdmin } = require('../middleware/auth');
 const { createRateLimiter } = require('../middleware/rateLimiter');
 
 const router = express.Router();
@@ -14,6 +14,11 @@ router.post('/session', sessionLimiter, attachUserIfPresent, c.createSession);
 router.post('/event',   writeLimiter, attachUserIfPresent, c.requireGuest, c.recordEvent);
 router.post('/contact', writeLimiter, attachUserIfPresent, c.requireGuest, c.saveContact);
 router.post('/offer',   writeLimiter, attachUserIfPresent, c.requireGuest, c.claimOffer);
+router.get('/public/:gid', writeLimiter, c.publicSummary);
+router.post('/checkout', writeLimiter, attachUserIfPresent, c.checkout);
 router.get('/rank/:quizId', attachUserIfPresent, c.requireGuest, c.getRank);
+
+router.get('/admin/leads',  requireAdmin, c.adminLeads);
+router.get('/admin/funnel', requireAdmin, c.adminFunnel);
 
 module.exports = router;
