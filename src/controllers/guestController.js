@@ -199,6 +199,8 @@ async function _leadByTokenOrGid(req) {
 exports.publicSummary = asyncHandler(async (req, res) => {
   const lead = await _leadByTokenOrGid(req);
   const batch = lead.batch ? await Batch.findOne({ name: lead.batch }, 'name monthly_price yearly_price').lean() : null;
+  const paid = lead.converted_code ? (await _paidCodes([lead.converted_code])).has(lead.converted_code) : false;
+  const students = await _studentCount();
   res.json({
     success: true,
     data: {
@@ -209,11 +211,25 @@ exports.publicSummary = asyncHandler(async (req, res) => {
       last_test: lead.last_test,
       parent_mobile_known: !!lead.parent_mobile,
       converted: !!lead.converted_code,
+      // The code is useless without the PIN the parent chose; the app needs it
+      // to log in once the payment (done in the browser) is through.
+      student_code: lead.converted_code || '',
+      paid,
       offer: _offerView(lead),
       prices: { monthly: batch?.monthly_price || 0, yearly: batch?.yearly_price || 0 },
+      // Real social proof for the pay page: registered students, rounded down.
+      students_count: students,
     },
   });
 });
+
+let _countCache = { at: 0, n: 0 };
+async function _studentCount() {
+  if (Date.now() - _countCache.at < 10 * 60 * 1000) return _countCache.n;
+  const n = await User.countDocuments({ role: 'student' }).catch(() => 0);
+  _countCache = { at: Date.now(), n: n >= 10 ? Math.floor(n / 10) * 10 : n };
+  return _countCache.n;
+}
 
 // POST /api/guest/checkout { gid?, name, parent_mobile, pin, period }
 // Creates the student account (free tier until the payment clears), moves the
