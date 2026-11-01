@@ -315,6 +315,10 @@ function start() {
     _runStudyPlanEveningJobsIfNeeded().catch(err => console.warn('study plan evening check failed:', err.message));
     _runStudyPlanTeacherDigestIfNeeded().catch(err => console.warn('study plan teacher digest check failed:', err.message));
     _runGuestRemindersIfNeeded().catch(err => console.warn('guest reminders check failed:', err.message));
+    // Weekly महा-Test: next week's test ready ahead of time; ranks once a window closes.
+    const W = require('../utils/weeklyTests');
+    W.ensureUpcoming().catch(err => console.warn('weekly ensure failed:', err.message));
+    W.finalizeDue().catch(err => console.warn('weekly finalize failed:', err.message));
   }, QUEUE_POLL_MS);
 
   console.log('notificationScheduler: started (poll every', QUEUE_POLL_MS / 1000, 's)');

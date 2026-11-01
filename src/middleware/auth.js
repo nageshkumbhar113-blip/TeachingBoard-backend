@@ -57,6 +57,7 @@ const _GUEST_ALLOWED = [
   ['GET',  /^\/api\/banners\/(for-student|default-quotes)$/],
   ['POST', /^\/api\/attempts$/],
   ['ANY',  /^\/api\/guest\//],
+  ['ANY',  /^\/api\/weekly\/(?!admin\/)/],   // weekly महा-Test: free visitors take part too
 ];
 
 function _guestDenied(req, res) {
