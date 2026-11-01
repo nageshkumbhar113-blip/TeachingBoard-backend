@@ -18,7 +18,7 @@ const GENERAL = [
 function messageFor(lead, now = new Date()) {
   const name = lead.name ? `${lead.name}, ` : '';
   if (lead.offer?.expires_at && new Date(lead.offer.expires_at) > now) {
-    return ['⏳ तुमची सवलत लवकरच संपेल', `${name}पहिल्या महिन्यावर ${lead.offer.percent || 50}% सवलत — सगळे tests उघडा`];
+    return ['⏳ तुमची सवलत लवकरच संपेल', `${name}पहिल्या payment वर ${lead.offer.percent || 50}% सवलत — सगळे tests उघडा`];
   }
   if (!lead.tests) return ['🎯 पहिला free test द्या!', `${name}10 मिनिटांत तुमचा result आणि क्रमांक बघा`];
   const [title, body] = GENERAL[(lead.reminders_sent || 0) % GENERAL.length];

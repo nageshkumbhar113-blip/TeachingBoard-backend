@@ -172,7 +172,7 @@ exports.getRank = asyncHandler(async (req, res) => {
   res.json({ success: true, data: await rankOnTest(quizId, req.user.student_code) });
 });
 
-// POST /api/guest/offer — after finishing a test: 50 % off the first month,
+// POST /api/guest/offer — after finishing a test: 50 % off the FIRST PAYMENT (monthly or yearly),
 // 12 hours, at most once per calendar month (per guest, and per parent mobile).
 // Repeated calls return the same offer (active or expired) — never a new one.
 exports.claimOffer = asyncHandler(async (req, res) => {
@@ -250,7 +250,7 @@ async function _studentCount() {
 
 // POST /api/guest/checkout { gid?, name, parent_mobile, pin, period }
 // Creates the student account (free tier until the payment clears), moves the
-// guest's tests into it, and opens a Razorpay order. The first-month offer
+// guest's tests into it, and opens a Razorpay order. The first-payment offer
 // (50 %, while its 12 hours last) applies to a monthly plan only. Payment is
 // then verified by the existing /payment/verify(-public) endpoints.
 exports.checkout = asyncHandler(async (req, res) => {
@@ -324,7 +324,8 @@ exports.checkout = asyncHandler(async (req, res) => {
   if (!price || price <= 0) throw new AppError(`या class ची ${period === 'yearly' ? 'yearly' : 'monthly'} किंमत अजून ठरलेली नाही`, 400);
 
   const priorPaid = await StudentSubscription.exists({ student_user_id: student.user_id, payment_verified: true, is_trial: false });
-  const useOffer = period === 'monthly' && _offerActive(lead) && !priorPaid;
+  // Owner's choice 2026-11-01: the offer is on the first payment, monthly or yearly.
+  const useOffer = _offerActive(lead) && !priorPaid;
   const percent = useOffer ? (lead.offer.percent || OFFER_PERCENT) : 0;
   const amount = Math.round(price * (1 - percent / 100));
 
