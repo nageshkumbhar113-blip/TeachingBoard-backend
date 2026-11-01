@@ -33,6 +33,7 @@ const weeklyEventSchema = new mongoose.Schema(
     status:           { type: String, enum: ['scheduled', 'results', 'skipped'], default: 'scheduled', index: true },
     skip_reason:      { type: String, default: '' },
     results_at:       { type: Date, default: null },
+    reveal_at:        { type: Date, default: null },   // rank list time (>= ends_at); null = ends_at
     participants:     { type: Number, default: 0 },
     is_trial:         { type: Boolean, default: false },   // admin "try now" event
     // The paper is downloaded days ahead, encrypted with this key; the key is

@@ -11,7 +11,10 @@ const weeklyScheduleSchema = new mongoose.Schema(
     enabled:          { type: Boolean, default: true },
     day_of_week:      { type: Number, min: 0, max: 6, default: 0 },          // 0 = Sunday (IST)
     start_time:       { type: String, default: '18:00', match: /^([01]\d|2[0-3]):[0-5]\d$/ },
-    window_minutes:   { type: Number, min: 10, max: 24 * 60, default: 120 }, // may start any time in the window
+    window_minutes:   { type: Number, min: 10, max: 24 * 60, default: 30 }, // may start any time in the window
+    // Rank list + answers shown at this time the same day (IST), e.g. test 6:00–6:30, result 8:00.
+    // '' = right when the window closes.
+    result_time:      { type: String, default: '20:00', match: /^$|^([01]\d|2[0-3]):[0-5]\d$/ },
     duration_minutes: { type: Number, min: 5, max: 180, default: 30 },
     question_count:   { type: Number, min: 5, max: 100, default: 30 },
     question_types:   { type: [String], default: ['mcq'] },                  // mcq | tf | fib

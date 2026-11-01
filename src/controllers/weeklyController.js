@@ -35,11 +35,12 @@ async function _eventFor(req, me, { withKey = false } = {}) {
 
 function _view(ev, entry, registered = 0, now = _now()) {
   const state = now < ev.starts_at ? 'upcoming' : now < ev.ends_at ? 'live' : 'closed';
+  const reveal = W.revealOf(ev);
   return {
     event_id: String(ev._id), batch: ev.batch, subject: ev.subject, title: ev.title,
-    starts_at: ev.starts_at, ends_at: ev.ends_at, duration_minutes: ev.duration_minutes,
+    starts_at: ev.starts_at, ends_at: ev.ends_at, reveal_at: reveal, duration_minutes: ev.duration_minutes,
     question_count: ev.questions?.length || 0, open_to: ev.open_to, state,
-    results: ev.status === 'results' || state === 'closed',
+    results: now >= reveal,
     registered_count: registered,
     me: entry ? {
       registered: true, submitted: !!entry.submitted_at, score: entry.submitted_at ? entry.score : null,
@@ -103,7 +104,9 @@ exports.submit = asyncHandler(async (req, res) => {
   const ev = await _eventFor(req, me);
   const now = _now();
   if (now < ev.starts_at) throw new AppError('Test अजून सुरू झाला नाही', 400);
-  if (now.getTime() > ev.ends_at.getTime() + SUBMIT_GRACE_MS) throw new AppError('वेळ संपली — हा test जमा करता येणार नाही', 400);
+  // a submit queued offline may come a little late, but never after the rank list is out
+  const cutoff = Math.min(ev.ends_at.getTime() + SUBMIT_GRACE_MS, Math.max(W.revealOf(ev).getTime(), ev.ends_at.getTime()));
+  if (now.getTime() > cutoff) throw new AppError('वेळ संपली — हा test जमा करता येणार नाही', 400);
   const existing = await WeeklyEntry.findOne({ event_id: String(ev._id), student_code: me.code }).lean();
   if (existing?.submitted_at) {
     return res.json({ success: true, already: true, data: { score: existing.score, total: existing.total, correct: existing.correct, wrong: existing.wrong, skipped: existing.skipped } });
@@ -125,10 +128,11 @@ exports.submit = asyncHandler(async (req, res) => {
 exports.result = asyncHandler(async (req, res) => {
   const me = _me(req);
   let ev = await _eventFor(req, me);
-  if (_now() < ev.ends_at) return res.json({ success: true, pending: true, reveal_at: ev.ends_at });
+  if (_now() < W.revealOf(ev)) return res.json({ success: true, pending: true, reveal_at: W.revealOf(ev) });
   ev = await W.finalizeIfDue(ev);
   const mine = await WeeklyEntry.findOne({ event_id: String(ev._id), student_code: me.code }).lean();
-  const top = await WeeklyEntry.find({ event_id: String(ev._id), submitted_at: { $ne: null } }).sort({ rank: 1, score: -1 }).limit(10).select('name score total rank time_taken student_code').lean();
+  // Rank board: the top 50 (first names only); the student's own row is added below if outside it.
+  const top = await WeeklyEntry.find({ event_id: String(ev._id), submitted_at: { $ne: null } }).sort({ rank: 1, score: -1 }).limit(50).select('name score total rank time_taken student_code').lean();
   const given = new Map((mine?.answers || []).map(a => [a.q_id, a.given]));
   res.json({
     success: true,
@@ -143,7 +147,7 @@ exports.result = asyncHandler(async (req, res) => {
 
 // ── Admin ────────────────────────────────────────────────────────────────────
 
-const _ALLOWED = ['batch', 'title', 'enabled', 'day_of_week', 'start_time', 'window_minutes', 'duration_minutes', 'question_count', 'question_types', 'question_source', 'subjects', 'open_to'];
+const _ALLOWED = ['batch', 'title', 'enabled', 'day_of_week', 'start_time', 'result_time', 'window_minutes', 'duration_minutes', 'question_count', 'question_types', 'question_source', 'subjects', 'open_to'];
 function _pick(body) {
   const out = {};
   for (const k of _ALLOWED) if (body?.[k] !== undefined) out[k] = body[k];
@@ -154,8 +158,8 @@ function _pick(body) {
 
 exports.adminSchedules = asyncHandler(async (_req, res) => {
   const schedules = await WeeklySchedule.find({}).sort({ batch: 1 }).lean();
-  const next = await WeeklyEvent.find({ schedule_id: { $in: schedules.map(s => String(s._id)) }, ends_at: { $gt: new Date() }, is_trial: { $ne: true } }).select('schedule_id subject starts_at status questions.q_id').lean();
-  const nextBy = new Map(next.map(e => [e.schedule_id, { subject: e.subject, starts_at: e.starts_at, status: e.status, questions: e.questions?.length || 0 }]));
+  const next = await WeeklyEvent.find({ schedule_id: { $in: schedules.map(s => String(s._id)) }, ends_at: { $gt: new Date() }, is_trial: { $ne: true } }).select('schedule_id subject starts_at ends_at reveal_at status questions.q_id').lean();
+  const nextBy = new Map(next.map(e => [e.schedule_id, { subject: e.subject, starts_at: e.starts_at, ends_at: e.ends_at, reveal_at: W.revealOf(e), status: e.status, questions: e.questions?.length || 0 }]));
   res.json({ success: true, data: schedules.map(s => ({ ...s, next: nextBy.get(String(s._id)) || null })) });
 });
 

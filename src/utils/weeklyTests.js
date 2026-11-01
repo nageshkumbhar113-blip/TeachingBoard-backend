@@ -81,6 +81,19 @@ async function _subjectsOf(schedule) {
   return (b?.subjects || []).map(s => s.name).filter(Boolean);
 }
 
+// When the rank list opens: the schedule's result_time that day (IST), never
+// before the window closes.
+function revealAt(schedule, startsAt, endsAt) {
+  const rt = String(schedule.result_time || '');
+  if (!/^\d{2}:\d{2}$/.test(rt)) return endsAt;
+  const [h, m] = rt.split(':').map(Number);
+  const ist = new Date(startsAt.getTime() + IST_MS);
+  const t = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate(), h, m) - IST_MS);
+  return t > endsAt ? t : endsAt;
+}
+
+const revealOf = ev => new Date(ev.reveal_at || ev.ends_at);
+
 // Make the event for one start time (round-robin subject; skips a subject
 // with no usable questions and tries the next one).
 async function generateEvent(schedule, startsAt, { trial = false } = {}) {
@@ -95,9 +108,10 @@ async function generateEvent(schedule, startsAt, { trial = false } = {}) {
     if (pool.length) { chosen = subject; break; }
   }
   if (!trial) await WeeklySchedule.updateOne({ _id: schedule._id }, { $set: { next_subject_index: idx % subjects.length } });
+  const endsAt = new Date(startsAt.getTime() + schedule.window_minutes * 60000);
   const base = {
     schedule_id: String(schedule._id), batch: schedule.batch, title: schedule.title || 'महा-Test',
-    starts_at: startsAt, ends_at: new Date(startsAt.getTime() + schedule.window_minutes * 60000),
+    starts_at: startsAt, ends_at: endsAt, reveal_at: trial ? endsAt : revealAt(schedule, startsAt, endsAt),
     duration_minutes: schedule.duration_minutes, open_to: schedule.open_to, is_trial: trial,
   };
   if (!chosen) {
@@ -156,7 +170,7 @@ function grade(event, answers) {
 
 // Once the window has closed: ranks for everyone, computed one time.
 async function finalizeIfDue(event, now = new Date()) {
-  if (!event || event.status !== 'scheduled' || new Date(event.ends_at) > now) return event;
+  if (!event || event.status !== 'scheduled' || revealOf(event) > now) return event;
   const claimed = await WeeklyEvent.findOneAndUpdate({ _id: event._id, status: 'scheduled' }, { $set: { status: 'results', results_at: now } }, { new: true });
   if (!claimed) return WeeklyEvent.findById(event._id);   // another tick did it
   const entries = await WeeklyEntry.find({ event_id: String(event._id), submitted_at: { $ne: null } }).sort({ score: -1, time_taken: 1 }).lean();
@@ -172,8 +186,8 @@ async function finalizeIfDue(event, now = new Date()) {
 }
 
 async function finalizeDue(now = new Date()) {
-  const due = await WeeklyEvent.find({ status: 'scheduled', ends_at: { $lte: now } }).limit(20);
-  for (const e of due) await finalizeIfDue(e, now).catch(err => console.warn('weekly finalize failed:', err.message));
+  const due = await WeeklyEvent.find({ status: 'scheduled', ends_at: { $lte: now } }).limit(50);
+  for (const e of due) if (revealOf(e) <= now) await finalizeIfDue(e, now).catch(err => console.warn('weekly finalize failed:', err.message));
 }
 
-module.exports = { nextStart, questionPool, generateEvent, ensureUpcoming, encryptPaper, grade, isCorrect, finalizeIfDue, finalizeDue };
+module.exports = { revealAt, revealOf, nextStart, questionPool, generateEvent, ensureUpcoming, encryptPaper, grade, isCorrect, finalizeIfDue, finalizeDue };
