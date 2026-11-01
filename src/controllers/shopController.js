@@ -305,3 +305,5 @@ exports.adminUpdate = asyncHandler(async (req, res) => {
   invalidateUserCache('teacher', shop.user_id);
   res.json({ success: true, data: _shopView(shop), ...(pin ? { pin } : {}) });
 });
+
+exports.summaryOf = _summary;
