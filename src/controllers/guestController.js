@@ -18,7 +18,7 @@ const { isWeakPin } = require('../utils/pin');
 
 const OFFER_PERCENT = 50;
 const OFFER_HOURS = 12;
-const SOURCES = new Set(['admin', 'friend', 'teacher', 'student']);
+const SOURCES = new Set(['admin', 'friend', 'teacher', 'student', 'shop']);
 const EVENT_STEPS = new Set(['browsed', 'engaged', 'shared_friend', 'shared_parent', 'offer_seen', 'checkout']);
 
 const _clean = (v, max = 60) => String(v || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, max);
@@ -282,9 +282,10 @@ exports.checkout = asyncHandler(async (req, res) => {
     if (dupe) throw new AppError(`${name} आधीच registered आहे (Code ${dupe.student_code}). App मध्ये त्या code ने login करून pay करा.`, 409);
 
     let teacherCode = '';
-    if (lead.source === 'teacher' && lead.ref) {
-      const t = await User.findOne({ role: 'teacher', teacher_code: lead.ref }).select('teacher_code').lean();
-      if (t) teacherCode = t.teacher_code;
+    if ((lead.source === 'teacher' || lead.source === 'shop') && lead.ref) {
+      const t = await User.findOne({ role: 'teacher', teacher_code: lead.ref }).select('teacher_code partner_type mobile').lean();
+      // a shop's own number never counts for the shop
+      if (t && !(t.partner_type === 'shop' && t.mobile === mobile)) teacherCode = t.teacher_code;
     }
     // Came from a student's own share link (?free=1&ref=CODE): that student's
     // Refer & Earn friend — same rule as registration (not the same mobile).

@@ -113,7 +113,7 @@ exports.setPartnerConfig = asyncHandler(async (req, res) => {
 // ── Admin: overview of every partner's running balance ───────────────────────
 
 exports.listPartners = asyncHandler(async (_req, res) => {
-  const partners = await User.find({ role: 'teacher', $or: [{ commission_enabled: true }, { partner_type: { $in: ['school', 'youtube'] } }] }).lean();
+  const partners = await User.find({ role: 'teacher', $or: [{ commission_enabled: true }, { partner_type: { $in: ['school', 'youtube', 'shop'] } }] }).lean();
   const now = new Date();
   const open = await CommissionEntry.find({ status: 'active', statement_id: '' }).lean();
   const statements = await PayoutStatement.find({}).lean();

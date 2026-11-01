@@ -86,12 +86,16 @@ exports.login = asyncHandler(async (req, res) => {
   // ── Teacher login ────────────────────────────────
   if (role === 'teacher') {
     const teacherCode = String(req.body.teacher_code || '').trim().toUpperCase();
+    const shopMobile = String(req.body.mobile || '').replace(/\D/g, '').slice(-10);
     const pin = String(req.body.pin || '').trim();
 
-    if (!teacherCode) return res.status(400).json({ success: false, message: 'teacher_code is required' });
+    if (!teacherCode && shopMobile.length !== 10) return res.status(400).json({ success: false, message: 'teacher_code is required' });
     if (!pin)         return res.status(400).json({ success: false, message: 'pin is required' });
 
-    const teacher = await User.findOne({ teacher_code: teacherCode, role: 'teacher' });
+    // Shops (shop.html) log in with their mobile number instead of the code.
+    const teacher = teacherCode
+      ? await User.findOne({ teacher_code: teacherCode, role: 'teacher' })
+      : await User.findOne({ mobile: shopMobile, role: 'teacher', partner_type: 'shop' });
     if (!teacher || !teacher.verifyPin(pin)) {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }

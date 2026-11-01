@@ -171,12 +171,14 @@ function _teacherDenied(req, res) {
   return false;
 }
 
-// A YouTube partner earns commission but must not see student data or use teacher tools.
-// Only the partner (earnings) endpoints and device-token registration stay open to them.
+// A YouTube partner or a shop earns commission but must not see student data or use teacher tools.
+// Only the partner (earnings) endpoints, the shop panel and device-token registration stay open to them.
 function _youtubePartnerBlocked(req, res) {
-  if (req.userDoc?.partner_type !== 'youtube') return false;
+  const pt = req.userDoc?.partner_type;
+  if (pt !== 'youtube' && pt !== 'shop') return false;
   const url = String(req.originalUrl || '');
   if (url.startsWith('/api/partners/') || url.startsWith('/api/teacher/device-token')) return false;
+  if (pt === 'shop' && url.startsWith('/api/shop/me')) return false;
   res.status(403).json({ success: false, code: 'PARTNER_NO_ACCESS', message: 'This feature is not available for YouTube partner accounts.' });
   return true;
 }

@@ -50,11 +50,13 @@ async function findPartnerForStudent(student) {
   }
   if (!teacher || teacher.commission_enabled !== true) return null;
   if ((teacher.status || 'active') !== 'active') return null;
+  // A shop never earns on its own number (shopkeeper's own family account).
+  if (teacher.partner_type === 'shop' && teacher.mobile && teacher.mobile === student.mobile) return null;
   return teacher;
 }
 
-function commissionFor(teacher, amountPaid) {
-  const value = Number(teacher.commission_value) || 0;
+function commissionFor(teacher, amountPaid, renewal = false) {
+  const value = Number(renewal ? teacher.commission_renewal_value : teacher.commission_value) || 0;
   if (value <= 0) return 0;
   const raw = teacher.commission_mode === 'percent' ? (amountPaid * value) / 100 : value;
   return round2(Math.min(raw, amountPaid));
@@ -73,14 +75,19 @@ async function recordCommissionForPayment(sub, student) {
     const teacher = await findPartnerForStudent(student);
     if (!teacher) return null;
 
+    // Later payments of the same student: nothing, or the renewal percent if the partner has one.
+    let renewal = false;
     if (teacher.commission_first_payment_only !== false) {
       const earlier = await CommissionEntry.findOne({
         partner_user_id: teacher.user_id, student_code: student.student_code, type: 'commission', status: 'active',
       }).lean();
-      if (earlier) return null;
+      if (earlier) {
+        if (teacher.commission_mode !== 'percent' || !(Number(teacher.commission_renewal_value) > 0)) return null;
+        renewal = true;
+      }
     }
 
-    const amount = commissionFor(teacher, Number(sub.amount));
+    const amount = commissionFor(teacher, Number(sub.amount), renewal);
     if (!(amount > 0)) return null;
 
     const cfg = await getConfig();
@@ -96,8 +103,9 @@ async function recordCommissionForPayment(sub, student) {
       razorpay_payment_id: sub.razorpay_payment_id,
       amount_paid: Number(sub.amount),
       mode: teacher.commission_mode === 'percent' ? 'percent' : 'flat',
-      rate: Number(teacher.commission_value) || 0,
+      rate: Number(renewal ? teacher.commission_renewal_value : teacher.commission_value) || 0,
       amount,
+      note: renewal ? 'renewal' : '',
       paid_at: paidAt,
       payable_at: payableAt,
       payable_month: monthKey(payableAt),

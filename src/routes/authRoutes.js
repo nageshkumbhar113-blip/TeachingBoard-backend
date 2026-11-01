@@ -19,7 +19,7 @@ const WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MESSAGE = 'Too many login attempts — please try again later';
 const _role = req => String(req.body?.role || '').trim().toLowerCase();
 const _accountCode = req => String(
-  req.body?.student_code || req.body?.teacher_code || req.body?.parent_code || ''
+  req.body?.student_code || req.body?.teacher_code || req.body?.parent_code || req.body?.mobile || ''
 ).trim().toUpperCase();
 
 const adminIpLimiter = createRateLimiter({

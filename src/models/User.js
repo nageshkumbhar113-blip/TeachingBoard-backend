@@ -53,11 +53,15 @@ const userSchema = new mongoose.Schema(
     // Board-style (exam look-alike) papers are off for teachers unless an admin allows them.
     board_papers_allowed: { type: Boolean, default: false },
     // Partner programme (YouTube teacher / school teacher earning a commission on linked students' payments).
-    partner_type:       { type: String, enum: ['', 'school', 'youtube'], default: '' },
+    // 'shop' = a guide / book shop created by the admin (shares the free test, earns on payments).
+    partner_type:       { type: String, enum: ['', 'school', 'youtube', 'shop'], default: '' },
     commission_enabled: { type: Boolean, default: false },
     commission_mode:    { type: String, enum: ['flat', 'percent'], default: 'flat' },
     commission_value:   { type: Number, default: 0, min: 0 },   // rupees (flat) or percent
     commission_first_payment_only: { type: Boolean, default: true },
+    // Percent on later payments of the same student when first_payment_only is on (0 = nothing).
+    commission_renewal_value: { type: Number, default: 0, min: 0, max: 100 },
+    shop_area:          { type: String, default: '', trim: true },   // shop: village / area
     payout_upi_id:      { type: String, default: '', trim: true },
     payout_name:        { type: String, default: '', trim: true },
     pan:                { type: String, default: '', trim: true },

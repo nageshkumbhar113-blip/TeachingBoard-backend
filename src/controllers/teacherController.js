@@ -152,7 +152,8 @@ exports.registerTeacher = asyncHandler(async (req, res) => {
 exports.getTeachers = asyncHandler(async (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query.limit) || 200, 1), 1000);
   const skip  = Math.max(parseInt(req.query.skip) || 0, 0);
-  const teachers = await User.find({ role: 'teacher' })
+  // Shops are teachers underneath but are managed in Admin > Partners > Shops.
+  const teachers = await User.find({ role: 'teacher', partner_type: { $ne: 'shop' } })
     .sort({ created_at: -1 })
     .skip(skip)
     .limit(limit)

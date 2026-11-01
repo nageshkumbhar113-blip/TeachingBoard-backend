@@ -172,6 +172,7 @@ app.use("/api/partners",         require("./routes/partnerRoutes"));
 app.use("/api/referrals",        require("./routes/referralRoutes"));
 app.use("/api/guest",            require("./routes/guestRoutes"));
 app.use("/api/weekly",           require("./routes/weeklyRoutes"));
+app.use("/api/shop",             require("./routes/shopRoutes"));
 app.use("/api/passage-blocks",   require("./routes/passageBlockRoutes"));
 app.use("/api/study-plan",       require("./routes/studyPlanRoutes"));
 app.use("/api/admin/notes",     noteAdminRouter);
