@@ -15,6 +15,8 @@ router.post('/cron/close-month',  c.cronCloseMonth);
 router.get('/config',               requireAdmin, c.getPartnerConfig);
 router.put('/config',               requireAdmin, c.setPartnerConfig);
 router.get('/',                     requireAdmin, c.listPartners);
+router.get('/settlement',           requireAdmin, c.settlementOverview);
+router.get('/settlement/:id',       requireAdmin, c.settlementHistory);
 router.get('/statements',           requireAdmin, c.listStatements);
 router.post('/statements/close',    requireAdmin, c.closeMonthNow);
 router.post('/statements/:id/paid', requireAdmin, c.markStatementPaid);

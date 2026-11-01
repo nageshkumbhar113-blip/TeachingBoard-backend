@@ -4,6 +4,8 @@ const GuestLead = require('../models/GuestLead');
 const ShopInvite = require('../models/ShopInvite');
 const CommissionEntry = require('../models/CommissionEntry');
 const StudentSubscription = require('../models/StudentSubscription');
+const PayoutStatement = require('../models/PayoutStatement');
+const { monthKey, ensurePreviousMonthClosed, getConfig } = require('../utils/partnerCommission');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const { isWeakPin } = require('../utils/pin');
@@ -105,6 +107,46 @@ async function _summary(shop) {
   return { invites, visitors, tested, accounts: codes.length, paid, earned: Math.round((earnedAgg[0]?.t || 0) * 100) / 100 };
 }
 
+// Month-by-month account (settlement) of a shop: the running month (lines not yet
+// in a statement) and every closed monthly statement with its payout.
+async function _settlement(shop) {
+  await ensurePreviousMonthClosed();
+  const now = new Date();
+  const [open, statements, cfg] = await Promise.all([
+    CommissionEntry.find({ partner_user_id: shop.user_id, status: 'active', statement_id: '' }, 'type amount payable_at').lean(),
+    PayoutStatement.find({ partner_user_id: shop.user_id }).sort({ month: -1 }).limit(24).lean(),
+    getConfig(),
+  ]);
+  const sum = rows => Math.round(rows.reduce((t, e) => t + e.amount, 0) * 100) / 100;
+  const hold = open.filter(e => e.payable_at > now);
+  return {
+    hold_days: cfg.hold_days,
+    min_payout: cfg.min_payout,
+    running: {
+      month: monthKey(now),
+      count: open.filter(e => e.type === 'commission').length,
+      amount: sum(open),
+      hold_amount: sum(hold),
+    },
+    months: statements.map(st => ({
+      id: String(st._id),
+      month: st.month,
+      count: st.new_count,
+      amount: st.new_amount,
+      adjust: st.adjust_amount,
+      carried_in: st.carried_in,
+      net: st.net,
+      status: st.status,
+      carried_to: st.carried_to || '',
+      upi_id: st.upi_id || '',
+      upi_name: st.upi_name || '',
+      paid_at: st.paid_at,
+      utr: st.utr || '',
+    })),
+    paid_total: Math.round(statements.filter(st => st.status === 'paid').reduce((t, st) => t + st.net, 0) * 100) / 100,
+  };
+}
+
 function _requireShop(req) {
   if (req.userDoc?.partner_type !== 'shop') throw new AppError('हे page फक्त दुकानांसाठी आहे', 403);
   return req.userDoc;
@@ -116,11 +158,12 @@ function _requireShop(req) {
 exports.me = asyncHandler(async (req, res) => {
   const shop = _requireShop(req);
   const code = shop.teacher_code;
-  const [summary, students, leads, invites] = await Promise.all([
+  const [summary, students, leads, invites, settlement] = await Promise.all([
     _summary(shop),
     _students(shop, 300),
     GuestLead.find({ source: 'shop', ref: code }, 'name batch tests best_pct parent_mobile converted_code last_seen_at created_at').sort({ last_seen_at: -1 }).limit(200).lean(),
     ShopInvite.find({ shop_code: code }).sort({ last_at: -1 }).limit(200).lean(),
+    _settlement(shop),
   ]);
   const byMobile = new Map(students.map(s => [s._mobile, s]));
   const leadByMobile = new Map(leads.filter(l => l.parent_mobile).map(l => [l.parent_mobile, l]));
@@ -129,6 +172,7 @@ exports.me = asyncHandler(async (req, res) => {
     data: {
       shop: _shopView(shop),
       summary,
+      settlement,
       students: students.map(({ _mobile, ...s }) => s),
       visitors: leads.filter(l => !l.converted_code).map(l => ({
         name: l.name || '', class: l.batch || '', tests: l.tests || 0, best_pct: l.best_pct || 0,
@@ -173,6 +217,13 @@ exports.adminStudents = asyncHandler(async (req, res) => {
   if (!shop) throw new AppError('Shop सापडलं नाही', 404);
   const rows = await _students(shop);
   res.json({ success: true, data: rows.map(({ _mobile, ...s }) => ({ ...s, mobile: _mobile })) });
+});
+
+// GET /api/shop/admin/shops/:id/settlement — monthly account of one shop.
+exports.adminSettlement = asyncHandler(async (req, res) => {
+  const shop = await User.findOne({ user_id: req.params.id, role: 'teacher', partner_type: 'shop' }).lean();
+  if (!shop) throw new AppError('Shop सापडलं नाही', 404);
+  res.json({ success: true, data: await _settlement(shop) });
 });
 
 // POST /api/shop/admin/shops — new shop; the PIN is returned once.

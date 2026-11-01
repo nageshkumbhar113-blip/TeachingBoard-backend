@@ -19,5 +19,6 @@ router.get('/admin/shops', requireAdmin, c.adminList);
 router.post('/admin/shops', requireAdmin, c.adminCreate);
 router.put('/admin/shops/:id', requireAdmin, c.adminUpdate);
 router.get('/admin/shops/:id/students', requireAdmin, c.adminStudents);
+router.get('/admin/shops/:id/settlement', requireAdmin, c.adminSettlement);
 
 module.exports = router;
