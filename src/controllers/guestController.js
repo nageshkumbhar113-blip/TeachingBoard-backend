@@ -18,7 +18,7 @@ const { isWeakPin } = require('../utils/pin');
 
 const OFFER_PERCENT = 50;
 const OFFER_HOURS = 12;
-const SOURCES = new Set(['admin', 'friend', 'teacher']);
+const SOURCES = new Set(['admin', 'friend', 'teacher', 'student']);
 const EVENT_STEPS = new Set(['browsed', 'engaged', 'shared_friend', 'shared_parent', 'offer_seen', 'checkout']);
 
 const _clean = (v, max = 60) => String(v || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, max);
@@ -286,6 +286,13 @@ exports.checkout = asyncHandler(async (req, res) => {
       const t = await User.findOne({ role: 'teacher', teacher_code: lead.ref }).select('teacher_code').lean();
       if (t) teacherCode = t.teacher_code;
     }
+    // Came from a student's own share link (?free=1&ref=CODE): that student's
+    // Refer & Earn friend — same rule as registration (not the same mobile).
+    let friendCode = '';
+    if (lead.source === 'student' && lead.ref) {
+      const f = await User.findOne({ role: 'student', student_code: lead.ref }).select('student_code mobile').lean();
+      if (f && f.mobile !== mobile) friendCode = f.student_code;
+    }
 
     const prefix = name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) || 'STU';
     let code, tries = 0;
@@ -307,6 +314,7 @@ exports.checkout = asyncHandler(async (req, res) => {
       approved_by: 'auto',
       request_source: 'self',
       referred_by_teacher: teacherCode,
+      referred_by_student: friendCode,
       pin_hash: User.hashPin(pin),
     });
     if (teacherCode) await User.updateOne({ role: 'teacher', teacher_code: teacherCode }, { $addToSet: { assigned_students: code } });
