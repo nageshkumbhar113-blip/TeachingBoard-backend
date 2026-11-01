@@ -19,6 +19,10 @@ router.get('/public/:gid', writeLimiter, c.publicSummary);
 router.post('/checkout', writeLimiter, attachUserIfPresent, c.checkout);
 router.get('/rank/:quizId', attachUserIfPresent, c.requireGuest, c.getRank);
 
+router.get('/exams', c.nextExam);
+router.get('/admin/exams', requireAdmin, c.adminListExams);
+router.post('/admin/exams', requireAdmin, c.adminAddExam);
+router.delete('/admin/exams/:id', requireAdmin, c.adminDeleteExam);
 router.get('/admin/leads',  requireAdmin, c.adminLeads);
 router.get('/admin/funnel', requireAdmin, c.adminFunnel);
 

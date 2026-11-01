@@ -367,6 +367,36 @@ exports.checkout = asyncHandler(async (req, res) => {
   });
 });
 
+// ── Exam countdown ───────────────────────────────────────────────────────────
+const ExamDate = require('../models/ExamDate');
+
+// GET /api/guest/exams?batch= — the next real exam for that class (or for all).
+exports.nextExam = asyncHandler(async (req, res) => {
+  const batch = _clean(req.query.batch, 120);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const exam = await ExamDate.findOne({ date: { $gte: today }, batch: { $in: ['', batch] } }).sort({ date: 1 }).lean();
+  res.json({ success: true, data: exam ? { title: exam.title, date: exam.date, batch: exam.batch } : null });
+});
+
+exports.adminListExams = asyncHandler(async (_req, res) => {
+  res.json({ success: true, data: await ExamDate.find({}).sort({ date: 1 }).lean() });
+});
+
+exports.adminAddExam = asyncHandler(async (req, res) => {
+  const title = _clean(req.body?.title, 60);
+  const date = new Date(req.body?.date);
+  if (!title) throw new AppError('परीक्षेचं नाव लिहा', 400);
+  if (Number.isNaN(date.getTime())) throw new AppError('तारीख चुकीची आहे', 400);
+  const exam = await ExamDate.create({ title, date, batch: _clean(req.body?.batch, 120) });
+  res.status(201).json({ success: true, data: exam });
+});
+
+exports.adminDeleteExam = asyncHandler(async (req, res) => {
+  if (!/^[0-9a-f]{24}$/i.test(String(req.params.id))) throw new AppError('Not found', 404);
+  await ExamDate.deleteOne({ _id: req.params.id });
+  res.json({ success: true });
+});
+
 // ── Admin ────────────────────────────────────────────────────────────────────
 
 const FUNNEL_STEPS = ['opened', 'browsed', 'engaged', 'tested', 'shared_friend', 'shared_parent', 'lead', 'offer_seen', 'checkout', 'paid'];
