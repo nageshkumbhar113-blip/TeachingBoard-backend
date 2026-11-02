@@ -34,10 +34,13 @@ exports.recover = asyncHandler(async (req, res) => {
   const deviceId = _clean(req.body?.device_id, 100);
   const name = _clean(req.body?.name, 60);
   const fail = () => res.json({ ok: false });   // never says which part did not match
-  if (!mobile || !deviceId || !name) return fail();
+  if (!mobile || !name) return fail();
   const students = await User.find({ role: 'student', mobile }).select('user_id name student_code device_id status').lean();
-  const hits = _byName(students, name).filter(u => u.device_id && u.device_id === deviceId && u.status !== 'blocked');
-  if (hits.length !== 1) return fail();
+  const named = _byName(students, name).filter(u => u.status !== 'blocked');
+  const hits = named.filter(u => u.device_id && u.device_id === deviceId);
+  // Name + number are right but the account is on another phone (or on none yet):
+  // say so, so the person knows to use that phone or ask the admin.
+  if (hits.length !== 1) return res.json({ ok: false, reason: named.length ? 'other_device' : 'no_match' });
   const u = hits[0];
   const ticket = crypto.randomBytes(24).toString('hex');
   await User.updateOne({ user_id: u.user_id }, { $set: { pin_reset_hash: _hash(ticket), pin_reset_expires: new Date(Date.now() + TICKET_MS) } });
