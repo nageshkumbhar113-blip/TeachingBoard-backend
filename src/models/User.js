@@ -15,6 +15,9 @@ const userSchema = new mongoose.Schema(
     name:             { type: String, required: true, trim: true, index: true },
     role:             { type: String, enum: ['admin', 'student', 'teacher', 'parent'], required: true },
     pin_hash:         { type: String, default: null },
+    // Help bot "forgot PIN": one-time ticket (hash) after the phone was confirmed, valid 10 minutes.
+    pin_reset_hash:    { type: String, default: null, select: false },
+    pin_reset_expires: { type: Date, default: null },
 
     // Student-specific
     // default omitted so sparse index skips non-student users (default:null causes 11000 with multiple null values)
