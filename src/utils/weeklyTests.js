@@ -71,7 +71,8 @@ async function questionPool(batch, subject, types, source) {
     const type = _typeOf(q);
     if (!want.has(type) || !q.question || !q.answer) return;
     if (type !== 'fib' && Object.keys(q.options || {}).length < 2) return;
-    const key = _norm(q.question);
+    // Figure questions share one direction text, so pictures are part of "same question".
+    const key = _norm(q.question) + '|' + (q.image || '') + '|' + Object.values(q.option_images || {}).filter(Boolean).join(',');
     if (seen.has(key)) return;
     seen.add(key);
     pool.push({

@@ -75,6 +75,7 @@ function normalizeQuestion(body) {
     image:    normalizeUrl(body.image),
     option_images: optionImages,
     tags:     Array.isArray(body.tags) ? body.tags.map(String) : [],
+    explanation: String(body.explanation || '').trim().slice(0, 8000),
   };
 }
 
@@ -135,6 +136,21 @@ exports.createQuestion = asyncHandler(async (req, res) => {
   ).lean();
 
   res.status(201).json({ success: true, message: 'Question saved', data: question });
+});
+
+// POST /api/questions/bulk { questions: [...] } — upsert by q_id (Admin › Create Quiz › Reasoning प्रश्न).
+exports.bulkSaveQuestions = asyncHandler(async (req, res) => {
+  const list = Array.isArray(req.body?.questions) ? req.body.questions : null;
+  if (!list || !list.length) throw new AppError('questions must be a non-empty array', 400);
+  if (list.length > 100) throw new AppError('At most 100 questions at a time', 400);
+  const ops = list.map(body => {
+    const normalized = normalizeQuestion(body);
+    const qId = String(body.q_id || '').trim() || `q_${randomUUID()}`;
+    return { updateOne: { filter: { q_id: qId }, update: { $set: { ...normalized, q_id: qId } }, upsert: true } };
+  });
+  await Question.bulkWrite(ops, { ordered: false });
+  const ids = ops.map(o => o.updateOne.filter.q_id);
+  res.status(201).json({ success: true, count: ids.length, q_ids: ids });
 });
 
 exports.updateQuestion = asyncHandler(async (req, res) => {

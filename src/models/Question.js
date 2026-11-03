@@ -14,6 +14,8 @@ const questionSchema = new mongoose.Schema(
     image:      { type: String, default: null },
     option_images: { type: mongoose.Schema.Types.Mixed, default: {} },
     tags:       { type: [String], default: [] },
+    // Solution shown to the student after answering (same field as Quiz questions).
+    explanation: { type: String, default: '', trim: true },
     // Set only on copies made by Admin > Import (controllers/importController.js):
     // where the copy came from, and which import job made it (for Undo).
     importedFrom: { id: { type: String }, batch: { type: String } },
