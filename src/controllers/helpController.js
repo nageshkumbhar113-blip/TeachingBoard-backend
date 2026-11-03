@@ -7,6 +7,8 @@ const AppError = require('../utils/AppError');
 const { isWeakPin } = require('../utils/pin');
 const { normalizeMobile } = require('./guestController');
 const { invalidateUserCache } = require('../middleware/auth');
+const { parentTokensFor } = require('../utils/parentTokens');
+const { sendToUser } = require('../utils/fcm');
 
 // Help bot on the login page (core/helpBot.js). "Forgot code / PIN" is done by
 // the student alone only when name + parent's mobile match AND this phone is the
@@ -63,6 +65,48 @@ exports.resetPin = asyncHandler(async (req, res) => {
   await u.save();
   invalidateUserCache('student', u.user_id);
   res.json({ ok: true, student_code: u.student_code });
+});
+
+// "📱 हे app नवीन phone वर वापरायचं आहे" — done from the OLD phone, right after /help/recover has
+// confirmed name + parent's mobile + that this is the bound phone (the ticket proves it).
+// The binding is released (the next login binds the new phone), every earlier login stops working,
+// the move is logged for the admin and the parents are told. At most MOVE_LIMIT moves in 30 days;
+// after that (or when the old phone is lost) it is an admin request as before.
+const MOVE_LIMIT = 2;
+const MOVE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+exports.moveDevice = asyncHandler(async (req, res) => {
+  const code = _clean(req.body?.student_code, 30).toUpperCase();
+  const ticket = String(req.body?.ticket || '');
+  const deviceId = _clean(req.body?.device_id, 100);
+  const u = await User.findOne({ role: 'student', student_code: code }).select('+pin_reset_hash');
+  if (!u || !u.pin_reset_hash || !ticket || u.pin_reset_hash !== _hash(ticket) || !u.pin_reset_expires || u.pin_reset_expires < new Date()
+      || !deviceId || u.device_id !== deviceId) {
+    throw new AppError('वेळ संपली — पुन्हा सुरुवातीपासून करा', 400);
+  }
+  const since = Date.now() - MOVE_WINDOW_MS;
+  const recent = (u.device_moves || []).filter(d => new Date(d).getTime() > since);
+  if (recent.length >= MOVE_LIMIT) {
+    throw new AppError(`30 दिवसांत ${MOVE_LIMIT} वेळाच phone बदलता येतो. आता Admin ला request पाठवा.`, 429);
+  }
+  const now = new Date();
+  u.device_moves = [...recent, now];
+  u.moved_from_device = u.device_id;
+  u.device_id = null;
+  u.device_bound_at = null;
+  u.device_token = null;            // the old phone stops getting notifications
+  u.tokens_valid_after = now;
+  u.pin_reset_hash = null;
+  u.pin_reset_expires = null;
+  await u.save();
+  invalidateUserCache('student', u.user_id);
+  await PinRequest.create({
+    role: 'student', name: u.name, mobile: u.mobile || '', code: u.student_code, reason: 'device_move',
+    note: 'जुन्या phone वरून स्वतः नवीन phone वर shift केलं (help bot)', status: 'done', done_for: u.user_id, done_at: now,
+  });
+  parentTokensFor([u.student_code])
+    .then(tokens => Promise.all(tokens.map(t => sendToUser(t, `${u.name} — नवीन phone`, `${u.name} चं account नवीन phone वर shift झालं. तुम्ही केलं नसेल तर Admin ला कळवा.`, { student_code: u.student_code }).catch(() => {}))))
+    .catch(() => {});
+  res.json({ ok: true, student_code: u.student_code, moves_left: MOVE_LIMIT - u.device_moves.length });
 });
 
 // POST /api/help/pin-request { role, name, mobile, code?, note?, reason? } — for the admin.
@@ -142,7 +186,7 @@ exports.adminResolve = asyncHandler(async (req, res) => {
   if (!u) throw new AppError('Account सापडलं नाही', 404);
   const pin = _newPin();
   u.pin_hash = User.hashPin(pin);
-  if (u.role === 'student' && req.body?.reset_device !== false) { u.device_id = null; u.device_bound_at = null; }
+  if (u.role === 'student' && req.body?.reset_device !== false) { u.device_id = null; u.device_bound_at = null; u.moved_from_device = null; }
   await u.save();
   invalidateUserCache(u.role, u.user_id);
   r.status = 'done'; r.done_for = userId; r.done_at = new Date();

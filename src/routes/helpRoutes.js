@@ -18,6 +18,7 @@ router.get('/faq', c.faq);
 router.post('/hit', small, c.hit);
 router.post('/recover', perIp, perDevice, perMobile, c.recover);
 router.post('/reset-pin', resetLimit, c.resetPin);
+router.post('/move-device', resetLimit, c.moveDevice);
 router.post('/pin-request', perIp, perMobile, c.pinRequest);
 
 router.get('/admin', requireAdmin, c.adminOverview);

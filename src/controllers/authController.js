@@ -201,6 +201,14 @@ exports.login = asyncHandler(async (req, res) => {
   const deviceId = String(req.body.device_id || '').trim();
   let bindDevice = false;
   if (deviceId) {
+    if (student.moved_from_device && student.moved_from_device === deviceId && student.device_id !== deviceId) {
+      // the student moved this account away from this very phone (help bot › नवीन phone)
+      return res.status(403).json({
+        success: false,
+        message: 'हे account नवीन phone वर shift केलं आहे. या phone वर ते आता वापरता येणार नाही.',
+        code: 'DEVICE_MOVED',
+      });
+    }
     if (!student.device_id) {
       bindDevice = true;
     } else if (student.device_id !== deviceId && !student.shared_device) {

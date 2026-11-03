@@ -38,6 +38,11 @@ const userSchema = new mongoose.Schema(
     device_id:        { type: String, default: null },
     device_bound_at:  { type: Date, default: null },
     shared_device:    { type: Boolean, default: false },
+    // "📱 हे app नवीन phone वर" from the old phone (help bot): when it happened (limit per 30 days),
+    // and logins made before the last move stop working (middleware/auth.js).
+    device_moves:       { type: [Date], default: undefined },
+    tokens_valid_after: { type: Date, default: null },
+    moved_from_device:  { type: String, default: null },   // that old phone can no longer log in to this account
     // Free-tier student: self-registered and has not paid yet — may open only
     // free chapters (utils/contentAccess.js). Cleared when a payment activates
     // them. Existing students default to false, i.e. nothing changes for them.

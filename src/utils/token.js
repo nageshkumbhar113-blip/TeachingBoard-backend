@@ -44,6 +44,7 @@ function createToken(user) {
     student_code: user.student_code || "",
     teacher_code: user.teacher_code || "",
     parent_code:  user.parent_code  || "",
+    iat: Math.floor(Date.now() / 1000),
     exp: Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS
   };
 

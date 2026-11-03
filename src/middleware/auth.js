@@ -69,7 +69,17 @@ function _guestDenied(req, res) {
   return true;
 }
 
+// A student who moved the account to a new phone: logins made before the move no longer count.
+const _movedAway = (payload, doc) => payload.role === 'student' && doc?.tokens_valid_after &&
+  (payload.iat || 0) <= Math.floor(new Date(doc.tokens_valid_after).getTime() / 1000);
+
 async function _attachResolvedUser(req) {
+  const payload = await _resolveUser(req);
+  if (payload && _movedAway(payload, req.userDoc)) { req.user = undefined; req.userDoc = undefined; return null; }
+  return payload;
+}
+
+async function _resolveUser(req) {
   const payload = decodeTokenFromHeader(req.headers.authorization);
   if (!payload) return null;
 
