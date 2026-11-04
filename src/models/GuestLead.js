@@ -12,6 +12,8 @@ const guestLeadSchema = new mongoose.Schema(
     // 'teacher' (teacher/partner code), '' (unknown). `ref` = the code / friend's guest id.
     source:        { type: String, default: '', trim: true, index: true },
     ref:           { type: String, default: '', trim: true },
+    // The class in the link they opened (Admin's per-class free link, ?batch=…); '' = picked a class themselves.
+    link_batch:    { type: String, default: '', trim: true },
     // Funnel steps reached (opened, browsed, engaged, tested, shared_friend,
     // shared_parent, lead, offer_seen, checkout, paid).
     steps:         { type: [String], default: [] },

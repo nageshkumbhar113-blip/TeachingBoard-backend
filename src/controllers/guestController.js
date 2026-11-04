@@ -11,6 +11,8 @@ const User = require('../models/User');
 const StudentSubscription = require('../models/StudentSubscription');
 const razorpay = require('../utils/razorpay');
 const { isWeakPin } = require('../utils/pin');
+const Quiz = require('../models/Quiz');
+const { isQuizLocked } = require('../utils/contentAccess');
 
 // Free part without login (docs/PLAN_guest_funnel.md). A guest gets a signed
 // token for the one batch they picked; middleware/auth.js turns it into a
@@ -77,9 +79,23 @@ function requireGuest(req, res, next) {
   next();
 }
 
+// How many published tests of each class a free visitor can open (cached 5 min) — for
+// Admin's per-class free-link message ("✅ 12 Free Tests").
+let _freeCount = null, _freeCountAt = 0;
+async function _freeTestCounts() {
+  if (_freeCount && Date.now() - _freeCountAt < 5 * 60 * 1000) return _freeCount;
+  const visitor = { role: 'student', status: 'active', free_tier: true, expiry_date: null };
+  const quizzes = await Quiz.find({ status: 'published' }, 'batch subject chapter paper_mode sections.source_batch sections.subject sections.chapter').lean();
+  const out = {};
+  for (const q of quizzes) if (!(await isQuizLocked(visitor, q))) out[q.batch] = (out[q.batch] || 0) + 1;
+  _freeCount = out; _freeCountAt = Date.now();
+  return out;
+}
+
 // GET /api/guest/batches — the batch picker (no token needed).
 exports.listBatches = asyncHandler(async (_req, res) => {
   const batches = await Batch.find({ is_active: { $ne: false } }, 'name icon cover_image board medium standard subjects.name').lean();
+  const free = await _freeTestCounts().catch(() => ({}));
   res.json({
     success: true,
     data: batches.map(b => ({
@@ -90,6 +106,7 @@ exports.listBatches = asyncHandler(async (_req, res) => {
       medium: b.medium || '',
       standard: b.standard || '',
       subjects: (b.subjects || []).map(s => s.name),
+      free_tests: free[b.name] || 0,
     })),
   });
 });
@@ -118,6 +135,7 @@ exports.createSession = asyncHandler(async (req, res) => {
       gid: _newGid(),
       source: SOURCES.has(src) ? src : '',
       ref: _clean(req.body?.ref, 40).toUpperCase(),
+      link_batch: _clean(req.body?.link_batch, 120) === batch.name ? batch.name : '',
       steps: ['opened'],
     });
   }
@@ -450,21 +468,23 @@ exports.adminLeads = asyncHandler(async (req, res) => {
 // GET /api/guest/admin/funnel?days=30 — how many guests reached each step, per source.
 exports.adminFunnel = asyncHandler(async (req, res) => {
   const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
-  const leads = await GuestLead.find({ created_at: { $gte: new Date(Date.now() - days * 864e5) } }, 'source steps converted_code').lean();
+  const leads = await GuestLead.find({ created_at: { $gte: new Date(Date.now() - days * 864e5) } }, 'source steps converted_code link_batch').lean();
   const paid = await _paidCodes(leads.map(l => l.converted_code).filter(Boolean));
   const blank = () => Object.fromEntries(FUNNEL_STEPS.map(s => [s, 0]));
   const total = blank();
-  const bySource = {};
+  const bySource = {}, byLink = {};
   for (const l of leads) {
     const steps = new Set(l.steps || []);
     if (paid.has(l.converted_code)) steps.add('paid');
     const src = l.source || 'direct';
     bySource[src] = bySource[src] || blank();
+    if (l.link_batch) byLink[l.link_batch] = byLink[l.link_batch] || blank();
     for (const s of steps) {
-      if (s in total) { total[s]++; bySource[src][s]++; }
+      if (s in total) { total[s]++; bySource[src][s]++; if (l.link_batch) byLink[l.link_batch][s]++; }
     }
   }
-  res.json({ success: true, days, steps: FUNNEL_STEPS, total, by_source: bySource });
+  // by_link: visitors who came through a per-class link (Admin › Free link › class)
+  res.json({ success: true, days, steps: FUNNEL_STEPS, total, by_source: bySource, by_link: byLink });
 });
 
 // Called by attemptController after a guest's test is saved.
