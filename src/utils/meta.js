@@ -212,7 +212,7 @@ const MAX_STEP = 1.2;   // a budget never grows more than 20% in one go
 async function setAdStatus(adId, status) {
   if (!/^\d+$/.test(String(adId))) throw Object.assign(new Error('Bad ad id'), { status: 400 });
   if (!['PAUSED', 'ACTIVE'].includes(status)) throw Object.assign(new Error('Bad status'), { status: 400 });
-  const ad = await graph(String(adId), { fields: 'id,name,adset_id,account_id' });
+  const ad = await graph(String(adId), { fields: 'id,name,adset_id,campaign_id,account_id' });
   if (`act_${ad.account_id}` !== env().account) throw Object.assign(new Error('Not this ad account'), { status: 400 });
   if (status === 'PAUSED') {
     // never the last running ad of its ad set: pause the ad set itself in Ads Manager instead
@@ -221,6 +221,14 @@ async function setAdStatus(adId, status) {
     if (!running.length) throw Object.assign(new Error('ही या ad set मधली शेवटची चालू ad आहे — ती बंद केली नाही (हवं तर Ads Manager मध्ये ad set बंद करा)'), { status: 400 });
   }
   await post(String(adId), { status });
+  // turning an ad on also turns on its ad set and campaign (made PAUSED by "Meta वर पाठवा"),
+  // otherwise the ad would never run; pausing touches only the ad
+  if (status === 'ACTIVE') {
+    for (const id of [ad.adset_id, ad.campaign_id].filter(Boolean)) {
+      const o = await graph(String(id), { fields: 'status' }).catch(() => null);
+      if (o && o.status === 'PAUSED') await post(String(id), { status: 'ACTIVE' });
+    }
+  }
   _cache = null;
   return { ad_id: ad.id, name: ad.name, status };
 }
