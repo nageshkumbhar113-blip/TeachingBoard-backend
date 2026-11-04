@@ -15,6 +15,7 @@ const Quiz = require('../models/Quiz');
 const { isQuizLocked } = require('../utils/contentAccess');
 const CommissionEntry = require('../models/CommissionEntry');
 const Note = require('../models/Note');
+const META = require('../utils/meta');
 const SLSQuestion = require('../models/SLSQuestion');
 const { isChapterIdFree, makeChapterId } = require('../utils/contentAccess');
 
@@ -567,6 +568,22 @@ exports.adminAdContent = asyncHandler(async (req, res) => {
     });
   }
   res.json({ success: true, batch: batch.name, subjects });
+});
+
+// GET /api/guest/admin/meta?days=30 — Meta (Facebook / Instagram) ads: is it connected, the ad
+// account, and each ad's spend / impressions / link clicks keyed by the ad's name (= our ad id).
+// Read-only. The token stays on the server; ?check=1 only checks the connection.
+exports.adminMeta = asyncHandler(async (req, res) => {
+  const cfg = META.configured();
+  if (!cfg.ok) return res.json({ success: true, connected: false, config: cfg });
+  const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 90);
+  try {
+    if (req.query.fresh === '1') META._resetCache();
+    const [account, ins] = await Promise.all([META.account(), req.query.check === '1' ? null : META.insights(days)]);
+    res.json({ success: true, connected: true, config: cfg, account, ...(ins || {}) });
+  } catch (err) {
+    res.json({ success: true, connected: false, config: cfg, error: err.message });
+  }
 });
 
 // Called by attemptController after a guest's test is saved.

@@ -26,5 +26,6 @@ router.delete('/admin/exams/:id', requireAdmin, c.adminDeleteExam);
 router.get('/admin/leads',  requireAdmin, c.adminLeads);
 router.get('/admin/funnel', requireAdmin, c.adminFunnel);
 router.get('/admin/ad-content', requireAdmin, c.adminAdContent);
+router.get('/admin/meta', requireAdmin, c.adminMeta);
 
 module.exports = router;
