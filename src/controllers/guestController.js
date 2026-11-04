@@ -20,7 +20,8 @@ const { isQuizLocked } = require('../utils/contentAccess');
 
 const OFFER_PERCENT = 50;
 const OFFER_HOURS = 12;
-const SOURCES = new Set(['admin', 'friend', 'teacher', 'student', 'shop']);
+// 'ad' = a Facebook / Instagram ad's link (ref = the ad's id, Admin › Sync › Ads)
+const SOURCES = new Set(['admin', 'friend', 'teacher', 'student', 'shop', 'ad']);
 const EVENT_STEPS = new Set(['browsed', 'engaged', 'shared_friend', 'shared_parent', 'offer_seen', 'checkout']);
 
 const _clean = (v, max = 60) => String(v || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, max);
@@ -134,7 +135,7 @@ exports.createSession = asyncHandler(async (req, res) => {
     lead = new GuestLead({
       gid: _newGid(),
       source: SOURCES.has(src) ? src : '',
-      ref: _clean(req.body?.ref, 40).toUpperCase(),
+      ref: src === 'ad' ? _clean(req.body?.ref, 40).toLowerCase().replace(/[^a-z0-9-]/g, '') : _clean(req.body?.ref, 40).toUpperCase(),
       link_batch: _clean(req.body?.link_batch, 120) === batch.name ? batch.name : '',
       steps: ['opened'],
     });
@@ -468,23 +469,26 @@ exports.adminLeads = asyncHandler(async (req, res) => {
 // GET /api/guest/admin/funnel?days=30 — how many guests reached each step, per source.
 exports.adminFunnel = asyncHandler(async (req, res) => {
   const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
-  const leads = await GuestLead.find({ created_at: { $gte: new Date(Date.now() - days * 864e5) } }, 'source steps converted_code link_batch').lean();
+  const leads = await GuestLead.find({ created_at: { $gte: new Date(Date.now() - days * 864e5) } }, 'source ref steps converted_code link_batch').lean();
   const paid = await _paidCodes(leads.map(l => l.converted_code).filter(Boolean));
   const blank = () => Object.fromEntries(FUNNEL_STEPS.map(s => [s, 0]));
   const total = blank();
-  const bySource = {}, byLink = {};
+  const bySource = {}, byLink = {}, byAd = {};
   for (const l of leads) {
     const steps = new Set(l.steps || []);
     if (paid.has(l.converted_code)) steps.add('paid');
     const src = l.source || 'direct';
     bySource[src] = bySource[src] || blank();
     if (l.link_batch) byLink[l.link_batch] = byLink[l.link_batch] || blank();
+    const ad = src === 'ad' && l.ref ? String(l.ref).toLowerCase() : '';
+    if (ad) byAd[ad] = byAd[ad] || blank();
     for (const s of steps) {
-      if (s in total) { total[s]++; bySource[src][s]++; if (l.link_batch) byLink[l.link_batch][s]++; }
+      if (s in total) { total[s]++; bySource[src][s]++; if (l.link_batch) byLink[l.link_batch][s]++; if (ad) byAd[ad][s]++; }
     }
   }
   // by_link: visitors who came through a per-class link (Admin › Free link › class)
-  res.json({ success: true, days, steps: FUNNEL_STEPS, total, by_source: bySource, by_link: byLink });
+  // by_ad: visitors per Facebook / Instagram ad (Admin › Sync › Ads leaderboard)
+  res.json({ success: true, days, steps: FUNNEL_STEPS, total, by_source: bySource, by_link: byLink, by_ad: byAd });
 });
 
 // Called by attemptController after a guest's test is saved.
