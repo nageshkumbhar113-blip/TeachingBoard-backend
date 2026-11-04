@@ -13,6 +13,7 @@ const razorpay = require('../utils/razorpay');
 const { isWeakPin } = require('../utils/pin');
 const Quiz = require('../models/Quiz');
 const { isQuizLocked } = require('../utils/contentAccess');
+const CommissionEntry = require('../models/CommissionEntry');
 
 // Free part without login (docs/PLAN_guest_funnel.md). A guest gets a signed
 // token for the one batch they picked; middleware/auth.js turns it into a
@@ -488,8 +489,30 @@ exports.adminFunnel = asyncHandler(async (req, res) => {
   }
   // by_link: visitors who came through a per-class link (Admin › Free link › class)
   // by_ad: visitors per Facebook / Instagram ad (Admin › Sync › Ads leaderboard)
-  res.json({ success: true, days, steps: FUNNEL_STEPS, total, by_source: bySource, by_link: byLink, by_ad: byAd });
+  res.json({ success: true, days, steps: FUNNEL_STEPS, total, by_source: bySource, by_link: byLink, by_ad: byAd, by_teacher_ad: await _teacherAds(days) });
 });
+
+// Teachers / YouTubers who registered from an ad: registered → approved → students they
+// brought → students who paid (a commission entry), per ad.
+async function _teacherAds(days) {
+  const ts = await User.find({ role: 'teacher', signup_ad: { $nin: ['', null] }, created_at: { $gte: new Date(Date.now() - days * 864e5) } }, 'user_id teacher_code signup_ad status').lean();
+  if (!ts.length) return {};
+  const codes = ts.map(t => t.teacher_code).filter(Boolean);
+  const [studs, paid] = await Promise.all([
+    User.aggregate([{ $match: { role: 'student', referred_by_teacher: { $in: codes } } }, { $group: { _id: '$referred_by_teacher', n: { $sum: 1 } } }]),
+    CommissionEntry.aggregate([{ $match: { type: 'commission', status: 'active', partner_user_id: { $in: ts.map(t => t.user_id) } } }, { $group: { _id: '$partner_user_id', s: { $addToSet: '$student_code' } } }]),
+  ]);
+  const sBy = new Map(studs.map(r => [r._id, r.n])), pBy = new Map(paid.map(r => [r._id, r.s.length]));
+  const out = {};
+  for (const t of ts) {
+    const r = out[t.signup_ad] = out[t.signup_ad] || { registered: 0, approved: 0, students: 0, paid: 0 };
+    r.registered++;
+    if (t.status === 'active') r.approved++;
+    r.students += sBy.get(t.teacher_code) || 0;
+    r.paid += pBy.get(t.user_id) || 0;
+  }
+  return out;
+}
 
 // Called by attemptController after a guest's test is saved.
 async function noteGuestAttempt(studentCode, quizTitle, pct) {

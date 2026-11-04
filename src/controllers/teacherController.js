@@ -133,6 +133,7 @@ exports.registerTeacher = asyncHandler(async (req, res) => {
     commission_first_payment_only: true,
     status: 'pending',
     request_source: 'self',
+    signup_ad: String(req.body.signup_ad || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40),
     terms_accepted_at: new Date(),
     terms_version: isYoutube ? YOUTUBE_TERMS_VERSION : TEACHER_TERMS_VERSION,
     terms_ip: clientIp(req),
