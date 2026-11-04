@@ -27,5 +27,7 @@ router.get('/admin/leads',  requireAdmin, c.adminLeads);
 router.get('/admin/funnel', requireAdmin, c.adminFunnel);
 router.get('/admin/ad-content', requireAdmin, c.adminAdContent);
 router.get('/admin/meta', requireAdmin, c.adminMeta);
+router.post('/admin/meta/upload', requireAdmin, c.adminMetaUpload);
+router.post('/admin/meta/ad', requireAdmin, c.adminMetaCreateAd);
 
 module.exports = router;

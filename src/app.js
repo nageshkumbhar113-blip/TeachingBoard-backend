@@ -86,6 +86,8 @@ app.use(cors({
 }));
 
 // ── Body parsing ────────────────────────────────────────────
+// Admin › Ads › "Meta वर पाठवा": the ad's video / thumbnail bytes, passed straight on to Meta
+app.use('/api/guest/admin/meta/upload', express.raw({ type: () => true, limit: '40mb' }));
 // Higher limit for PDF note uploads only (base64 of 10MB PDF ≈ 13.5MB JSON)
 app.use('/api/admin/notes/upload', express.json({ limit: '15mb' }));
 // Capture the raw body so the Razorpay webhook can verify its signature.

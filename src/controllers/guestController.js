@@ -586,6 +586,41 @@ exports.adminMeta = asyncHandler(async (req, res) => {
   }
 });
 
+// POST /api/guest/admin/meta/upload?kind=video|image&name=… (raw bytes) — the ad's video /
+// thumbnail, passed straight on to the Meta ad account (nothing kept on this server).
+exports.adminMetaUpload = asyncHandler(async (req, res) => {
+  if (!META.configured().ok) throw new AppError('Meta जोडलेलं नाही', 400);
+  const buf = req.body;
+  if (!Buffer.isBuffer(buf) || buf.length < 1000) throw new AppError('File रिकामी आहे', 400);
+  const name = _clean(req.query.name, 60).replace(/[^a-z0-9-]/gi, '') || 'eduorbit-ad';
+  try {
+    const out = req.query.kind === 'image' ? await META.uploadImage(buf) : await META.uploadVideo(buf, name);
+    res.json({ success: true, ...out });
+  } catch (err) { throw new AppError(err.message, err.status || 400); }
+});
+
+// POST /api/guest/admin/meta/ad — make the ad (campaign per audience, ad set per class+audience),
+// always PAUSED. Re-sending the same ad name does not make a second ad.
+exports.adminMetaCreateAd = asyncHandler(async (req, res) => {
+  if (!META.configured().ok) throw new AppError('Meta जोडलेलं नाही', 400);
+  const b = req.body || {};
+  const name = _clean(b.name, 60).toLowerCase().replace(/[^a-z0-9-]/g, '');
+  const adset = _clean(b.adset, 80).toLowerCase().replace(/[^a-z0-9-]/g, '');
+  const link = String(b.link || '');
+  if (!name || !adset) throw new AppError('Ad name missing', 400);
+  if (!/^https:\/\/teachingboard-frontend\.vercel\.app\//.test(link)) throw new AppError('Link must be the app link', 400);
+  if (!/^\d+$/.test(String(b.video_id || '')) || !b.image_hash) throw new AppError('Video / thumbnail missing', 400);
+  try {
+    const out = await META.createAd({
+      name, adset, audience: String(b.audience || ''), daily_budget: Number(b.daily_budget) || 0,
+      video_id: String(b.video_id), image_hash: String(b.image_hash),
+      message: String(b.message || '').slice(0, 2000), headline: String(b.headline || '').slice(0, 120),
+      cta: b.cta === 'SIGN_UP' ? 'SIGN_UP' : 'LEARN_MORE', link,
+    });
+    res.json({ success: true, ...out });
+  } catch (err) { throw new AppError(err.message, err.status || 400); }
+});
+
 // Called by attemptController after a guest's test is saved.
 async function noteGuestAttempt(studentCode, quizTitle, pct) {
   const gid = String(studentCode || '').replace(/^GUEST-/, '');
