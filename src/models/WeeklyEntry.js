@@ -18,6 +18,8 @@ const weeklyEntrySchema = new mongoose.Schema(
     correct:       { type: Number, default: 0 },
     wrong:         { type: Number, default: 0 },
     skipped:       { type: Number, default: 0 },
+    // mixed papers: marks per subject [{ subject, score, total, correct, wrong }]
+    by_subject:    { type: [{ _id: false, subject: String, score: Number, total: Number, correct: Number, wrong: Number }], default: [] },
     time_taken:    { type: Number, default: 0 },      // seconds
     leave_count:   { type: Number, default: 0 },      // left the app during the test (reported)
     rank:          { type: Number, default: null },

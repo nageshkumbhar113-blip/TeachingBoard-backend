@@ -22,6 +22,31 @@ const weeklyScheduleSchema = new mongoose.Schema(
     subjects:         { type: [String], default: [] },                       // empty = every subject of the class
     next_subject_index: { type: Number, default: 0 },
     open_to:          { type: String, enum: ['all', 'paid'], default: 'all' }, // 'all' = free visitors too
+    // 'subject' = one subject a week (above); 'papers' = the admin's mixed papers below, taking turns
+    // week by week (e.g. NMMS: MAT, SAT, MAT…). A paper takes `count` random questions from each
+    // part (a subject, all or some chapters), each worth `marks`; `order` 'sections' keeps the parts
+    // in the given order, 'mix' shuffles everything; `negative` is taken off for each wrong answer.
+    mode:             { type: String, enum: ['subject', 'papers'], default: 'subject' },
+    papers: {
+      type: [{
+        _id: false,
+        name:     { type: String, trim: true, maxlength: 60, required: true },
+        order:    { type: String, enum: ['sections', 'mix'], default: 'sections' },
+        negative: { type: Number, min: 0, max: 10, default: 0 },
+        parts: {
+          type: [{
+            _id: false,
+            subject:  { type: String, trim: true, required: true },
+            chapters: { type: [String], default: [] },             // empty = all chapters
+            count:    { type: Number, min: 1, max: 200, default: 10 },
+            marks:    { type: Number, min: 0.25, max: 20, default: 1 },
+          }],
+          default: [],
+        },
+      }],
+      default: [],
+    },
+    next_paper_index: { type: Number, default: 0 },
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }, versionKey: false }
 );

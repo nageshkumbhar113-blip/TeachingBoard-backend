@@ -98,6 +98,23 @@ async function _subjectsOf(schedule) {
   return (b?.subjects || []).map(s => s.name).filter(Boolean);
 }
 
+// A mixed paper (schedule mode 'papers'): each part's questions, the chosen
+// chapters only, `count` of them at random; parts kept in order or mixed.
+async function buildPaper(schedule, paper) {
+  const picked = [], sections = [], shortages = [];
+  for (const part of paper.parts || []) {
+    const chapters = new Set((part.chapters || []).map(_norm));
+    let pool = await questionPool(schedule.batch, part.subject, schedule.question_types, schedule.question_source);
+    if (chapters.size) pool = pool.filter(q => chapters.has(_norm(q.chapter)));
+    const want = Math.max(1, Number(part.count) || 1), marks = Number(part.marks) || 1;
+    const take = _shuffle(pool).slice(0, want).map(q => ({ ...q, subject: part.subject, marks }));
+    if (take.length < want) shortages.push({ subject: part.subject, want, got: take.length });
+    if (take.length) sections.push({ subject: part.subject, count: take.length, marks });
+    picked.push(...take);
+  }
+  return { questions: paper.order === 'mix' ? _shuffle(picked) : picked, sections, shortages };
+}
+
 // When the rank list opens: the schedule's result_time that day (IST), never
 // before the window closes.
 function revealAt(schedule, startsAt, endsAt) {
@@ -114,6 +131,7 @@ const revealOf = ev => new Date(ev.reveal_at || ev.ends_at);
 // Make the event for one start time (round-robin subject; skips a subject
 // with no usable questions and tries the next one).
 async function generateEvent(schedule, startsAt, { trial = false } = {}) {
+  if (schedule.mode === 'papers' && schedule.papers?.length) return _generatePaperEvent(schedule, startsAt, { trial });
   const subjects = await _subjectsOf(schedule);
   if (!subjects.length) return null;
   let idx = schedule.next_subject_index || 0;
@@ -138,6 +156,29 @@ async function generateEvent(schedule, startsAt, { trial = false } = {}) {
   return WeeklyEvent.create({ ...base, subject: chosen, questions, key_b64: crypto.randomBytes(32).toString('base64') });
 }
 
+// Mixed papers take turns (MAT, SAT, MAT…); a paper with no questions at all is skipped for the next one.
+async function _generatePaperEvent(schedule, startsAt, { trial = false } = {}) {
+  const papers = schedule.papers;
+  let idx = schedule.next_paper_index || 0, paper = null, built = null;
+  for (let tries = 0; tries < papers.length; tries++) {
+    const p = papers[idx % papers.length];
+    idx++;
+    const b = await buildPaper(schedule, p);
+    if (b.questions.length) { paper = p; built = b; break; }
+    if (!paper) { paper = p; built = b; }
+  }
+  if (!trial) await WeeklySchedule.updateOne({ _id: schedule._id }, { $set: { next_paper_index: idx % papers.length } });
+  const endsAt = new Date(startsAt.getTime() + schedule.window_minutes * 60000);
+  const base = {
+    schedule_id: String(schedule._id), batch: schedule.batch, title: schedule.title || 'महा-Test', subject: paper.name,
+    starts_at: startsAt, ends_at: endsAt, reveal_at: trial ? endsAt : revealAt(schedule, startsAt, endsAt),
+    duration_minutes: schedule.duration_minutes, open_to: schedule.open_to, is_trial: trial,
+    paper_order: paper.order || 'sections', negative: Number(paper.negative) || 0, sections: built.sections, shortages: built.shortages,
+  };
+  if (!built.questions.length) return WeeklyEvent.create({ ...base, status: 'skipped', skip_reason: 'पेपरच्या निवडलेल्या विषय / chapters मध्ये प्रश्न नाहीत' });
+  return WeeklyEvent.create({ ...base, questions: built.questions, key_b64: crypto.randomBytes(32).toString('base64') });
+}
+
 // Every enabled schedule has its next event ready (made up to 7 days ahead,
 // so phones can download the paper early). Called by the scheduler tick.
 async function ensureUpcoming(now = new Date()) {
@@ -157,6 +198,7 @@ function encryptPaper(event) {
   const c = crypto.createCipheriv('aes-256-gcm', key, iv);
   const plain = JSON.stringify(event.questions.map(q => ({
     q_id: q.q_id, type: q.type, question: q.question, options: q.options, image: q.image, option_images: q.option_images, chapter: q.chapter,
+    ...(event.paper_order ? { subject: q.subject, marks: q.marks } : {}),
   })));
   const data = Buffer.concat([c.update(plain, 'utf8'), c.final(), c.getAuthTag()]);
   return { iv: iv.toString('base64'), data: data.toString('base64') };
@@ -171,18 +213,26 @@ function isCorrect(q, given) {
   return g === q.answer || _norm(opts[g] ?? g) === _norm(answerText);
 }
 
+// One subject: a mark a question, nothing off. Mixed paper: each question's marks, `negative`
+// off for a wrong answer, and the marks per subject.
 function grade(event, answers) {
   const byId = new Map((answers || []).map(a => [String(a.q_id), String(a.given ?? '')]));
-  let correct = 0, wrong = 0, skipped = 0;
-  const kept = [];
+  const paper = !!event.paper_order, neg = paper ? Number(event.negative) || 0 : 0;
+  let correct = 0, wrong = 0, skipped = 0, score = 0, total = 0;
+  const kept = [], subj = new Map();
   for (const q of event.questions) {
     const given = byId.get(q.q_id) || '';
+    const m = paper ? Number(q.marks) || 1 : 1;
+    const s = paper ? (subj.get(q.subject) || subj.set(q.subject, { subject: q.subject, score: 0, total: 0, correct: 0, wrong: 0 }).get(q.subject)) : null;
     kept.push({ q_id: q.q_id, given });
+    total += m; if (s) s.total += m;
     if (!given) skipped++;
-    else if (isCorrect(q, given)) correct++;
-    else wrong++;
+    else if (isCorrect(q, given)) { correct++; score += m; if (s) { s.correct++; s.score += m; } }
+    else { wrong++; score -= neg; if (s) { s.wrong++; s.score -= neg; } }
   }
-  return { correct, wrong, skipped, score: correct, total: event.questions.length, answers: kept };
+  const r2 = n => Math.round(n * 100) / 100;
+  return { correct, wrong, skipped, score: r2(score), total: r2(total), answers: kept,
+    by_subject: [...subj.values()].map(s => ({ ...s, score: r2(s.score), total: r2(s.total) })) };
 }
 
 // Once the window has closed: ranks for everyone, computed one time.
@@ -216,4 +266,4 @@ async function finalizeDue(now = new Date()) {
   for (const e of due) if (revealOf(e) <= now) await finalizeIfDue(e, now).catch(err => console.warn('weekly finalize failed:', err.message));
 }
 
-module.exports = { hiddenCodes, revealAt, revealOf, nextStart, questionPool, generateEvent, ensureUpcoming, encryptPaper, grade, isCorrect, finalizeIfDue, finalizeDue };
+module.exports = { hiddenCodes, revealAt, revealOf, nextStart, questionPool, buildPaper, generateEvent, ensureUpcoming, encryptPaper, grade, isCorrect, finalizeIfDue, finalizeDue };

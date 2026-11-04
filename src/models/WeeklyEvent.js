@@ -14,6 +14,8 @@ const eventQuestionSchema = new mongoose.Schema(
     image:       { type: String, default: null },
     option_images: { type: mongoose.Schema.Types.Mixed, default: {} },
     chapter:     { type: String, default: '' },
+    subject:     { type: String, default: '' },     // mixed papers: which part it came from
+    marks:       { type: Number, default: 1 },
   },
   { _id: false }
 );
@@ -41,6 +43,12 @@ const weeklyEventSchema = new mongoose.Schema(
       type: [{ rank: Number, name: String, score: Number, total: Number, code: String, hidden: Boolean, _id: false }],
       default: [],
     },
+    // Mixed paper (schedule mode 'papers'): `subject` holds the paper's name.
+    paper_order:      { type: String, default: '' },        // '' (one subject) | 'sections' | 'mix'
+    negative:         { type: Number, default: 0 },
+    sections:         { type: [{ subject: String, count: Number, marks: Number, _id: false }], default: [] },
+    // parts that had fewer questions than asked (shown to the admin)
+    shortages:        { type: [{ subject: String, want: Number, got: Number, _id: false }], default: [] },
     is_trial:         { type: Boolean, default: false },   // admin "try now" event
     // The paper is downloaded days ahead, encrypted with this key; the key is
     // handed out only from starts_at (a ~50-byte call), so the test itself
