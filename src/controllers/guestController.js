@@ -14,6 +14,9 @@ const { isWeakPin } = require('../utils/pin');
 const Quiz = require('../models/Quiz');
 const { isQuizLocked } = require('../utils/contentAccess');
 const CommissionEntry = require('../models/CommissionEntry');
+const Note = require('../models/Note');
+const SLSQuestion = require('../models/SLSQuestion');
+const { isChapterIdFree, makeChapterId } = require('../utils/contentAccess');
 
 // Free part without login (docs/PLAN_guest_funnel.md). A guest gets a signed
 // token for the one batch they picked; middleware/auth.js turns it into a
@@ -513,6 +516,58 @@ async function _teacherAds(days) {
   }
   return out;
 }
+
+// GET /api/guest/admin/ad-content?batch=… — what a regular class really has, subject by
+// subject, for its Facebook / Instagram ads (Admin › Sync › Ads): chapters, notes, exercise
+// answers, how many chapters are fully covered, one real chapter (the free one when it has
+// content) and one real exercise question + answer for the demo screens.
+exports.adminAdContent = asyncHandler(async (req, res) => {
+  const name = _clean(req.query.batch, 120);
+  const batch = await Batch.findOne({ name }, 'name subjects').lean();
+  if (!batch) throw new AppError('Class not found', 404);
+  const norm = s => String(s || '').trim().toLowerCase().replace(/\s+/g, '-');
+  const [notes, ex] = await Promise.all([
+    Note.aggregate([{ $match: { batch: batch.name, status: { $ne: 'archived' } } }, { $group: { _id: { s: '$subject', c: '$chapter' }, n: { $sum: 1 }, title: { $first: '$title' } } }]),
+    SLSQuestion.aggregate([{ $match: { batchId: batch.name, status: 'published' } }, { $group: { _id: { s: '$subjectId', c: '$chapterId' }, n: { $sum: 1 } } }]),
+  ]);
+  const subjects = [];
+  for (const s of batch.subjects || []) {
+    const chapters = (s.chapters || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+    const nOf = c => notes.filter(r => norm(r._id.s) === norm(s.name) && norm(r._id.c) === norm(c.name));
+    const eOf = c => ex.filter(r => norm(r._id.s) === norm(s.name) && r._id.c === makeChapterId(batch.name, s.name, c.name));
+    const rows = await Promise.all(chapters.map(async c => ({
+      name: c.name,
+      notes: nOf(c).reduce((t, r) => t + r.n, 0),
+      note_title: nOf(c)[0]?.title || '',
+      answers: eOf(c).reduce((t, r) => t + r.n, 0),
+      free: await isChapterIdFree(makeChapterId(batch.name, s.name, c.name)).catch(() => false),
+    })));
+    if (!rows.length) continue;
+    // the demo chapter: the free one with notes and answers, else any with both, else any with something
+    const pick = rows.find(r => r.free && r.notes && r.answers) || rows.find(r => r.notes && r.answers) || rows.find(r => r.notes || r.answers) || null;
+    let sample = null;
+    if (pick?.answers) {
+      const q = await SLSQuestion.findOne({ batchId: batch.name, chapterId: makeChapterId(batch.name, s.name, pick.name), status: 'published' })
+        .sort({ exerciseNo: 1, created_at: 1 }).select('exerciseNo questionText answerText').lean();
+      if (q) sample = {
+        exercise_no: q.exerciseNo || '',
+        question: String(q.questionText?.marathi || q.questionText?.english || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160),
+        answer: String(q.answerText?.marathi || q.answerText?.english || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 260),
+      };
+    }
+    subjects.push({
+      subject: s.name,
+      chapters: rows.length,
+      notes: rows.reduce((t, r) => t + r.notes, 0),
+      answers: rows.reduce((t, r) => t + r.answers, 0),
+      chapters_with_notes: rows.filter(r => r.notes).length,
+      chapters_with_answers: rows.filter(r => r.answers).length,
+      demo_chapter: pick ? { name: pick.name, note_title: pick.note_title, free: pick.free } : null,
+      sample,
+    });
+  }
+  res.json({ success: true, batch: batch.name, subjects });
+});
 
 // Called by attemptController after a guest's test is saved.
 async function noteGuestAttempt(studentCode, quizTitle, pct) {

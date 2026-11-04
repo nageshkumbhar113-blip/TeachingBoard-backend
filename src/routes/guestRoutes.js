@@ -25,5 +25,6 @@ router.post('/admin/exams', requireAdmin, c.adminAddExam);
 router.delete('/admin/exams/:id', requireAdmin, c.adminDeleteExam);
 router.get('/admin/leads',  requireAdmin, c.adminLeads);
 router.get('/admin/funnel', requireAdmin, c.adminFunnel);
+router.get('/admin/ad-content', requireAdmin, c.adminAdContent);
 
 module.exports = router;
