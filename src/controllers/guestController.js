@@ -599,6 +599,20 @@ exports.adminMetaUpload = asyncHandler(async (req, res) => {
   } catch (err) { throw new AppError(err.message, err.status || 400); }
 });
 
+// POST /api/guest/admin/meta/action { action: 'pause' | 'resume', ad_id } | { action: 'budget', adset_id }
+// — the leaderboard's buttons. Budget: +20% at most per press; never pauses the last running ad of an ad set.
+exports.adminMetaAction = asyncHandler(async (req, res) => {
+  if (!META.configured().ok) throw new AppError('Meta जोडलेलं नाही', 400);
+  const b = req.body || {};
+  try {
+    let out;
+    if (b.action === 'pause' || b.action === 'resume') out = await META.setAdStatus(String(b.ad_id || ''), b.action === 'pause' ? 'PAUSED' : 'ACTIVE');
+    else if (b.action === 'budget') out = await META.raiseBudget(String(b.adset_id || ''), 20);
+    else throw new AppError('Unknown action', 400);
+    res.json({ success: true, ...out });
+  } catch (err) { throw new AppError(err.message, err.status || 400); }
+});
+
 // ages for a new ad set: Meta allows 13–65; a pair that makes no sense is ignored
 function _ages(min, max) {
   const a = parseInt(min, 10), z = parseInt(max, 10);

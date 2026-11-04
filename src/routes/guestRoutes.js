@@ -29,5 +29,6 @@ router.get('/admin/ad-content', requireAdmin, c.adminAdContent);
 router.get('/admin/meta', requireAdmin, c.adminMeta);
 router.post('/admin/meta/upload', requireAdmin, c.adminMetaUpload);
 router.post('/admin/meta/ad', requireAdmin, c.adminMetaCreateAd);
+router.post('/admin/meta/action', requireAdmin, c.adminMetaAction);
 
 module.exports = router;

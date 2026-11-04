@@ -82,7 +82,7 @@ const _ist = d => new Date(d.getTime() + 5.5 * 3600e3).toISOString().slice(0, 10
 // per-ad numbers for the last `days` days, keyed by the ad's name (our ad id) in lower case
 let _cache = null;
 async function insights(days = 30) {
-  const key = String(days);
+  const key = `${days}|${env().account}|${env().token.slice(-6)}`;   // new account / token = fresh numbers
   if (_cache && _cache.key === key && Date.now() - _cache.at < 10 * 60e3) return _cache.data;   // ≤ 1 Meta call / 10 min
   const e = env();
   const until = new Date(), since = new Date(Date.now() - (days - 1) * 864e5);
@@ -104,7 +104,7 @@ async function insights(days = 30) {
     t.ads++;
   }
   for (const t of Object.values(byName)) t.spend = Math.round(t.spend * 100) / 100;
-  const data = { days, since: _ist(since), until: _ist(until), by_name: byName, fetched_at: new Date().toISOString() };
+  const data = { days, since: _ist(since), until: _ist(until), by_name: byName, ads: await adsState(), fetched_at: new Date().toISOString() };
   _cache = { key, at: Date.now(), data };
   return data;
 }
@@ -195,4 +195,46 @@ async function createAd(o) {
     manager: `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${e.account.replace(/^act_/, '')}&selected_ad_ids=${ad.id}` };
 }
 
-module.exports = { configured, account, insights, graph, uploadVideo, uploadImage, createAd, _resetCache: () => { _cache = null; _region = null; } };
+// ── phase 4: the admin's buttons — pause / resume an ad, +20% on an ad set's daily budget ──
+// every ad now in the account: status + its ad set's budget, keyed by the ad's name (our ad id)
+async function adsState() {
+  const rows = await graphAll(`${env().account}/ads`, { fields: 'id,name,effective_status,configured_status,adset{id,name,daily_budget}', limit: '500' });
+  const out = {};
+  for (const r of rows) {
+    const k = String(r.name || '').trim().toLowerCase();
+    if (!k) continue;
+    out[k] = { ad_id: r.id, status: r.configured_status || r.effective_status || '', effective: r.effective_status || '',
+      adset_id: r.adset?.id || '', adset: r.adset?.name || '', budget: r.adset?.daily_budget ? Number(r.adset.daily_budget) / 100 : null };
+  }
+  return out;
+}
+const MAX_STEP = 1.2;   // a budget never grows more than 20% in one go
+async function setAdStatus(adId, status) {
+  if (!/^\d+$/.test(String(adId))) throw Object.assign(new Error('Bad ad id'), { status: 400 });
+  if (!['PAUSED', 'ACTIVE'].includes(status)) throw Object.assign(new Error('Bad status'), { status: 400 });
+  const ad = await graph(String(adId), { fields: 'id,name,adset_id,account_id' });
+  if (`act_${ad.account_id}` !== env().account) throw Object.assign(new Error('Not this ad account'), { status: 400 });
+  if (status === 'PAUSED') {
+    // never the last running ad of its ad set: pause the ad set itself in Ads Manager instead
+    const sibs = await graphAll(`${ad.adset_id}/ads`, { fields: 'id,configured_status', limit: '100' });
+    const running = sibs.filter(s => s.configured_status === 'ACTIVE' && s.id !== ad.id);
+    if (!running.length) throw Object.assign(new Error('ही या ad set मधली शेवटची चालू ad आहे — ती बंद केली नाही (हवं तर Ads Manager मध्ये ad set बंद करा)'), { status: 400 });
+  }
+  await post(String(adId), { status });
+  _cache = null;
+  return { ad_id: ad.id, name: ad.name, status };
+}
+async function raiseBudget(adsetId, pct = 20) {
+  if (!/^\d+$/.test(String(adsetId))) throw Object.assign(new Error('Bad ad set id'), { status: 400 });
+  const s = await graph(String(adsetId), { fields: 'id,name,daily_budget,account_id' });
+  if (`act_${s.account_id}` !== env().account) throw Object.assign(new Error('Not this ad account'), { status: 400 });
+  const old = Number(s.daily_budget) || 0;
+  if (!old) throw Object.assign(new Error('या ad set ला रोजचं बजेट नाही (campaign budget?) — Ads Manager मध्ये बदला'), { status: 400 });
+  const step = Math.min(MAX_STEP, 1 + Math.max(1, Math.min(20, Number(pct) || 20)) / 100);
+  const next = Math.round(old * step / 100) * 100;   // whole rupees, in paise
+  await post(String(adsetId), { daily_budget: next });
+  _cache = null;
+  return { adset_id: s.id, name: s.name, from: old / 100, to: next / 100 };
+}
+
+module.exports = { configured, account, insights, graph, uploadVideo, uploadImage, createAd, adsState, setAdStatus, raiseBudget, _resetCache: () => { _cache = null; _region = null; } };
