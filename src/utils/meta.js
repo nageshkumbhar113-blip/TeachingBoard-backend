@@ -171,7 +171,8 @@ async function createAd(o) {
       billing_event: 'IMPRESSIONS', optimization_goal: 'LINK_CLICKS', bid_strategy: 'LOWEST_COST_WITHOUT_CAP', destination_type: 'WEBSITE',
       targeting: {
         geo_locations: region ? { regions: [region], location_types: ['home', 'recent'] } : { countries: ['IN'] },
-        age_min: A.age_min, age_max: A.age_max,
+        // the admin's ages (Admin › Ads), else the audience's
+        age_min: o.age_min || A.age_min, age_max: o.age_max || A.age_max,
         targeting_automation: { advantage_audience: 0 },
       },
     });

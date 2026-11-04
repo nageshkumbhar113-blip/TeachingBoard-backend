@@ -599,6 +599,13 @@ exports.adminMetaUpload = asyncHandler(async (req, res) => {
   } catch (err) { throw new AppError(err.message, err.status || 400); }
 });
 
+// ages for a new ad set: Meta allows 13–65; a pair that makes no sense is ignored
+function _ages(min, max) {
+  const a = parseInt(min, 10), z = parseInt(max, 10);
+  if (!(a >= 13 && z <= 65 && a <= z)) return {};
+  return { age_min: a, age_max: z };
+}
+
 // POST /api/guest/admin/meta/ad — make the ad (campaign per audience, ad set per class+audience),
 // always PAUSED. Re-sending the same ad name does not make a second ad.
 exports.adminMetaCreateAd = asyncHandler(async (req, res) => {
@@ -616,6 +623,7 @@ exports.adminMetaCreateAd = asyncHandler(async (req, res) => {
       video_id: String(b.video_id), image_hash: String(b.image_hash),
       message: String(b.message || '').slice(0, 2000), headline: String(b.headline || '').slice(0, 120),
       cta: b.cta === 'SIGN_UP' ? 'SIGN_UP' : 'LEARN_MORE', link,
+      ..._ages(b.age_min, b.age_max),
     });
     res.json({ success: true, ...out });
   } catch (err) { throw new AppError(err.message, err.status || 400); }
