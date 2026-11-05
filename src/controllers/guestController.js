@@ -143,6 +143,8 @@ exports.createSession = asyncHandler(async (req, res) => {
       ref: src === 'ad' ? _clean(req.body?.ref, 40).toLowerCase().replace(/[^a-z0-9-]/g, '') : _clean(req.body?.ref, 40).toUpperCase(),
       link_batch: _clean(req.body?.link_batch, 120) === batch.name ? batch.name : '',
       steps: ['opened'],
+      // from a Facebook / Instagram ad link (?src=meta&ad=…&fbclid=…): Meta's click id
+      ...(src === 'ad' && req.body?.fbclid ? { fbc: META.fbcOf(req.body.fbclid), ua: String(req.get('user-agent') || '').slice(0, 300) } : {}),
     });
   }
   lead.batch = batch.name;
@@ -579,8 +581,12 @@ exports.adminMeta = asyncHandler(async (req, res) => {
   const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 90);
   try {
     if (req.query.fresh === '1') META._resetCache();
-    const [account, ins] = await Promise.all([META.account(), req.query.check === '1' ? null : META.insights(days)]);
-    res.json({ success: true, connected: true, config: cfg, account, ...(ins || {}) });
+    const since = new Date(Date.now() - days * 864e5);
+    const [account, ins, leads, paid] = await Promise.all([
+      META.account(), req.query.check === '1' ? null : META.insights(days),
+      GuestLead.countDocuments({ capi_lead_at: { $gte: since } }), GuestLead.countDocuments({ capi_paid_at: { $gte: since } }),
+    ]);
+    res.json({ success: true, connected: true, config: { ...cfg, dataset: META.datasetReady() }, account, capi: { leads, paid }, ...(ins || {}) });
   } catch (err) {
     res.json({ success: true, connected: false, config: cfg, error: err.message });
   }
@@ -653,8 +659,28 @@ async function noteGuestAttempt(studentCode, quizTitle, pct) {
     $addToSet: { steps: 'tested' },
     $set: { last_test: String(quizTitle || '').slice(0, 120), last_seen_at: new Date() },
   });
+  // first test of a visitor from a parent / teacher ad → "Lead" to Meta (once)
+  // not for student ads (checked before anything is marked)
+  const cand = await GuestLead.findOne({ gid, source: 'ad', fbc: { $ne: '' }, capi_lead_at: null }, 'ref').lean();
+  const lead = cand && !META.isStudentAd(cand.ref)
+    ? await GuestLead.findOneAndUpdate({ gid, capi_lead_at: null }, { $set: { capi_lead_at: new Date() } }, { new: true }).lean() : null;
+  if (lead) {
+    META.sendEvent({ name: 'Lead', id: `lead-${gid}`, fbc: lead.fbc, ua: lead.ua })
+      .catch(err => console.warn('[meta capi] lead', err.message));
+  }
+}
+
+// After a verified payment: the student's first payment, when they came from a parent ad → "Purchase".
+async function noteAdPurchase(sub) {
+  if (!META.datasetReady() || !sub?.student_code || sub.is_trial || !(Number(sub.amount) > 0)) return;   // amount in rupees
+  const cand = await GuestLead.findOne({ converted_code: sub.student_code, source: 'ad', fbc: { $ne: '' }, capi_paid_at: null }, 'gid ref').lean();
+  if (!cand || META.isStudentAd(cand.ref)) return;
+  const lead = await GuestLead.findOneAndUpdate({ gid: cand.gid, capi_paid_at: null }, { $set: { capi_paid_at: new Date() } }, { new: true }).lean();
+  if (!lead) return;
+  await META.sendEvent({ name: 'Purchase', id: `pay-${sub.razorpay_payment_id || sub._id}`, fbc: lead.fbc, ua: lead.ua, value: Number(sub.amount) });
 }
 
 exports.requireGuest = requireGuest;
 exports.normalizeMobile = normalizeMobile;
 exports.noteGuestAttempt = noteGuestAttempt;
+exports.noteAdPurchase = (sub) => noteAdPurchase(sub).catch(err => console.warn('[meta capi] purchase', err.message));

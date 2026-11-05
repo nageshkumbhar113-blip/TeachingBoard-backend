@@ -14,6 +14,12 @@ const guestLeadSchema = new mongoose.Schema(
     ref:           { type: String, default: '', trim: true },
     // The class in the link they opened (Admin's per-class free link, ?batch=…); '' = picked a class themselves.
     link_batch:    { type: String, default: '', trim: true },
+    // Came from a Facebook / Instagram ad: Meta's click id (fbc = fb.1.<ms>.<fbclid>) and the
+    // browser's user agent — the only things sent to Meta with a result (Conversions API).
+    fbc:           { type: String, default: '', trim: true },
+    ua:            { type: String, default: '', trim: true },
+    capi_lead_at:  { type: Date, default: null },
+    capi_paid_at:  { type: Date, default: null },
     // Funnel steps reached (opened, browsed, engaged, tested, shared_friend,
     // shared_parent, lead, offer_seen, checkout, paid).
     steps:         { type: [String], default: [] },

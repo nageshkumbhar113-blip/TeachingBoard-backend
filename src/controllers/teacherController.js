@@ -141,6 +141,13 @@ exports.registerTeacher = asyncHandler(async (req, res) => {
     pin_hash: User.hashPin(pin),
   });
 
+  // from a teacher ad (?treg=…&ad=…&fbclid=…): tell Meta a registration happened (no personal data)
+  if (req.body.signup_ad && req.body.fbclid) {
+    const META = require('../utils/meta');
+    META.sendEvent({ name: 'CompleteRegistration', id: `treg-${teacherCode}`, fbc: META.fbcOf(req.body.fbclid), ua: String(req.get('user-agent') || '').slice(0, 300) })
+      .catch(err => console.warn('[meta capi] registration', err.message));
+  }
+
   res.status(201).json({
     success: true,
     message: 'Registration received. An admin will contact you; you can log in after approval.',

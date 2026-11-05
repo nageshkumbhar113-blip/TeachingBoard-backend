@@ -155,20 +155,30 @@ async function createAd(o) {
   if (!e.page) throw Object.assign(new Error('Render मध्ये META_PAGE_ID नाही'), { status: 400 });
   const A = AUDIENCE[o.audience];
   if (!A) throw Object.assign(new Error('Unknown audience'), { status: 400 });
-  const existing = await _findByName('ads', o.name);
+  // With a Meta dataset (results sent by our server) ad sets run for the result itself —
+  // a free test given (Lead) / a teacher registered — not for clicks. Never for student ads.
+  const ds = process.env.META_DATASET_ID || '';
+  const conv = !!ds && o.audience !== 'student';
+  const campaignName = conv ? `${A.campaign} · Leads` : A.campaign;
+  const adsetName = conv ? `${o.adset}-lead` : o.adset;
+  const existing = (await graphAll(`${e.account}/ads`, { fields: 'id,name,status,adset{name}', filtering: [{ field: 'name', operator: 'EQUAL', value: o.name }], limit: '25' }))
+    .find(x => x.name === o.name && (!x.adset?.name || x.adset.name === adsetName));
   if (existing) return { exists: true, ad_id: existing.id, status: existing.status };
 
-  let campaign = await _findByName('campaigns', A.campaign);
+  let campaign = await _findByName('campaigns', campaignName);
   if (!campaign) campaign = await post(`${e.account}/campaigns`, {
-    name: A.campaign, objective: 'OUTCOME_TRAFFIC', status: 'PAUSED', special_ad_categories: [], is_adset_budget_sharing_enabled: false,
+    name: campaignName, objective: conv ? 'OUTCOME_LEADS' : 'OUTCOME_TRAFFIC', status: 'PAUSED', special_ad_categories: [], is_adset_budget_sharing_enabled: false,
   });
-  let adset = await _findByName('adsets', o.adset);
+  let adset = await _findByName('adsets', adsetName);
   if (!adset) {
     const region = await _maharashtra();
     adset = await post(`${e.account}/adsets`, {
-      name: o.adset, campaign_id: campaign.id, status: 'PAUSED',
+      name: adsetName, campaign_id: campaign.id, status: 'PAUSED',
       daily_budget: Math.max(100, Math.round(Number(o.daily_budget) || 0)) * 100,   // paise
-      billing_event: 'IMPRESSIONS', optimization_goal: 'LINK_CLICKS', bid_strategy: 'LOWEST_COST_WITHOUT_CAP', destination_type: 'WEBSITE',
+      billing_event: 'IMPRESSIONS', bid_strategy: 'LOWEST_COST_WITHOUT_CAP', destination_type: 'WEBSITE',
+      ...(conv
+        ? { optimization_goal: 'OFFSITE_CONVERSIONS', promoted_object: { pixel_id: ds, custom_event_type: o.audience === 'parent' ? 'LEAD' : 'COMPLETE_REGISTRATION' } }
+        : { optimization_goal: 'LINK_CLICKS' }),
       targeting: {
         geo_locations: region ? { regions: [region], location_types: ['home', 'recent'] } : { countries: ['IN'] },
         // the admin's ages (Admin › Ads), else the audience's
@@ -195,6 +205,28 @@ async function createAd(o) {
     manager: `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${e.account.replace(/^act_/, '')}&selected_ad_ids=${ad.id}` };
 }
 
+// ── phase 3: Conversions API — our server tells Meta "this ad click led to a result" ──
+// Only the click id Meta put in the link (fbc) and the browser's user agent go with it: no name,
+// phone, marks or class. Never for ads aimed at students. Fire-and-forget: a failure is logged,
+// never shown to the visitor.
+const STUDENT_VARIANTS = ['challenge', 'rank', 'beat', 'r-shw', 'r-srev'];
+const isStudentAd = adId => STUDENT_VARIANTS.some(v => String(adId || '').endsWith('-' + v));
+function datasetReady() { return !!process.env.META_DATASET_ID && configured().ok; }
+async function sendEvent({ name, id, fbc, ua, url, value }) {
+  if (!datasetReady() || !fbc) return { skipped: true };
+  const ev = {
+    event_name: name, event_time: Math.floor(Date.now() / 1000), event_id: id,
+    action_source: 'website', event_source_url: url || 'https://teachingboard-frontend.vercel.app/student-app/',
+    user_data: { fbc, ...(ua ? { client_user_agent: ua } : {}) },
+    ...(value ? { custom_data: { value: Number(value), currency: 'INR' } } : {}),
+  };
+  return post(`${process.env.META_DATASET_ID}/events`, {
+    data: [ev], ...(process.env.META_TEST_EVENT_CODE ? { test_event_code: process.env.META_TEST_EVENT_CODE } : {}),
+  });
+}
+// fbclid from the ad link → fbc
+const fbcOf = fbclid => { const c = String(fbclid || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 300); return c ? `fb.1.${Date.now()}.${c}` : ''; };
+
 // ── phase 4: the admin's buttons — pause / resume an ad, +20% on an ad set's daily budget ──
 // every ad now in the account: status + its ad set's budget, keyed by the ad's name (our ad id)
 async function adsState() {
@@ -203,6 +235,8 @@ async function adsState() {
   for (const r of rows) {
     const k = String(r.name || '').trim().toLowerCase();
     if (!k) continue;
+    // the same ad name in a clicks and a results ad set: the running one wins
+    if (out[k] && out[k].status === 'ACTIVE' && (r.configured_status || r.effective_status) !== 'ACTIVE') continue;
     out[k] = { ad_id: r.id, status: r.configured_status || r.effective_status || '', effective: r.effective_status || '',
       adset_id: r.adset?.id || '', adset: r.adset?.name || '', budget: r.adset?.daily_budget ? Number(r.adset.daily_budget) / 100 : null };
   }
@@ -245,4 +279,4 @@ async function raiseBudget(adsetId, pct = 20) {
   return { adset_id: s.id, name: s.name, from: old / 100, to: next / 100 };
 }
 
-module.exports = { configured, account, insights, graph, uploadVideo, uploadImage, createAd, adsState, setAdStatus, raiseBudget, _resetCache: () => { _cache = null; _region = null; } };
+module.exports = { configured, account, insights, graph, uploadVideo, uploadImage, createAd, adsState, setAdStatus, raiseBudget, sendEvent, fbcOf, isStudentAd, datasetReady, _resetCache: () => { _cache = null; _region = null; } };
