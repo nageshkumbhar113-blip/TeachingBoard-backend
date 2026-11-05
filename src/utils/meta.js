@@ -210,7 +210,8 @@ async function createAd(o) {
 // phone, marks or class. Never for ads aimed at students. Fire-and-forget: a failure is logged,
 // never shown to the visitor.
 const STUDENT_VARIANTS = ['challenge', 'rank', 'beat', 'r-shw', 'r-srev'];
-const isStudentAd = adId => STUDENT_VARIANTS.some(v => String(adId || '').endsWith('-' + v));
+const PARENT_ENDINGS = ['-demo-rank'];   // parent ads whose name also ends like a student ad
+const isStudentAd = adId => !PARENT_ENDINGS.some(e => String(adId || '').endsWith(e)) && STUDENT_VARIANTS.some(v => String(adId || '').endsWith('-' + v));
 function datasetReady() { return !!process.env.META_DATASET_ID && configured().ok; }
 async function sendEvent({ name, id, fbc, ua, url, value }) {
   if (!datasetReady() || !fbc) return { skipped: true };
