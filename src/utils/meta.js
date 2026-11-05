@@ -227,7 +227,7 @@ async function sendEvent({ name, id, fbc, ua, url, value }) {
   if (!datasetReady() || !fbc) return { skipped: true };
   const ev = {
     event_name: name, event_time: Math.floor(Date.now() / 1000), event_id: id,
-    action_source: 'website', event_source_url: url || 'https://teachingboard-frontend.vercel.app/student-app/',
+    action_source: 'website', event_source_url: url || `${process.env.PUBLIC_SITE_URL || 'https://teachingboard-frontend.vercel.app'}/student-app/`,   // PUBLIC_SITE_URL=https://nkseduorbit.in once live
     user_data: { fbc, ...(ua ? { client_user_agent: ua } : {}) },
     ...(value ? { custom_data: { value: Number(value), currency: 'INR' } } : {}),
   };

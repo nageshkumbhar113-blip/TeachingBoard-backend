@@ -635,7 +635,7 @@ exports.adminMetaCreateAd = asyncHandler(async (req, res) => {
   const adset = _clean(b.adset, 80).toLowerCase().replace(/[^a-z0-9-]/g, '');
   const link = String(b.link || '');
   if (!name || !adset) throw new AppError('Ad name missing', 400);
-  if (!/^https:\/\/teachingboard-frontend\.vercel\.app\//.test(link)) throw new AppError('Link must be the app link', 400);
+  if (!/^https:\/\/(nkseduorbit\.in|www\.nkseduorbit\.in|teachingboard-frontend\.vercel\.app)\//.test(link)) throw new AppError('Link must be the app link', 400);   // new domain + the old address
   if (!/^\d+$/.test(String(b.video_id || '')) || !b.image_hash) throw new AppError('Video / thumbnail missing', 400);
   try {
     const out = await META.createAd({
