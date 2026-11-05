@@ -109,13 +109,17 @@ async function insights(days = 30) {
   const key = `${days}|${env().customer}|${env().refresh.slice(-6)}`;
   if (_cache && _cacheKey === key && Date.now() - _cacheAt < 10 * 60 * 1000) return _cache;
   const until = new Date(), since = new Date(Date.now() - (days - 1) * 864e5);
-  const [stats, state] = await Promise.all([
+  // the budget can't be read FROM ad_group_ad — it comes FROM campaign (by campaign id)
+  const [stats, state, camps] = await Promise.all([
     search(`SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.final_urls, metrics.cost_micros, metrics.impressions, metrics.video_trueview_views, metrics.clicks
             FROM ad_group_ad WHERE segments.date BETWEEN '${_day(since)}' AND '${_day(until)}'`),
     search(`SELECT ad_group_ad.resource_name, ad_group_ad.status, ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.final_urls,
-                   ad_group.id, ad_group.name, campaign.id, campaign.name, campaign.status, campaign_budget.resource_name, campaign_budget.amount_micros
+                   ad_group.id, ad_group.name, campaign.id, campaign.name, campaign.status
             FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED'`),
+    search(`SELECT campaign.id, campaign_budget.resource_name, campaign_budget.amount_micros
+            FROM campaign WHERE campaign.status != 'REMOVED'`),
   ]);
+  const budgetOf = new Map(camps.map(r => [String(r.campaign?.id || ''), r.campaignBudget || {}]));
   const by_name = {};
   for (const r of stats) {
     const id = adIdOf(r.adGroupAd?.ad);
@@ -130,10 +134,11 @@ async function insights(days = 30) {
   for (const r of state) {
     const id = adIdOf(r.adGroupAd?.ad);
     if (!id) continue;
+    const b = budgetOf.get(String(r.campaign?.id || '')) || {};
     ads[id] = {
       ad: r.adGroupAd?.resourceName || '', status: r.adGroupAd?.status || '',
       adgroup: r.adGroup?.name || '', campaign: r.campaign?.name || '', campaign_id: String(r.campaign?.id || ''), campaign_status: r.campaign?.status || '',
-      budget: micros(r.campaignBudget?.amountMicros), budget_id: r.campaignBudget?.resourceName || '',
+      budget: micros(b.amountMicros), budget_id: b.resourceName || '',
     };
   }
   _cache = { since: _day(since), until: _day(until), by_name, ads }; _cacheAt = Date.now(); _cacheKey = key;
