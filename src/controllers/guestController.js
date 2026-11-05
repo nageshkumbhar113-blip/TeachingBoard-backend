@@ -584,7 +584,7 @@ exports.adminMeta = asyncHandler(async (req, res) => {
     const since = new Date(Date.now() - days * 864e5);
     const [account, ins, leads, paid] = await Promise.all([
       META.account(), req.query.check === '1' ? null : META.insights(days),
-      GuestLead.countDocuments({ capi_lead_at: { $gte: since } }), GuestLead.countDocuments({ capi_paid_at: { $gte: since } }),
+      GuestLead.countDocuments({ capi_lead_at: { $gte: since } }), 0,
     ]);
     res.json({ success: true, connected: true, config: { ...cfg, dataset: META.datasetReady() }, account, capi: { leads, paid }, ...(ins || {}) });
   } catch (err) {
@@ -670,7 +670,8 @@ async function noteGuestAttempt(studentCode, quizTitle, pct) {
   }
 }
 
-// After a verified payment: the student's first payment, when they came from a parent ad → "Purchase".
+// "Purchase" (a payment) is NOT sent to Meta — the admin chose Lead only (2026-11-05). Kept for a
+// later decision; nothing calls it.
 async function noteAdPurchase(sub) {
   if (!META.datasetReady() || !sub?.student_code || sub.is_trial || !(Number(sub.amount) > 0)) return;   // amount in rupees
   const cand = await GuestLead.findOne({ converted_code: sub.student_code, source: 'ad', fbc: { $ne: '' }, capi_paid_at: null }, 'gid ref').lean();

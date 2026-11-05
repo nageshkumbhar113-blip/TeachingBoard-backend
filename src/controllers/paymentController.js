@@ -248,7 +248,6 @@ exports.verifyPayment = asyncHandler(async (req, res) => {
   await activateStudentForBatch(student, sub.batch, expiry);
 
   await recordCommissionForPayment(sub, student);
-  require('./guestController').noteAdPurchase(sub);   // Meta: a paid student from an ad (no personal data)
 
   res.json({ success: true, message: 'Payment verified', student: { status: student.status, expiry_date: student.expiry_date } });
 });
@@ -299,7 +298,6 @@ exports.verifyPaymentPublic = asyncHandler(async (req, res) => {
   await activateStudentForBatch(student, sub.batch, expiry);
 
   await recordCommissionForPayment(sub, student);
-  require('./guestController').noteAdPurchase(sub);   // Meta: a paid student from an ad (no personal data)
 
   res.json({ success: true, message: 'Payment verified' });
 });
@@ -377,7 +375,6 @@ exports.webhook = asyncHandler(async (req, res) => {
     await activateStudentForBatch(student, sub.batch, expiry);
 
     await recordCommissionForPayment(sub, student);
-  require('./guestController').noteAdPurchase(sub);   // Meta: a paid student from an ad (no personal data)
 
     return res.status(200).json({ success: true, message: 'Payment processed' });
   }
