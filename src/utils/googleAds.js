@@ -7,7 +7,8 @@
 // sits in its link (&ad=yt-…), which is how numbers are matched.
 //
 // Settings live only on the server (Render environment) — never in the browser or the chat:
-//   GOOGLE_ADS_DEVELOPER_TOKEN   from the Google Ads API Center
+//   GOOGLE_ADS_DEVELOPER_TOKEN   optional — Google retired developer tokens on 2026-09-09: API access now belongs to the
+//                                Google Cloud project of the OAuth client (Test → apply for Basic there). Sent only if set.
 //   GOOGLE_ADS_CLIENT_ID         OAuth client (Google Cloud project)
 //   GOOGLE_ADS_CLIENT_SECRET
 //   GOOGLE_ADS_REFRESH_TOKEN     OAuth refresh token of the Google account that runs the ads
@@ -16,7 +17,7 @@
 //   GOOGLE_ADS_LEAD_ACTION_ID    optional: conversion action (Import › clicks) for "Lead"
 //   GOOGLE_ADS_API_VERSION       optional, default below — set it to the current version when connecting
 //   GOOGLE_ADS_URL / GOOGLE_OAUTH_URL   tests only (local fakes)
-const VERSION = 'v22';
+const VERSION = 'v23';   // v23 is supported until about Feb 2027 — set GOOGLE_ADS_API_VERSION to the current one when connecting
 
 const digits = s => String(s || '').replace(/\D/g, '');
 const env = () => ({
@@ -34,7 +35,7 @@ const env = () => ({
 function configured() {
   const e = env();
   return {
-    ok: !!(e.dev && e.clientId && e.clientSecret && e.refresh && e.customer),
+    ok: !!(e.clientId && e.clientSecret && e.refresh && e.customer),
     developer_token: !!e.dev, oauth: !!(e.clientId && e.clientSecret && e.refresh), customer: !!e.customer,
     manager: !!e.login, lead_action: !!e.leadAction, version: process.env.GOOGLE_ADS_API_VERSION || VERSION,
   };
@@ -58,7 +59,8 @@ async function _token() {
 }
 async function _call(path, payload) {
   const e = env();
-  const headers = { Authorization: `Bearer ${await _token()}`, 'developer-token': e.dev, 'Content-Type': 'application/json' };
+  const headers = { Authorization: `Bearer ${await _token()}`, 'Content-Type': 'application/json' };
+  if (e.dev) headers['developer-token'] = e.dev;   // no longer needed (access = the Cloud project), harmless while Google still accepts it
   if (e.login) headers['login-customer-id'] = e.login;
   const res = await fetch(`${e.base}/customers/${e.customer}${path}`, { method: 'POST', headers, body: JSON.stringify(payload), signal: AbortSignal.timeout(30000) });
   const body = await res.json().catch(() => ({}));
