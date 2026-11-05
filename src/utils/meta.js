@@ -158,21 +158,31 @@ async function createAd(o) {
   // With a Meta dataset (results sent by our server) ad sets run for the result itself —
   // a free test given (Lead) / a teacher registered — not for clicks. Never for student ads.
   const ds = process.env.META_DATASET_ID || '';
-  const conv = !!ds && o.audience !== 'student';
-  const campaignName = conv ? `${A.campaign} · Leads` : A.campaign;
-  const adsetName = conv ? `${o.adset}-lead` : o.adset;
+  let conv = !!ds && o.audience !== 'student', note = '';
+  let campaignName = conv ? `${A.campaign} · Leads` : A.campaign;
+  let adsetName = conv ? `${o.adset}-lead` : o.adset;
   const existing = (await graphAll(`${e.account}/ads`, { fields: 'id,name,status,adset{name}', filtering: [{ field: 'name', operator: 'EQUAL', value: o.name }], limit: '25' }))
     .find(x => x.name === o.name && (!x.adset?.name || x.adset.name === adsetName));
   if (existing) return { exists: true, ad_id: existing.id, status: existing.status };
 
-  let campaign = await _findByName('campaigns', campaignName);
-  if (!campaign) campaign = await post(`${e.account}/campaigns`, {
+  const makeCampaign = async () => (await _findByName('campaigns', campaignName)) || post(`${e.account}/campaigns`, {
     name: campaignName, objective: conv ? 'OUTCOME_LEADS' : 'OUTCOME_TRAFFIC', status: 'PAUSED', special_ad_categories: [], is_adset_budget_sharing_enabled: false,
   });
-  let adset = await _findByName('adsets', adsetName);
-  if (!adset) {
+  let campaign, adset;
+  try {
+    campaign = await makeCampaign();
+    adset = await _findByName('adsets', adsetName) || await makeAdset();
+  } catch (err) {
+    if (!conv) throw err;
+    // Meta would not make a "Free test" (Lead) ad set — run this one for clicks and say why
+    note = `Meta ने "Free test" वर ad set बनवू दिला नाही (${err.message}) — हा ad set click वर बनवला`;
+    conv = false; campaignName = A.campaign; adsetName = o.adset;
+    campaign = await makeCampaign();
+    adset = await _findByName('adsets', adsetName) || await makeAdset();
+  }
+  async function makeAdset() {
     const region = await _maharashtra();
-    adset = await post(`${e.account}/adsets`, {
+    return post(`${e.account}/adsets`, {
       name: adsetName, campaign_id: campaign.id, status: 'PAUSED',
       daily_budget: Math.max(100, Math.round(Number(o.daily_budget) || 0)) * 100,   // paise
       billing_event: 'IMPRESSIONS', bid_strategy: 'LOWEST_COST_WITHOUT_CAP', destination_type: 'WEBSITE',
@@ -188,7 +198,7 @@ async function createAd(o) {
     });
   }
   const ready = await _videoReady(o.video_id);
-  if (!ready) return { pending: true, campaign_id: campaign.id, adset_id: adset.id };
+  if (!ready) return { pending: true, campaign_id: campaign.id, adset_id: adset.id, note };
   const creative = await post(`${e.account}/adcreatives`, {
     name: o.name,
     object_story_spec: {
@@ -201,7 +211,7 @@ async function createAd(o) {
     },
   });
   const ad = await post(`${e.account}/ads`, { name: o.name, adset_id: adset.id, creative: { creative_id: creative.id }, status: 'PAUSED' });
-  return { created: true, ad_id: ad.id, adset_id: adset.id, campaign_id: campaign.id, creative_id: creative.id,
+  return { created: true, mode: conv ? 'lead' : 'clicks', note, ad_id: ad.id, adset_id: adset.id, campaign_id: campaign.id, creative_id: creative.id,
     manager: `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${e.account.replace(/^act_/, '')}&selected_ad_ids=${ad.id}` };
 }
 
@@ -269,8 +279,10 @@ async function setAdStatus(adId, status) {
 }
 async function raiseBudget(adsetId, pct = 20) {
   if (!/^\d+$/.test(String(adsetId))) throw Object.assign(new Error('Bad ad set id'), { status: 400 });
-  const s = await graph(String(adsetId), { fields: 'id,name,daily_budget,account_id' });
+  const s = await graph(String(adsetId), { fields: 'id,name,daily_budget,account_id,updated_time' });
   if (`act_${s.account_id}` !== env().account) throw Object.assign(new Error('Not this ad account'), { status: 400 });
+  const quietH = (Date.now() - new Date(s.updated_time || 0).getTime()) / 3600e3;
+  if (s.updated_time && quietH < 72) throw Object.assign(new Error(`हा ad set ${Math.floor(quietH)} तासांपूर्वी बदलला / चालू केला — Meta शिकत आहे. अजून ${Math.ceil(72 - quietH)} तासांनी +20% करा.`), { status: 400 });
   const old = Number(s.daily_budget) || 0;
   if (!old) throw Object.assign(new Error('या ad set ला रोजचं बजेट नाही (campaign budget?) — Ads Manager मध्ये बदला'), { status: 400 });
   const step = Math.min(MAX_STEP, 1 + Math.max(1, Math.min(20, Number(pct) || 20)) / 100);
