@@ -160,6 +160,12 @@ async function generateEvent(schedule, startsAt, { trial = false } = {}) {
 async function _generatePaperEvent(schedule, startsAt, { trial = false } = {}) {
   const papers = schedule.papers;
   let idx = schedule.next_paper_index || 0, paper = null, built = null;
+  // the turn follows the last real test (MAT → SAT → MAT…), so a lost or doubled step can't repeat a paper
+  if (!trial) {
+    const last = await WeeklyEvent.findOne({ schedule_id: String(schedule._id), is_trial: { $ne: true }, starts_at: { $lt: startsAt } }, 'subject').sort({ starts_at: -1 }).lean();
+    const at = last ? papers.findIndex(p => p.name === last.subject) : -1;
+    if (at >= 0) idx = at + 1;
+  }
   for (let tries = 0; tries < papers.length; tries++) {
     const p = papers[idx % papers.length];
     idx++;
@@ -179,9 +185,27 @@ async function _generatePaperEvent(schedule, startsAt, { trial = false } = {}) {
   return WeeklyEvent.create({ ...base, questions: built.questions, key_b64: crypto.randomBytes(32).toString('base64') });
 }
 
+// One at a time: the scheduler tick and an admin's Save both make the next test; run together
+// they each saw "nothing pending" and made one (two महा-Tests at the same time). Everything that
+// makes or remakes a real test goes through this queue.
+let _queue = Promise.resolve();
+function withScheduleLock(fn) {
+  const run = _queue.then(fn);
+  _queue = run.catch(() => {});
+  return run;
+}
+// an admin changed a schedule: its not-yet-started test is made again with the new settings
+function remakeUpcoming(scheduleId) {
+  return withScheduleLock(async () => {
+    await WeeklyEvent.deleteMany({ schedule_id: String(scheduleId), is_trial: { $ne: true }, starts_at: { $gt: new Date() } });
+    await _ensureUpcoming();
+  });
+}
+
 // Every enabled schedule has its next event ready (made up to 7 days ahead,
 // so phones can download the paper early). Called by the scheduler tick.
-async function ensureUpcoming(now = new Date()) {
+function ensureUpcoming(now = new Date()) { return withScheduleLock(() => _ensureUpcoming(now)); }
+async function _ensureUpcoming(now = new Date()) {
   const schedules = await WeeklySchedule.find({ enabled: true }).lean();
   for (const s of schedules) {
     const pending = await WeeklyEvent.exists({ schedule_id: String(s._id), is_trial: false, ends_at: { $gt: now } });
@@ -266,4 +290,4 @@ async function finalizeDue(now = new Date()) {
   for (const e of due) if (revealOf(e) <= now) await finalizeIfDue(e, now).catch(err => console.warn('weekly finalize failed:', err.message));
 }
 
-module.exports = { hiddenCodes, revealAt, revealOf, nextStart, questionPool, buildPaper, generateEvent, ensureUpcoming, encryptPaper, grade, isCorrect, finalizeIfDue, finalizeDue };
+module.exports = { hiddenCodes, revealAt, revealOf, nextStart, questionPool, buildPaper, generateEvent, ensureUpcoming, remakeUpcoming, withScheduleLock, encryptPaper, grade, isCorrect, finalizeIfDue, finalizeDue };

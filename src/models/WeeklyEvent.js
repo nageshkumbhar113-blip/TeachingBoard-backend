@@ -58,4 +58,7 @@ const weeklyEventSchema = new mongoose.Schema(
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }, versionKey: false }
 );
 
+// never two real tests of one schedule at the same start time (built when the data has none)
+weeklyEventSchema.index({ schedule_id: 1, starts_at: 1 }, { unique: true, partialFilterExpression: { is_trial: false } });
+
 module.exports = mongoose.models.WeeklyEvent || mongoose.model('WeeklyEvent', weeklyEventSchema);

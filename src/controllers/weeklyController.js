@@ -241,8 +241,7 @@ exports.adminSaveSchedule = asyncHandler(async (req, res) => {
     : await WeeklySchedule.create(body);
   if (!s) throw new AppError('Not found', 404);
   // timing / content changed → the not-yet-started event is made again with the new settings
-  await WeeklyEvent.deleteMany({ schedule_id: String(s._id), is_trial: { $ne: true }, starts_at: { $gt: new Date() } });
-  if (s.enabled) await W.ensureUpcoming();
+  await W.remakeUpcoming(s._id);   // (in the same queue as the scheduler tick — never two tests at once)
   res.status(req.params.id ? 200 : 201).json({ success: true, data: s });
 });
 
