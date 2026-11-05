@@ -173,6 +173,7 @@ app.use("/api/payment",          paymentRoutes);
 app.use("/api/partners",         require("./routes/partnerRoutes"));
 app.use("/api/referrals",        require("./routes/referralRoutes"));
 app.use("/api/guest",            require("./routes/guestRoutes"));
+app.use("/api/site",             require("./routes/siteRoutes"));   // Admin › Site / Exams + the public exam pages' data
 app.use("/api/weekly",           require("./routes/weeklyRoutes"));
 app.use("/api/shop",             require("./routes/shopRoutes"));
 app.use("/api/usage",            require("./routes/usageRoutes"));
