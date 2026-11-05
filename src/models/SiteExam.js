@@ -21,6 +21,7 @@ const siteExamSchema = new mongoose.Schema(
     group:       { type: String, enum: ['school', 'senior'], default: 'school' },   // landing-page tab
     name:        { type: String, required: true, trim: true, maxlength: 80 },        // "NMMS (8वी)"
     name_en:     { type: String, trim: true, maxlength: 80, default: '' },
+    full_name:   { type: String, trim: true, maxlength: 200, default: '' },        // the long official name (shown under the heading)
     class_label: { type: String, trim: true, maxlength: 40, default: '' },           // "8वी"
     purpose:     { type: String, trim: true, maxlength: 400, default: '' },          // one paragraph
     benefit:     { type: String, trim: true, maxlength: 80, default: '' },           // short: "₹48,000 शिष्यवृत्ती"

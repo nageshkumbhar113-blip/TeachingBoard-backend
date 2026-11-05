@@ -13,7 +13,7 @@ const { isQuizLocked } = require('../utils/contentAccess');
 const SEED = require('../data/siteExamsSeed');
 
 const STALE_DAYS = 180;
-const FIELDS = ['order', 'group', 'name', 'name_en', 'class_label', 'purpose', 'benefit', 'eligibility', 'pattern', 'syllabus',
+const FIELDS = ['order', 'group', 'name', 'name_en', 'full_name', 'class_label', 'purpose', 'benefit', 'eligibility', 'pattern', 'syllabus',
   'official_url', 'dates', 'faq', 'batch', 'animation', 'ad_loss_mr', 'ad_loss_en', 'enabled'];
 const _txt = (s, n) => String(s ?? '').replace(/\r\n/g, '\n').trim().slice(0, n);
 
@@ -72,7 +72,7 @@ function _clean(body) {
     } else if (k === 'faq') {
       o.faq = (Array.isArray(v) ? v : []).slice(0, 12).map(f => ({ q: _txt(f?.q, 200), a: _txt(f?.a, 1200) })).filter(f => f.q && f.a);
     } else {
-      const max = { name: 80, name_en: 80, class_label: 40, purpose: 400, benefit: 80, eligibility: 1500, pattern: 2000, syllabus: 2000, batch: 120, ad_loss_mr: 80, ad_loss_en: 80 }[k];
+      const max = { name: 80, name_en: 80, full_name: 200, class_label: 40, purpose: 400, benefit: 80, eligibility: 1500, pattern: 2000, syllabus: 2000, batch: 120, ad_loss_mr: 80, ad_loss_en: 80 }[k];
       o[k] = _txt(v, max);
     }
   }
