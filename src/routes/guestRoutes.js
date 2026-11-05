@@ -30,5 +30,7 @@ router.get('/admin/meta', requireAdmin, c.adminMeta);
 router.post('/admin/meta/upload', requireAdmin, c.adminMetaUpload);
 router.post('/admin/meta/ad', requireAdmin, c.adminMetaCreateAd);
 router.post('/admin/meta/action', requireAdmin, c.adminMetaAction);
+router.get('/admin/google', requireAdmin, c.adminGoogle);
+router.post('/admin/google/action', requireAdmin, c.adminGoogleAction);
 
 module.exports = router;

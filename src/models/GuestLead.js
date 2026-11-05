@@ -20,6 +20,12 @@ const guestLeadSchema = new mongoose.Schema(
     ua:            { type: String, default: '', trim: true },
     capi_lead_at:  { type: Date, default: null },
     capi_paid_at:  { type: Date, default: null },
+    // Came from a Google / YouTube ad: Google's click id (one of the three) — the only thing sent
+    // back to Google with a "Lead" (offline click conversion).
+    gclid:         { type: String, default: '', trim: true },
+    gbraid:        { type: String, default: '', trim: true },
+    wbraid:        { type: String, default: '', trim: true },
+    gads_lead_at:  { type: Date, default: null },
     // Funnel steps reached (opened, browsed, engaged, tested, shared_friend,
     // shared_parent, lead, offer_seen, checkout, paid).
     steps:         { type: [String], default: [] },

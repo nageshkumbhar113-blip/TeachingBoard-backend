@@ -147,6 +147,12 @@ exports.registerTeacher = asyncHandler(async (req, res) => {
     META.sendEvent({ name: 'CompleteRegistration', id: `treg-${teacherCode}`, fbc: META.fbcOf(req.body.fbclid), ua: String(req.get('user-agent') || '').slice(0, 300) })
       .catch(err => console.warn('[meta capi] registration', err.message));
   }
+  // …and to Google for a teacher who came from a YouTube ad (&gclid=…)
+  if (req.body.signup_ad) {
+    const GADS = require('../utils/googleAds');
+    const click = GADS.clickOf(req.body);
+    if (Object.keys(click).length) GADS.sendLead(click).catch(err => console.warn('[google ads] registration', err.message));
+  }
 
   res.status(201).json({
     success: true,

@@ -16,6 +16,7 @@ const { isQuizLocked } = require('../utils/contentAccess');
 const CommissionEntry = require('../models/CommissionEntry');
 const Note = require('../models/Note');
 const META = require('../utils/meta');
+const GADS = require('../utils/googleAds');
 const SLSQuestion = require('../models/SLSQuestion');
 const { isChapterIdFree, makeChapterId } = require('../utils/contentAccess');
 
@@ -145,6 +146,8 @@ exports.createSession = asyncHandler(async (req, res) => {
       steps: ['opened'],
       // from a Facebook / Instagram ad link (?src=meta&ad=…&fbclid=…): Meta's click id
       ...(src === 'ad' && req.body?.fbclid ? { fbc: META.fbcOf(req.body.fbclid), ua: String(req.get('user-agent') || '').slice(0, 300) } : {}),
+      // from a Google / YouTube ad link (?src=yt&ad=yt-…&gclid=…): Google's click id
+      ...(src === 'ad' ? GADS.clickOf(req.body) : {}),
     });
   }
   lead.batch = batch.name;
@@ -627,6 +630,38 @@ exports.adminMetaAction = asyncHandler(async (req, res) => {
   } catch (err) { throw new AppError(err.message, err.status || 400); }
 });
 
+// GET /api/guest/admin/google?days=30 — Google Ads (YouTube ads): connected?, the account, and each
+// ad's spend / views / clicks keyed by our ad id (yt-…). The tokens stay on the server.
+exports.adminGoogle = asyncHandler(async (req, res) => {
+  const cfg = GADS.configured();
+  if (!cfg.ok) return res.json({ success: true, connected: false, config: cfg });
+  const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 90);
+  try {
+    if (req.query.fresh === '1') GADS._resetCache();
+    const since = new Date(Date.now() - days * 864e5);
+    const [account, ins, leads] = await Promise.all([
+      GADS.account(), req.query.check === '1' ? null : GADS.insights(days),
+      GuestLead.countDocuments({ gads_lead_at: { $gte: since } }),
+    ]);
+    res.json({ success: true, connected: true, config: cfg, account, leads, ...(ins || {}) });
+  } catch (err) {
+    res.json({ success: true, connected: false, config: cfg, error: err.message });
+  }
+});
+
+// POST /api/guest/admin/google/action { action: 'pause'|'resume', ad } | { action: 'budget', budget }
+exports.adminGoogleAction = asyncHandler(async (req, res) => {
+  if (!GADS.configured().ok) throw new AppError('Google Ads जोडलेलं नाही', 400);
+  const b = req.body || {};
+  try {
+    let out;
+    if (b.action === 'pause' || b.action === 'resume') out = await GADS.setAdStatus(String(b.ad || ''), b.action === 'resume');
+    else if (b.action === 'budget') out = await GADS.raiseBudget(String(b.budget || ''));
+    else throw new AppError('Unknown action', 400);
+    res.json({ success: true, ...out });
+  } catch (err) { throw new AppError(err.message, err.status || 400); }
+});
+
 // ages for a new ad set: Meta allows 13–65; a pair that makes no sense is ignored
 function _ages(min, max) {
   const a = parseInt(min, 10), z = parseInt(max, 10);
@@ -675,6 +710,14 @@ async function noteGuestAttempt(studentCode, quizTitle, pct) {
   if (lead) {
     META.sendEvent({ name: 'Lead', id: `lead-${gid}`, fbc: lead.fbc, ua: lead.ua })
       .catch(err => console.warn('[meta capi] lead', err.message));
+  }
+  // the same for a Google / YouTube ad: a "Lead" with Google's click id (once; not for student ads)
+  if (GADS.leadReady()) {
+    const g = await GuestLead.findOne({ gid, source: 'ad', gads_lead_at: null, $or: [{ gclid: { $ne: '' } }, { gbraid: { $ne: '' } }, { wbraid: { $ne: '' } }] }, 'ref gclid gbraid wbraid').lean();
+    if (g && !META.isStudentAd(String(g.ref || '').replace(/^yt-/, ''))) {
+      const won = await GuestLead.findOneAndUpdate({ gid, gads_lead_at: null }, { $set: { gads_lead_at: new Date() } }, { new: true }).lean();
+      if (won) GADS.sendLead(GADS.clickOf(won)).catch(err => console.warn('[google ads] lead', err.message));
+    }
   }
 }
 
