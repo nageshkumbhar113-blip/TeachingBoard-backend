@@ -110,7 +110,7 @@ async function insights(days = 30) {
   if (_cache && _cacheKey === key && Date.now() - _cacheAt < 10 * 60 * 1000) return _cache;
   const until = new Date(), since = new Date(Date.now() - (days - 1) * 864e5);
   const [stats, state] = await Promise.all([
-    search(`SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.final_urls, metrics.cost_micros, metrics.impressions, metrics.video_views, metrics.clicks
+    search(`SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.final_urls, metrics.cost_micros, metrics.impressions, metrics.video_trueview_views, metrics.clicks
             FROM ad_group_ad WHERE segments.date BETWEEN '${_day(since)}' AND '${_day(until)}'`),
     search(`SELECT ad_group_ad.resource_name, ad_group_ad.status, ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.final_urls,
                    ad_group.id, ad_group.name, campaign.id, campaign.name, campaign.status, campaign_budget.resource_name, campaign_budget.amount_micros
@@ -122,7 +122,8 @@ async function insights(days = 30) {
     if (!id) continue;
     const o = by_name[id] = by_name[id] || { name: id, spend: 0, impressions: 0, views: 0, clicks: 0 };
     o.spend += micros(r.metrics?.costMicros); o.impressions += Number(r.metrics?.impressions) || 0;
-    o.views += Number(r.metrics?.videoViews) || 0; o.clicks += Number(r.metrics?.clicks) || 0;
+    o.views += Number(r.metrics?.videoTrueviewViews ?? r.metrics?.videoViews) || 0;   // "video_views" became "video_trueview_views" in v22
+    o.clicks += Number(r.metrics?.clicks) || 0;
   }
   for (const o of Object.values(by_name)) o.spend = Math.round(o.spend * 100) / 100;
   const ads = {};
