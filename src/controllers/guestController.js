@@ -27,7 +27,7 @@ const { isChapterIdFree, makeChapterId } = require('../utils/contentAccess');
 const OFFER_PERCENT = 50;
 const OFFER_HOURS = 12;
 // 'ad' = a Facebook / Instagram ad's link (ref = the ad's id, Admin › Sync › Ads)
-const SOURCES = new Set(['admin', 'friend', 'teacher', 'student', 'shop', 'ad']);
+const SOURCES = new Set(['admin', 'friend', 'teacher', 'student', 'shop', 'ad', 'web']);
 const EVENT_STEPS = new Set(['browsed', 'engaged', 'shared_friend', 'shared_parent', 'offer_seen', 'checkout']);
 
 const _clean = (v, max = 60) => String(v || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, max);
@@ -137,11 +137,13 @@ exports.createSession = asyncHandler(async (req, res) => {
   if (!batch) throw new AppError('Please choose a valid class', 400);
 
   if (!lead) {
-    const src = _clean(req.body?.src, 20);
+    let src = _clean(req.body?.src, 20);
+    // the Free Test button on our own exam pages (&ad=web-<exam>) is not an ad: its own source
+    if (src === 'ad' && /^web-/i.test(String(req.body?.ref || ''))) src = 'web';
     lead = new GuestLead({
       gid: _newGid(),
       source: SOURCES.has(src) ? src : '',
-      ref: src === 'ad' ? _clean(req.body?.ref, 40).toLowerCase().replace(/[^a-z0-9-]/g, '') : _clean(req.body?.ref, 40).toUpperCase(),
+      ref: src === 'ad' || src === 'web' ? _clean(req.body?.ref, 40).toLowerCase().replace(/[^a-z0-9-]/g, '') : _clean(req.body?.ref, 40).toUpperCase(),
       link_batch: _clean(req.body?.link_batch, 120) === batch.name ? batch.name : '',
       steps: ['opened'],
       // from a Facebook / Instagram ad link (?src=meta&ad=…&fbclid=…): Meta's click id

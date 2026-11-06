@@ -259,11 +259,13 @@ async function setAdStatus(adId, status) {
   if (!['PAUSED', 'ACTIVE'].includes(status)) throw Object.assign(new Error('Bad status'), { status: 400 });
   const ad = await graph(String(adId), { fields: 'id,name,adset_id,campaign_id,account_id' });
   if (`act_${ad.account_id}` !== env().account) throw Object.assign(new Error('Not this ad account'), { status: 400 });
+  let note = '';
   if (status === 'PAUSED') {
-    // never the last running ad of its ad set: pause the ad set itself in Ads Manager instead
+    // the last running ad of its ad set (e.g. the only NMMS ad): stop the ad set too, so the
+    // spending really stops — the admin pressed ⏸ to stop paying
     const sibs = await graphAll(`${ad.adset_id}/ads`, { fields: 'id,configured_status', limit: '100' });
     const running = sibs.filter(s => s.configured_status === 'ACTIVE' && s.id !== ad.id);
-    if (!running.length) throw Object.assign(new Error('ही या ad set मधली शेवटची चालू ad आहे — ती बंद केली नाही (हवं तर Ads Manager मध्ये ad set बंद करा)'), { status: 400 });
+    if (!running.length && ad.adset_id) { await post(String(ad.adset_id), { status: 'PAUSED' }); note = 'adset'; }
   }
   await post(String(adId), { status });
   // turning an ad on also turns on its ad set and campaign (made PAUSED by "Meta वर पाठवा"),
@@ -275,7 +277,7 @@ async function setAdStatus(adId, status) {
     }
   }
   _cache = null;
-  return { ad_id: ad.id, name: ad.name, status };
+  return { ad_id: ad.id, name: ad.name, status, note };
 }
 async function raiseBudget(adsetId, pct = 20) {
   if (!/^\d+$/.test(String(adsetId))) throw Object.assign(new Error('Bad ad set id'), { status: 400 });
