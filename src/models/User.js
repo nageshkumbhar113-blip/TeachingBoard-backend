@@ -91,6 +91,8 @@ const userSchema = new mongoose.Schema(
     // YouTube partner registration details, and the IP the terms were accepted from.
     channel_name: { type: String, default: '', trim: true },
     channel_url:  { type: String, default: '', trim: true },
+    // self-registered teacher: how our team should reach them to verify (WhatsApp / a call)
+    contact_pref: { type: String, enum: ['whatsapp', 'call', ''], default: '' },
     terms_ip:     { type: String, default: '', trim: true },
     terms_accepted_at:  { type: Date, default: null },
     terms_version:      { type: String, default: '' },

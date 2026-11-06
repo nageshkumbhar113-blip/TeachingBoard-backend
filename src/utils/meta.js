@@ -36,7 +36,9 @@ async function _done(res) {
   if (!res.ok || body.error) {
     // never echo the token back: Meta's message is enough
     const m = body.error?.error_user_msg || body.error?.message || res.statusText || 'request failed';
-    const err = new Error(`Meta: ${m}`);
+    // the common set-up problems, said plainly (Meta's own words stay at the end)
+    const hint = /development mode|must be in public/i.test(m) ? 'Meta app अजून Development mode मध्ये आहे — developers.facebook.com › तुमचं app › Publish (Live) करा, मग पुन्हा पाठवा. ' : '';
+    const err = new Error(`${hint}Meta: ${m}`);
     err.status = 400; err.code = body.error?.code;
     throw err;
   }

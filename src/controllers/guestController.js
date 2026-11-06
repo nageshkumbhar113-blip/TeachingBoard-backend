@@ -185,6 +185,7 @@ exports.saveContact = asyncHandler(async (req, res) => {
   if (!lead.steps.includes('lead')) lead.steps.push('lead');
   lead.last_seen_at = new Date();
   await lead.save();
+  _adLead(lead.gid).catch(err => console.warn('[ad lead] contact', err.message));
   res.json({ success: true, profile: _profile(lead) });
 });
 
@@ -767,8 +768,13 @@ async function noteGuestAttempt(studentCode, quizTitle, pct) {
     $addToSet: { steps: 'tested' },
     $set: { last_test: String(quizTitle || '').slice(0, 120), last_seen_at: new Date() },
   });
-  // first test of a visitor from a parent / teacher ad → "Lead" to Meta (once)
-  // not for student ads (checked before anything is marked)
+  await _adLead(gid);
+}
+
+// A visitor from a parent / teacher ad became a lead → "Lead" to Meta and Google (once each), on
+// whichever comes first: the first free test, or the parent's mobile number (a regular-class visitor
+// reads notes and may never take a test). Never for student ads (checked before anything is marked).
+async function _adLead(gid) {
   const cand = await GuestLead.findOne({ gid, source: 'ad', fbc: { $ne: '' }, capi_lead_at: null }, 'ref').lean();
   const lead = cand && !META.isStudentAd(cand.ref)
     ? await GuestLead.findOneAndUpdate({ gid, capi_lead_at: null }, { $set: { capi_lead_at: new Date() } }, { new: true }).lean() : null;
