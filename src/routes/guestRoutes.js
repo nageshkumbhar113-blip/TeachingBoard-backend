@@ -32,5 +32,7 @@ router.post('/admin/meta/ad', requireAdmin, c.adminMetaCreateAd);
 router.post('/admin/meta/action', requireAdmin, c.adminMetaAction);
 router.get('/admin/google', requireAdmin, c.adminGoogle);
 router.post('/admin/google/action', requireAdmin, c.adminGoogleAction);
+router.post('/admin/google/topup', requireAdmin, c.adminGoogleTopup);
+router.delete('/admin/google/topup/:i', requireAdmin, c.adminGoogleTopupDelete);
 
 module.exports = router;

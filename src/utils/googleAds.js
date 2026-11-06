@@ -116,10 +116,12 @@ async function insights(days = 30) {
     search(`SELECT ad_group_ad.resource_name, ad_group_ad.status, ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.final_urls,
                    ad_group.id, ad_group.name, campaign.id, campaign.name, campaign.status
             FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED'`),
-    search(`SELECT campaign.id, campaign_budget.resource_name, campaign_budget.amount_micros
+    search(`SELECT campaign.id, campaign.status, campaign_budget.resource_name, campaign_budget.amount_micros
             FROM campaign WHERE campaign.status != 'REMOVED'`),
   ]);
   const budgetOf = new Map(camps.map(r => [String(r.campaign?.id || ''), r.campaignBudget || {}]));
+  // what the running campaigns spend per day (a shared budget counted once)
+  const active_budget = [...new Map(camps.filter(r => r.campaign?.status === 'ENABLED').map(r => [r.campaignBudget?.resourceName || r.campaign?.id, micros(r.campaignBudget?.amountMicros)])).values()].reduce((t, b) => t + b, 0);
   const by_name = {};
   for (const r of stats) {
     const id = adIdOf(r.adGroupAd?.ad);
@@ -141,7 +143,7 @@ async function insights(days = 30) {
       budget: micros(b.amountMicros), budget_id: b.resourceName || '',
     };
   }
-  _cache = { since: _day(since), until: _day(until), by_name, ads }; _cacheAt = Date.now(); _cacheKey = key;
+  _cache = { since: _day(since), until: _day(until), by_name, ads, active_budget }; _cacheAt = Date.now(); _cacheKey = key;
   return _cache;
 }
 
@@ -184,4 +186,11 @@ const clickOf = body => {
   return out;
 };
 
-module.exports = { configured, leadReady, account, insights, search, setAdStatus, raiseBudget, sendLead, clickOf, adIdOf, _resetCache: () => { _cache = null; _tok = null; } };
+// the whole account's spend from a day (YYYY-MM-DD, IST) until today — for the prepaid estimate
+async function spendSince(day) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day))) return 0;
+  const r = await search(`SELECT metrics.cost_micros FROM customer WHERE segments.date BETWEEN '${day}' AND '${_day(new Date())}'`);
+  return Math.round(r.reduce((t, x) => t + micros(x.metrics?.costMicros), 0) * 100) / 100;
+}
+
+module.exports = { spendSince, configured, leadReady, account, insights, search, setAdStatus, raiseBudget, sendLead, clickOf, adIdOf, _resetCache: () => { _cache = null; _tok = null; } };

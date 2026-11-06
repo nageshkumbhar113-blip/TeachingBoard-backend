@@ -634,6 +634,17 @@ exports.adminMetaAction = asyncHandler(async (req, res) => {
 
 // GET /api/guest/admin/google?days=30 — Google Ads (YouTube ads): connected?, the account, and each
 // ad's spend / views / clicks keyed by our ad id (yt-…). The tokens stay on the server.
+const AdsConfig = require('../models/AdsConfig');
+const GST = 0.18;   // Google India: a prepayment includes 18% GST; the rest is ad money
+async function _googleMoney() {
+  const c = await AdsConfig.findOne({ key: 'main' }, 'google_topups').lean();
+  const topups = (c?.google_topups || []).slice().sort((a, b) => a.date.localeCompare(b.date));
+  if (!topups.length) return { topups };
+  const paid = topups.reduce((t, x) => t + x.amount, 0), since = topups[0].date;
+  const spent = await GADS.spendSince(since);
+  return { topups, paid, since, spent, est_balance: Math.round((paid / (1 + GST) - spent) * 100) / 100 };
+}
+
 exports.adminGoogle = asyncHandler(async (req, res) => {
   const cfg = GADS.configured();
   if (!cfg.ok) return res.json({ success: true, connected: false, config: cfg });
@@ -641,14 +652,37 @@ exports.adminGoogle = asyncHandler(async (req, res) => {
   try {
     if (req.query.fresh === '1') GADS._resetCache();
     const since = new Date(Date.now() - days * 864e5);
-    const [account, ins, leads] = await Promise.all([
+    const [account, ins, leads, money] = await Promise.all([
       GADS.account(), req.query.check === '1' ? null : GADS.insights(days),
       GuestLead.countDocuments({ gads_lead_at: { $gte: since } }),
+      _googleMoney().catch(err => ({ error: err.message })),
     ]);
-    res.json({ success: true, connected: true, config: cfg, account, leads, ...(ins || {}) });
+    res.json({ success: true, connected: true, config: cfg, account, leads, money, ...(ins || {}) });
   } catch (err) {
     res.json({ success: true, connected: false, config: cfg, error: err.message });
   }
+});
+
+// POST /api/guest/admin/google/topup { amount, date } — money paid into Google Ads (prepay)
+// DELETE /api/guest/admin/google/topup/:i — remove a wrong entry
+exports.adminGoogleTopup = asyncHandler(async (req, res) => {
+  const amount = Math.round(Number(req.body?.amount) * 100) / 100;
+  const date = String(req.body?.date || '');
+  if (!(amount >= 1 && amount <= 1000000)) throw new AppError('रक्कम ₹1 ते ₹10,00,000 मध्ये हवी', 400);
+  const today = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || isNaN(new Date(date)) || date > today) throw new AppError('तारीख चुकीची आहे (आजची किंवा मागची हवी)', 400);
+  await AdsConfig.updateOne({ key: 'main' }, { $push: { google_topups: { amount, date, at: new Date() } } }, { upsert: true });
+  res.json({ success: true });
+});
+exports.adminGoogleTopupDelete = asyncHandler(async (req, res) => {
+  const i = parseInt(req.params.i, 10);
+  const c = await AdsConfig.findOne({ key: 'main' });
+  if (!c || !(i >= 0 && i < c.google_topups.length)) throw new AppError('Not found', 404);
+  // the list the admin sees is sorted by date: remove that one
+  const sorted = c.google_topups.map((t, k) => ({ t, k })).sort((a, b) => a.t.date.localeCompare(b.t.date));
+  c.google_topups.splice(sorted[i].k, 1);
+  await c.save();
+  res.json({ success: true });
 });
 
 // POST /api/guest/admin/google/action { action: 'pause'|'resume', ad } | { action: 'budget', budget }
