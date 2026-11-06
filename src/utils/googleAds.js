@@ -113,7 +113,7 @@ async function insights(days = 30) {
   const [stats, state, camps] = await Promise.all([
     search(`SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.final_urls, metrics.cost_micros, metrics.impressions, metrics.video_trueview_views, metrics.clicks
             FROM ad_group_ad WHERE segments.date BETWEEN '${_day(since)}' AND '${_day(until)}'`),
-    search(`SELECT ad_group_ad.resource_name, ad_group_ad.status, ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.final_urls,
+    search(`SELECT ad_group_ad.resource_name, ad_group_ad.status, ad_group_ad.policy_summary.approval_status, ad_group_ad.policy_summary.review_status, ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.final_urls,
                    ad_group.id, ad_group.name, campaign.id, campaign.name, campaign.status
             FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED'`),
     search(`SELECT campaign.id, campaign.status, campaign_budget.resource_name, campaign_budget.amount_micros
@@ -139,6 +139,8 @@ async function insights(days = 30) {
     const b = budgetOf.get(String(r.campaign?.id || '')) || {};
     ads[id] = {
       ad: r.adGroupAd?.resourceName || '', status: r.adGroupAd?.status || '',
+      // Google's review: approval (APPROVED / APPROVED_LIMITED / DISAPPROVED …) and whether it is still being reviewed
+      approval: r.adGroupAd?.policySummary?.approvalStatus || '', review: r.adGroupAd?.policySummary?.reviewStatus || '',
       adgroup: r.adGroup?.name || '', campaign: r.campaign?.name || '', campaign_id: String(r.campaign?.id || ''), campaign_status: r.campaign?.status || '',
       budget: micros(b.amountMicros), budget_id: b.resourceName || '',
     };

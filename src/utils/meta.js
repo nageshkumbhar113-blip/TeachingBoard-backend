@@ -256,7 +256,9 @@ const fbcOf = fbclid => { const c = String(fbclid || '').replace(/[^A-Za-z0-9_-]
 // ── phase 4: the admin's buttons — pause / resume an ad, +20% on an ad set's daily budget ──
 // every ad now in the account: status + its ad set's budget, keyed by the ad's name (our ad id)
 async function adsState() {
-  const rows = await graphAll(`${env().account}/ads`, { fields: 'id,name,effective_status,configured_status,created_time,ad_review_feedback,issues_info,adset{id,name,daily_budget,status,effective_status,created_time},campaign{id,name,status}', limit: '500' });
+  // the full picture; if Meta ever refuses one of the extra fields, the basic one (the panel still works)
+  const rows = await graphAll(`${env().account}/ads`, { fields: 'id,name,effective_status,configured_status,created_time,ad_review_feedback,issues_info,adset{id,name,daily_budget,status,effective_status,created_time},campaign{id,name,status},creative{effective_object_story_id,instagram_permalink_url}', limit: '500' })
+    .catch(err => { console.warn('[meta] ads (full fields):', err.message); return graphAll(`${env().account}/ads`, { fields: 'id,name,effective_status,configured_status,adset{id,name,daily_budget}', limit: '500' }); });
   const out = {};
   // why Meta stopped / refused an ad, in its own words (review feedback + delivery issues)
   const why = r => [...Object.values(r.ad_review_feedback?.global || {}), ...(r.issues_info || []).map(i => i.error_summary || i.error_message || '')].map(String).filter(Boolean).slice(0, 3);
@@ -269,7 +271,10 @@ async function adsState() {
       adset_id: r.adset?.id || '', adset: r.adset?.name || '', budget: r.adset?.daily_budget ? Number(r.adset.daily_budget) / 100 : null,
       adset_status: r.adset?.effective_status || r.adset?.status || '', adset_created: r.adset?.created_time || '',
       campaign_id: r.campaign?.id || '', campaign: r.campaign?.name || '', campaign_status: r.campaign?.status || '',
-      created: r.created_time || '', why: why(r) };
+      created: r.created_time || '', why: why(r),
+      // the public post people see (to share, and to read / answer comments)
+      fb_post: r.creative?.effective_object_story_id ? `https://www.facebook.com/${r.creative.effective_object_story_id}` : '',
+      ig_post: r.creative?.instagram_permalink_url || '' };
   }
   return out;
 }
