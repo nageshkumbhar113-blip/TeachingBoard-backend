@@ -577,7 +577,7 @@ exports.adminAdContent = asyncHandler(async (req, res) => {
   // competitive classes: real questions from the class's free tests, and the exam the class is
   // linked to in Admin › Site / Exams (name, benefit, the ad's loss line, the next date)
   const SITE = require('./siteController');
-  const [mcqs, sx] = await Promise.all([SITE.sampleMcqs(batch.name, 8).catch(() => []), SITE.examForBatch(batch.name).catch(() => null)]);
+  const [mcqs, sx] = await Promise.all([SITE.sampleMcqs(batch.name, 12).catch(() => []), SITE.examForBatch(batch.name).catch(() => null)]);
   const today = new Date().setHours(0, 0, 0, 0);
   const next = (sx?.dates || []).filter(d => d.date && new Date(d.date).getTime() >= today).sort((a, b) => new Date(a.date) - new Date(b.date))[0] || null;
   const exam = sx ? { slug: sx.slug, name: sx.name, name_en: sx.name_en, group: sx.group, benefit: sx.benefit, ad_loss_mr: sx.ad_loss_mr, ad_loss_en: sx.ad_loss_en,

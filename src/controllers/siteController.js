@@ -27,9 +27,13 @@ async function sampleMcqs(batchName, n = 8) {
   if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.list.slice(0, n);
   const visitor = { role: 'student', status: 'active', free_tier: true, expiry_date: null };
   const quizzes = await Quiz.find({ batch: batchName, status: 'published' }, 'batch subject chapter paper_mode sections questions').lean();
-  const out = [];
+  const out = [], perSubject = {};
   for (const qz of quizzes) {
+    if (out.length >= 200) break;
+    if ((perSubject[qz.subject || ''] || 0) >= 12) continue;   // a few from every subject, not 30 from the first one
     if (await isQuizLocked(visitor, qz)) continue;
+    // a section of a paper may hold another subject's questions
+    const secOf = new Map(); for (const sec of qz.sections || []) for (const id of sec.question_ids || []) secOf.set(id, sec.subject);
     for (const q of qz.questions || []) {
       if (q.image || Object.values(q.option_images || {}).some(Boolean)) continue;
       const o = q.options || {};
@@ -40,13 +44,18 @@ async function sampleMcqs(batchName, n = 8) {
       const right = o[q.answer] !== undefined ? q.answer : keys.find(k => _plain(o[k]) === _plain(q.answer));
       if (!right) continue;
       const why = _plain(q.explanation);
-      out.push({ q: text, options: opts, answer: keys.indexOf(right), why: _hasMath(why) ? '' : why.slice(0, 140), subject: qz.subject || '' });
-      if (out.length >= 30) break;
+      const subject = secOf.get(q.q_id) || qz.subject || '';
+      if ((perSubject[subject] || 0) >= 12) continue;
+      perSubject[subject] = (perSubject[subject] || 0) + 1;
+      out.push({ q: text, options: opts, answer: keys.indexOf(right), why: _hasMath(why) ? '' : why.slice(0, 140), subject });
     }
-    if (out.length >= 30) break;
   }
-  // questions with an explanation first (it becomes the "युक्ती")
-  out.sort((a, b) => (b.why ? 1 : 0) - (a.why ? 1 : 0));
+  // every subject in turn (for the 3-subject ad screens), questions with an explanation first in each
+  const bySub = new Map();
+  for (const m of out) { if (!bySub.has(m.subject)) bySub.set(m.subject, []); bySub.get(m.subject).push(m); }
+  for (const l of bySub.values()) l.sort((a, b) => (b.why ? 1 : 0) - (a.why ? 1 : 0));
+  out.length = 0;
+  for (let i = 0; [...bySub.values()].some(l => l[i]); i++) for (const l of bySub.values()) if (l[i]) out.push(l[i]);
   _mcqCache.set(batchName, { at: Date.now(), list: out });
   return out.slice(0, n);
 }
