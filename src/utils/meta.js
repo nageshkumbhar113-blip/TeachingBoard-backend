@@ -136,9 +136,11 @@ async function _maharashtra() {
   _region = hit ? { key: String(hit.key) } : null;
   return _region;
 }
+const GONE = ['DELETED', 'ARCHIVED'];
 async function _findByName(edge, name, fields = 'id,name,status') {
   const r = await graph(`${env().account}/${edge}`, { fields, filtering: [{ field: 'name', operator: 'EQUAL', value: name }], limit: 5 });
-  return (r.data || []).find(x => x.name === name) || null;
+  // a deleted / archived one (e.g. removed in Ads Manager) is never reused — a fresh one is made
+  return (r.data || []).find(x => x.name === name && !GONE.includes(x.status)) || null;
 }
 async function uploadVideo(buf, name) {
   const r = await postFile(`${env().account}/advideos`, { name }, 'source', buf, `${name}.mp4`, 'video/mp4');
@@ -174,7 +176,7 @@ async function createAd(o) {
   let campaignName = conv ? `${A.campaign} · Leads` : A.campaign;
   let adsetName = conv ? `${o.adset}-lead` : o.adset;
   const existing = (await graphAll(`${e.account}/ads`, { fields: 'id,name,status,adset{name}', filtering: [{ field: 'name', operator: 'EQUAL', value: o.name }], limit: '25' }))
-    .find(x => x.name === o.name && (!x.adset?.name || x.adset.name === adsetName));
+    .find(x => x.name === o.name && !GONE.includes(x.status) && (!x.adset?.name || x.adset.name === adsetName));
   if (existing) return { exists: true, ad_id: existing.id, status: existing.status };
 
   const makeCampaign = async () => (await _findByName('campaigns', campaignName)) || post(`${e.account}/campaigns`, {
