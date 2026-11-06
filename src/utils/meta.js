@@ -254,15 +254,20 @@ const fbcOf = fbclid => { const c = String(fbclid || '').replace(/[^A-Za-z0-9_-]
 // ── phase 4: the admin's buttons — pause / resume an ad, +20% on an ad set's daily budget ──
 // every ad now in the account: status + its ad set's budget, keyed by the ad's name (our ad id)
 async function adsState() {
-  const rows = await graphAll(`${env().account}/ads`, { fields: 'id,name,effective_status,configured_status,adset{id,name,daily_budget}', limit: '500' });
+  const rows = await graphAll(`${env().account}/ads`, { fields: 'id,name,effective_status,configured_status,created_time,ad_review_feedback,issues_info,adset{id,name,daily_budget,status,effective_status,created_time},campaign{id,name,status}', limit: '500' });
   const out = {};
+  // why Meta stopped / refused an ad, in its own words (review feedback + delivery issues)
+  const why = r => [...Object.values(r.ad_review_feedback?.global || {}), ...(r.issues_info || []).map(i => i.error_summary || i.error_message || '')].map(String).filter(Boolean).slice(0, 3);
   for (const r of rows) {
     const k = String(r.name || '').trim().toLowerCase();
     if (!k) continue;
     // the same ad name in a clicks and a results ad set: the running one wins
     if (out[k] && out[k].status === 'ACTIVE' && (r.configured_status || r.effective_status) !== 'ACTIVE') continue;
     out[k] = { ad_id: r.id, status: r.configured_status || r.effective_status || '', effective: r.effective_status || '',
-      adset_id: r.adset?.id || '', adset: r.adset?.name || '', budget: r.adset?.daily_budget ? Number(r.adset.daily_budget) / 100 : null };
+      adset_id: r.adset?.id || '', adset: r.adset?.name || '', budget: r.adset?.daily_budget ? Number(r.adset.daily_budget) / 100 : null,
+      adset_status: r.adset?.effective_status || r.adset?.status || '', adset_created: r.adset?.created_time || '',
+      campaign_id: r.campaign?.id || '', campaign: r.campaign?.name || '', campaign_status: r.campaign?.status || '',
+      created: r.created_time || '', why: why(r) };
   }
   return out;
 }
@@ -307,4 +312,21 @@ async function raiseBudget(adsetId, pct = 20) {
   return { adset_id: s.id, name: s.name, from: old / 100, to: next / 100 };
 }
 
-module.exports = { configured, account, insights, graph, uploadVideo, uploadImage, createAd, adsState, setAdStatus, raiseBudget, sendEvent, fbcOf, isStudentAd, datasetReady, _resetCache: () => { _cache = null; _region = null; } };
+// the admin's own figure for an ad set's daily budget (₹). Down: any amount ≥ ₹100. Up: at most +20% in one
+// go unless `big` (a bigger jump restarts Meta's learning — the admin is asked first).
+async function setBudget(adsetId, rupees, { big = false } = {}) {
+  if (!/^\d+$/.test(String(adsetId))) throw Object.assign(new Error('Bad ad set id'), { status: 400 });
+  const want = Math.round(Number(rupees));
+  if (!Number.isFinite(want) || want < 100) throw Object.assign(new Error('रोजचं बजेट किमान ₹100'), { status: 400 });
+  if (want > 100000) throw Object.assign(new Error('एवढं मोठं बजेट Ads Manager मध्येच ठेवा'), { status: 400 });
+  const s = await graph(String(adsetId), { fields: 'id,name,daily_budget,account_id' });
+  if (`act_${s.account_id}` !== env().account) throw Object.assign(new Error('Not this ad account'), { status: 400 });
+  const old = (Number(s.daily_budget) || 0) / 100;
+  if (!old) throw Object.assign(new Error('या ad set ला रोजचं बजेट नाही (campaign budget?) — Ads Manager मध्ये बदला'), { status: 400 });
+  if (want > old * MAX_STEP + 0.5 && !big) throw Object.assign(new Error(`₹${old} → ₹${want} ही ${Math.round((want / old - 1) * 100)}% वाढ आहे — एकदम जास्त वाढवलं तर Meta पुन्हा शिकायला लागतो. तरी करायचं असेल तर पुन्हा दाबा.`), { status: 400, code: 'big' });
+  await post(String(adsetId), { daily_budget: want * 100 });
+  _cache = null;
+  return { adset_id: s.id, name: s.name, from: old, to: want };
+}
+
+module.exports = { configured, account, insights, graph, uploadVideo, uploadImage, createAd, adsState, setAdStatus, raiseBudget, setBudget, sendEvent, fbcOf, isStudentAd, datasetReady, _resetCache: () => { _cache = null; _region = null; } };

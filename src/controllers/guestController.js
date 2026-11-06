@@ -595,6 +595,8 @@ exports.adminMeta = asyncHandler(async (req, res) => {
   const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 90);
   try {
     if (req.query.fresh === '1') META._resetCache();
+    // 📡 just every ad's state right now (one light Meta call, never cached): upload / review / running / why
+    if (req.query.status === '1') return res.json({ success: true, connected: true, account_id: String(process.env.META_AD_ACCOUNT_ID || '').replace(/^act_/, ''), ads: await META.adsState(), at: new Date().toISOString() });
     const since = new Date(Date.now() - days * 864e5);
     const [account, ins, leads, paid] = await Promise.all([
       META.account(), req.query.check === '1' ? null : META.insights(days),
@@ -628,9 +630,10 @@ exports.adminMetaAction = asyncHandler(async (req, res) => {
     let out;
     if (b.action === 'pause' || b.action === 'resume') out = await META.setAdStatus(String(b.ad_id || ''), b.action === 'pause' ? 'PAUSED' : 'ACTIVE');
     else if (b.action === 'budget') out = await META.raiseBudget(String(b.adset_id || ''), 20);
+    else if (b.action === 'set_budget') out = await META.setBudget(String(b.adset_id || ''), b.amount, { big: b.big === true });
     else throw new AppError('Unknown action', 400);
     res.json({ success: true, ...out });
-  } catch (err) { throw new AppError(err.message, err.status || 400); }
+  } catch (err) { const e = new AppError(err.message, err.status || 400); if (err.code === 'big') e.details = { big: true }; throw e; }
 });
 
 // GET /api/guest/admin/google?days=30 — Google Ads (YouTube ads): connected?, the account, and each
