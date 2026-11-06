@@ -231,7 +231,8 @@ async function createAd(o) {
 // never shown to the visitor.
 const STUDENT_VARIANTS = ['challenge', 'rank', 'beat', 'r-shw', 'r-srev'];
 const PARENT_ENDINGS = ['-demo-rank'];   // parent ads whose name also ends like a student ad
-const isStudentAd = adId => !PARENT_ENDINGS.some(e => String(adId || '').endsWith(e)) && STUDENT_VARIANTS.some(v => String(adId || '').endsWith('-' + v));
+// a 🎬 script video for students: <class>-vs-<id>
+const isStudentAd = adId => /(^|-)vs-[a-z0-9]+$/.test(String(adId || '')) || (!PARENT_ENDINGS.some(e => String(adId || '').endsWith(e)) && STUDENT_VARIANTS.some(v => String(adId || '').endsWith('-' + v)));
 function datasetReady() { return !!process.env.META_DATASET_ID && configured().ok; }
 async function sendEvent({ name, id, fbc, ua, url, value }) {
   if (!datasetReady() || !fbc) return { skipped: true };

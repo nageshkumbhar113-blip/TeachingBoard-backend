@@ -33,6 +33,9 @@ router.post('/admin/meta/action', requireAdmin, c.adminMetaAction);
 router.get('/admin/google', requireAdmin, c.adminGoogle);
 router.post('/admin/google/action', requireAdmin, c.adminGoogleAction);
 router.post('/admin/google/topup', requireAdmin, c.adminGoogleTopup);
+router.get('/admin/ad-scripts', requireAdmin, c.adminAdScripts);
+router.post('/admin/ad-scripts', requireAdmin, c.adminAdScriptSave);
+router.delete('/admin/ad-scripts/:sid', requireAdmin, c.adminAdScriptDelete);
 router.delete('/admin/google/topup/:i', requireAdmin, c.adminGoogleTopupDelete);
 
 module.exports = router;

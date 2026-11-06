@@ -674,6 +674,35 @@ exports.adminGoogleTopup = asyncHandler(async (req, res) => {
   await AdsConfig.updateOne({ key: 'main' }, { $push: { google_topups: { amount, date, at: new Date() } } }, { upsert: true });
   res.json({ success: true });
 });
+// Admin › Ads › 🎬 माझा video: the saved AI scripts (checked in the browser by adScript.js;
+// here only size limits — the text is never run, only parsed as JSON by the admin page)
+exports.adminAdScripts = asyncHandler(async (_req, res) => {
+  const c = await AdsConfig.findOne({ key: 'main' }, 'video_scripts').lean();
+  res.json({ success: true, data: (c?.video_scripts || []).map(v => ({ sid: v.sid, raw: v.raw, at: v.at })) });
+});
+exports.adminAdScriptSave = asyncHandler(async (req, res) => {
+  const raw = String(req.body?.raw || '');
+  if (raw.length < 20 || raw.length > 20000) throw new AppError('Script 20 ते 20,000 अक्षरांचा हवा', 400);
+  let sid = String(req.body?.sid || '').toLowerCase();
+  const c = (await AdsConfig.findOne({ key: 'main' })) || new AdsConfig({ key: 'main' });
+  const i = sid ? c.video_scripts.findIndex(v => v.sid === sid) : -1;
+  if (i >= 0) { c.video_scripts[i].raw = raw; c.video_scripts[i].at = new Date(); }
+  else {
+    if (c.video_scripts.length >= 60) throw new AppError('जास्तीत जास्त 60 videos — जुने काढा', 400);
+    do { sid = Math.random().toString(36).slice(2, 7); } while (c.video_scripts.some(v => v.sid === sid));
+    c.video_scripts.push({ sid, raw, at: new Date() });
+  }
+  c.markModified('video_scripts');
+  await c.save();
+  res.json({ success: true, sid });
+});
+exports.adminAdScriptDelete = asyncHandler(async (req, res) => {
+  const sid = String(req.params.sid || '').toLowerCase();
+  const r = await AdsConfig.updateOne({ key: 'main' }, { $pull: { video_scripts: { sid } } });
+  if (!r.modifiedCount) throw new AppError('Not found', 404);
+  res.json({ success: true });
+});
+
 exports.adminGoogleTopupDelete = asyncHandler(async (req, res) => {
   const i = parseInt(req.params.i, 10);
   const c = await AdsConfig.findOne({ key: 'main' });

@@ -13,6 +13,8 @@ const adsConfigSchema = new mongoose.Schema(
   {
     key:           { type: String, default: 'main', unique: true },
     google_topups: { type: [topupSchema], default: [] },
+    // Admin › Ads › 🎬 माझा video: the AI scripts (JSON text as pasted), shared by every admin device
+    video_scripts: { type: [{ _id: false, sid: { type: String, required: true }, raw: { type: String, required: true }, at: { type: Date, default: Date.now } }], default: [] },
   },
   { versionKey: false, minimize: false }
 );
