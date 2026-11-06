@@ -6,7 +6,7 @@
 //   META_AD_ACCOUNT_ID  act_<number>
 //   META_APP_SECRET     app secret — every call carries appsecret_proof, so the token alone is useless
 //   META_PAGE_ID        the Facebook Page the ads run as (used when ads are created, phase 2)
-//   META_API_VERSION    optional, default v23.0
+//   META_API_VERSION    optional, default v26.0 (Marketing API versions retire faster than Graph — keep it recent)
 //   META_GRAPH_URL      optional, tests only (a local fake Graph API)
 // The token never leaves the server: the admin's browser only gets the numbers.
 const { createHmac } = require('crypto');
@@ -16,7 +16,7 @@ const env = () => ({
   account: (() => { const a = String(process.env.META_AD_ACCOUNT_ID || '').trim(); return !a ? '' : a.startsWith('act_') ? a : `act_${a}`; })(),
   secret: process.env.META_APP_SECRET || '',
   page: process.env.META_PAGE_ID || '',
-  base: `${(process.env.META_GRAPH_URL || 'https://graph.facebook.com').replace(/\/$/, '')}/${process.env.META_API_VERSION || 'v23.0'}`,
+  base: `${(process.env.META_GRAPH_URL || 'https://graph.facebook.com').replace(/\/$/, '')}/${process.env.META_API_VERSION || 'v26.0'}`,
 });
 
 function configured() {
