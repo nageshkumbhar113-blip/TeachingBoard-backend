@@ -74,8 +74,18 @@ async function graphAll(path, params) {
 
 async function account() {
   const e = env();
-  const a = await graph(e.account, { fields: 'name,account_status,currency,amount_spent,timezone_name' });
-  return { id: a.id, name: a.name, status: a.account_status, currency: a.currency, timezone: a.timezone_name };
+  const a = await graph(e.account, { fields: 'name,account_status,currency,amount_spent,timezone_name,balance,spend_cap,is_prepay_account,funding_source_details' });
+  // money fields come in the smallest unit (paise); the prepaid balance only as Meta's own text
+  const rupees = v => (v === undefined || v === null || v === '' ? null : Number(v) / 100);
+  const fs0 = a.funding_source_details || {};
+  // "Available balance (₹1,234.50 INR)" → 1234.5
+  const m = /(\d[\d,]*(?:\.\d+)?)/.exec(String(fs0.display_string || ''));
+  return {
+    id: a.id, name: a.name, status: a.account_status, currency: a.currency, timezone: a.timezone_name,
+    spent_total: rupees(a.amount_spent), due: rupees(a.balance), spend_cap: Number(a.spend_cap) ? rupees(a.spend_cap) : null,
+    prepay: !!a.is_prepay_account, funds_text: String(fs0.display_string || ''),
+    funds: a.is_prepay_account && m ? Number(m[1].replace(/,/g, '')) : null,
+  };
 }
 
 const _ist = d => new Date(d.getTime() + 5.5 * 3600e3).toISOString().slice(0, 10);
