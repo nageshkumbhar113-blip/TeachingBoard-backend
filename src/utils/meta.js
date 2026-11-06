@@ -213,7 +213,16 @@ async function createAd(o) {
   }
   const ready = await _videoReady(o.video_id);
   if (!ready) return { pending: true, campaign_id: campaign.id, adset_id: adset.id, note };
-  const creative = await post(`${e.account}/adcreatives`, {
+  const creative = await _creative(o);
+  const ad = await post(`${e.account}/ads`, { name: o.name, adset_id: adset.id, creative: { creative_id: creative.id }, status: 'PAUSED' });
+  return { created: true, mode: conv ? 'lead' : 'clicks', note, ad_id: ad.id, adset_id: adset.id, campaign_id: campaign.id, creative_id: creative.id,
+    manager: `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${e.account.replace(/^act_/, '')}&selected_ad_ids=${ad.id}` };
+}
+
+// the video post (page + optional Instagram identity, text, headline, button + link)
+function _creative(o) {
+  const e = env();
+  return post(`${e.account}/adcreatives`, {
     name: o.name,
     object_story_spec: {
       page_id: e.page,
@@ -224,9 +233,19 @@ async function createAd(o) {
       },
     },
   });
-  const ad = await post(`${e.account}/ads`, { name: o.name, adset_id: adset.id, creative: { creative_id: creative.id }, status: 'PAUSED' });
-  return { created: true, mode: conv ? 'lead' : 'clicks', note, ad_id: ad.id, adset_id: adset.id, campaign_id: campaign.id, creative_id: creative.id,
-    manager: `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${e.account.replace(/^act_/, '')}&selected_ad_ids=${ad.id}` };
+}
+// 🎬 a new video for an ad that is already in Meta (e.g. the first one froze): a new creative on the
+// same ad — the ad keeps its name, ad set, budget and numbers; Meta reviews it again.
+async function replaceVideo(o) {
+  if (!/^\d+$/.test(String(o.ad_id))) throw Object.assign(new Error('Bad ad id'), { status: 400 });
+  if (!env().page) throw Object.assign(new Error('Render मध्ये META_PAGE_ID नाही'), { status: 400 });
+  const ad = await graph(String(o.ad_id), { fields: 'id,name,account_id' });
+  if (`act_${ad.account_id}` !== env().account) throw Object.assign(new Error('Not this ad account'), { status: 400 });
+  if (!(await _videoReady(o.video_id, 90000))) throw Object.assign(new Error('Meta अजून नवीन video तयार करत आहे — 2 मिनिटांनी पुन्हा "Video बदला" दाबा (video पुन्हा बनणार नाही)'), { status: 400, code: 'pending' });
+  const creative = await _creative({ ...o, name: ad.name });
+  await post(String(o.ad_id), { creative: { creative_id: creative.id } });
+  _cache = null;
+  return { name: ad.name, ad_id: ad.id, creative_id: creative.id };
 }
 
 // ── phase 3: Conversions API — our server tells Meta "this ad click led to a result" ──
@@ -336,4 +355,4 @@ async function setBudget(adsetId, rupees, { big = false } = {}) {
   return { adset_id: s.id, name: s.name, from: old, to: want };
 }
 
-module.exports = { configured, account, insights, graph, uploadVideo, uploadImage, createAd, adsState, setAdStatus, raiseBudget, setBudget, sendEvent, fbcOf, isStudentAd, datasetReady, _resetCache: () => { _cache = null; _region = null; } };
+module.exports = { configured, account, insights, graph, uploadVideo, uploadImage, createAd, adsState, setAdStatus, raiseBudget, setBudget, replaceVideo, sendEvent, fbcOf, isStudentAd, datasetReady, _resetCache: () => { _cache = null; _region = null; } };
