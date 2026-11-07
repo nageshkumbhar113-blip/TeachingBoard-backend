@@ -756,6 +756,7 @@ exports.adminMetaCreateAd = asyncHandler(async (req, res) => {
       video_id: String(b.video_id), image_hash: String(b.image_hash),
       message: String(b.message || '').slice(0, 2000), headline: String(b.headline || '').slice(0, 120),
       cta: b.cta === 'SIGN_UP' ? 'SIGN_UP' : 'LEARN_MORE', link,
+      geo: ['gata', 'marathwada', 'nashik', 'kolhapur'].includes(b.geo) ? b.geo : 'all',
       ..._ages(b.age_min, b.age_max),
     });
     res.json({ success: true, ...out });

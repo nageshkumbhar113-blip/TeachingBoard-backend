@@ -136,6 +136,42 @@ async function _maharashtra() {
   _region = hit ? { key: String(hit.key) } : null;
   return _region;
 }
+// 📍 area groups (NMMS: where most of the state's NMMS students register — the admin's district table,
+// 2025: the 6 districts of group A = 44% of 2,48,758). Each town + a 40 km circle; Pune district only by
+// its rural towns (the city's English-medium schools are not the NMMS audience, and cost more).
+// A town may be known to Meta by an old name — every name is tried.
+const GEO = {
+  gata: [['Kolhapur'], ['Ichalkaranji'], ['Gadhinglaj'], ['Sangli'], ['Miraj'], ['Islampur'], ['Satara'], ['Karad'], ['Phaltan'], ['Solapur'], ['Pandharpur'], ['Barshi'],
+    ['Ahilyanagar', 'Ahmednagar'], ['Shrirampur'], ['Sangamner'], ['Baramati'], ['Indapur'], ['Shirur'], ['Junnar'], ['Daund']],
+  marathwada: [['Chhatrapati Sambhajinagar', 'Aurangabad'], ['Beed'], ['Ambajogai'], ['Latur'], ['Udgir'], ['Nanded'], ['Dharashiv', 'Osmanabad']],
+  nashik: [['Nashik'], ['Malegaon'], ['Sinnar']],
+  kolhapur: [['Kolhapur'], ['Ichalkaranji'], ['Gadhinglaj']],
+};
+const GEO_KM = 40;
+const _cityKeys = new Map();
+async function _city(names) {
+  for (const n of names) {
+    if (_cityKeys.has(n)) return _cityKeys.get(n);
+    const r = await graph('search', { type: 'adgeolocation', location_types: ['city'], q: n, country_code: 'IN', limit: 10 }).catch(() => null);
+    // the exact name first (e.g. Shirur, Pune — not Shirur Kasar, Beed), else a name that starts with it
+    const mh = (r?.data || []).filter(x => /maharashtra/i.test(x.region || ''));
+    const hit = mh.find(x => x.name.toLowerCase() === n.toLowerCase()) || mh.find(x => x.name.toLowerCase().startsWith(n.toLowerCase().split(' ')[0])) || null;
+    _cityKeys.set(n, hit ? { key: String(hit.key), name: hit.name } : null);
+    if (hit) return _cityKeys.get(n);
+  }
+  return null;
+}
+// the ad set's places: the whole state, or a group's towns (+ 40 km)
+async function _geoOf(geo) {
+  if (!geo || geo === 'all' || !GEO[geo]) {
+    const region = await _maharashtra();
+    return { geo: region ? { regions: [region], location_types: ['home', 'recent'] } : { countries: ['IN'] }, missed: [] };
+  }
+  const found = [], missed = [];
+  for (const names of GEO[geo]) { const c = await _city(names); if (c) found.push(c); else missed.push(names[0]); }
+  if (!found.length) throw Object.assign(new Error('Meta मध्ये या गटातली एकही शहरं सापडली नाहीत — "संपूर्ण महाराष्ट्र" निवडा'), { status: 400 });
+  return { geo: { cities: [...new Map(found.map(c => [c.key, { key: c.key, radius: GEO_KM, distance_unit: 'kilometer' }])).values()], location_types: ['home', 'recent'] }, missed };
+}
 const GONE = ['DELETED', 'ARCHIVED'];
 async function _findByName(edge, name, fields = 'id,name,status') {
   const r = await graph(`${env().account}/${edge}`, { fields, filtering: [{ field: 'name', operator: 'EQUAL', value: name }], limit: 5 });
@@ -195,7 +231,8 @@ async function createAd(o) {
     adset = await _findByName('adsets', adsetName) || await makeAdset();
   }
   async function makeAdset() {
-    const region = await _maharashtra();
+    const place = await _geoOf(o.geo);
+    if (place.missed.length) note = (note ? note + ' · ' : '') + `Meta मध्ये ही शहरं सापडली नाहीत (बाकीची घेतली): ${place.missed.join(', ')}`;
     return post(`${e.account}/adsets`, {
       name: adsetName, campaign_id: campaign.id, status: 'PAUSED',
       daily_budget: Math.max(100, Math.round(Number(o.daily_budget) || 0)) * 100,   // paise
@@ -204,7 +241,7 @@ async function createAd(o) {
         ? { optimization_goal: 'OFFSITE_CONVERSIONS', promoted_object: { pixel_id: ds, custom_event_type: o.audience === 'parent' ? 'LEAD' : 'COMPLETE_REGISTRATION' } }
         : { optimization_goal: 'LINK_CLICKS' }),
       targeting: {
-        geo_locations: region ? { regions: [region], location_types: ['home', 'recent'] } : { countries: ['IN'] },
+        geo_locations: place.geo,
         // the admin's ages (Admin › Ads), else the audience's
         age_min: o.age_min || A.age_min, age_max: o.age_max || A.age_max,
         targeting_automation: { advantage_audience: 0 },
@@ -284,9 +321,15 @@ async function adsState() {
   for (const r of rows) {
     const k = String(r.name || '').trim().toLowerCase();
     if (!k) continue;
-    // the same ad name in a clicks and a results ad set: the running one wins
-    if (out[k] && out[k].status === 'ACTIVE' && (r.configured_status || r.effective_status) !== 'ACTIVE') continue;
-    out[k] = { ad_id: r.id, status: r.configured_status || r.effective_status || '', effective: r.effective_status || '',
+    // the same ad name in two ad sets (clicks / results, or two areas): both are kept — the running one
+    // under the plain name (the leaderboard uses it), the other one under "name · ad set"
+    let key = k;
+    if (out[k]) {
+      const mineOn = (r.configured_status || r.effective_status) === 'ACTIVE', theirsOn = out[k].status === 'ACTIVE';
+      if (mineOn && !theirsOn) out[`${k} · ${out[k].adset}`] = out[k];
+      else key = `${k} · ${r.adset?.name || r.id}`;
+    }
+    out[key] = { name: r.name, ad_id: r.id, status: r.configured_status || r.effective_status || '', effective: r.effective_status || '',
       adset_id: r.adset?.id || '', adset: r.adset?.name || '', budget: r.adset?.daily_budget ? Number(r.adset.daily_budget) / 100 : null,
       adset_status: r.adset?.effective_status || r.adset?.status || '', adset_created: r.adset?.created_time || '',
       campaign_id: r.campaign?.id || '', campaign: r.campaign?.name || '', campaign_status: r.campaign?.status || '',
