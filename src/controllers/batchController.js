@@ -234,8 +234,10 @@ exports.createBatch = asyncHandler(async (req, res) => {
   const medium   = req.body.medium   !== undefined ? String(req.body.medium).trim()   : undefined;
   const standard = req.body.standard !== undefined ? String(req.body.standard).trim() : undefined;
   const kind     = req.body.kind !== undefined ? require('../utils/courseKind').cleanKind(req.body.kind) : undefined;
+  const cardColor = req.body.card_color !== undefined ? Math.max(-1, Math.min(7, parseInt(req.body.card_color, 10))) : undefined;
 
   const insertDoc = { name, icon, subjects: [], ...pricingFields };
+  if (cardColor !== undefined && !Number.isNaN(cardColor)) insertDoc.card_color = cardColor;
   if (kind        !== undefined) insertDoc.kind          = kind;
   if (description !== undefined) insertDoc.description = description;
   if (board       !== undefined) insertDoc.board        = board;
@@ -330,6 +332,7 @@ exports.renameBatch = asyncHandler(async (req, res) => {
   const medium      = req.body.medium !== undefined ? String(req.body.medium).trim() : undefined;
   const standard    = req.body.standard !== undefined ? String(req.body.standard).trim() : undefined;
   const kind        = req.body.kind !== undefined ? require('../utils/courseKind').cleanKind(req.body.kind) : undefined;
+  const cardColor   = req.body.card_color !== undefined ? Math.max(-1, Math.min(7, parseInt(req.body.card_color, 10))) : undefined;
 
   if (!oldName) throw new AppError('old name is required', 400);
   if (!newName) throw new AppError('new name is required', 400);
@@ -354,6 +357,7 @@ exports.renameBatch = asyncHandler(async (req, res) => {
   if (medium !== undefined) updateFields.medium = medium;
   if (standard !== undefined) updateFields.standard = standard;
   if (kind !== undefined) updateFields.kind = kind;
+  if (cardColor !== undefined && !Number.isNaN(cardColor)) updateFields.card_color = cardColor;
 
   await Promise.all([
     Batch.updateOne({ name: oldName }, { $set: updateFields }),
@@ -874,9 +878,10 @@ exports.getBatchPricing = asyncHandler(async (req, res) => {
  */
 exports.getAllBatchesPricing = asyncHandler(async (req, res) => {
   const batches = await Batch.find({ is_active: true })
-    .select('name icon cover_image pricing_type monthly_price yearly_price trial_days description board medium standard kind subjects.name')
+    .select('name icon cover_image pricing_type monthly_price yearly_price trial_days description board medium standard kind card_color subjects.name')
     .lean();
   const { kindOf } = require('../utils/courseKind');
+  const facts = await require('../utils/courseFacts').courseFacts().catch(() => ({}));
 
   const data = batches.map(b => ({
     name: b.name,
@@ -896,6 +901,9 @@ exports.getAllBatchesPricing = asyncHandler(async (req, res) => {
     // the course card (core/courseCard.js) is drawn from these: the type and the subjects there are now
     kind: kindOf(b),
     subjects: (b.subjects || []).map(s => s.name).filter(Boolean),
+    // what the course holds (subjects, chapters, Notes, answers, free part) for the card's moving line
+    facts: facts[b.name] || null,
+    card_color: Number.isInteger(b.card_color) ? b.card_color : -1,
   }));
 
   res.json({ success: true, data });
