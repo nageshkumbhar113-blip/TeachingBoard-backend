@@ -22,6 +22,7 @@
   // ── settings: change here, not in the rules ──
   const CONFIG = {
     offerHours: 24, offerPercent: 50,
+    offer2Percent: 30,            // after the 24 h: this much until the first Sunday 11 pm (IST), then the full price
     windowHours: 24,              // the free window after the parent's own message
     earlyHours: 1,                // the daily test goes this much before the window closes, if the chosen time is later
     quiet: { from: 21, to: 8 },   // no message from the bot in these hours (IST)
@@ -85,8 +86,19 @@
   }
   // "Monthly ₹200 → ₹100 · Yearly ₹1,500 → ₹750" from the class's real prices (lead.prices), nothing when unknown
   const rs = n => '₹' + Number(n).toLocaleString('en-IN');
-  function priceText(lead, withOffer) {
-    const p = lead.prices || {}, cut = n => Math.round(n * (100 - CONFIG.offerPercent) / 100);
+  // the offer right now: { pct, end } (50 % for 24 h, then 30 % until the first Sunday 11 pm), or null
+  function offerNow(lead, now) {
+    if (lead.paid || !lead.offerEnd) return null;
+    const e1 = new Date(lead.offerEnd);
+    if (now < e1) return { pct: CONFIG.offerPercent, end: e1, stage: 1 };
+    let d = atIST(e1, 23, 0, 0);
+    for (let i = 0; i < 9 && (dow(d) !== 0 || d <= e1); i++) d = atIST(e1, 23, 0, i + 1);
+    return now < d ? { pct: CONFIG.offer2Percent, end: d, stage: 2 } : null;
+  }
+  function priceText(lead, withOffer, now) {
+    const o = withOffer ? offerNow(lead, now || new Date()) : null;
+    if (withOffer && !o) withOffer = false;
+    const p = lead.prices || {}, cut = n => Math.round(n * (100 - (o ? o.pct : 0)) / 100);
     const one = (label, n) => n ? `${label} ${rs(n)}${withOffer ? ' → ' + rs(cut(n)) : ''}` : '';
     return [one('Monthly', p.monthly), one('Yearly', p.yearly)].filter(Boolean).join(' · ');
   }
@@ -134,11 +146,12 @@
   // ── texts ──
   const HINT = '\n👉 पुढची free test हवी तेव्हा फक्त *TEST* पाठवा.';
   const tail = lead => HINT + (lead.app ? '' : `\n\nहवं असल्यास app install करा आणि सर्व उपलब्ध free tests सोडवा 👇\n${CONFIG.play}`);
-  const offerLine = (lead, now) => !lead.paid && lead.offerEnd && now < new Date(lead.offerEnd) ? `\n🎁 पहिल्या payment वर ${CONFIG.offerPercent}% सूट — ${whenText(new Date(lead.offerEnd), now)} पर्यंत.` : '';
+  const offerLine = (lead, now) => { const o = offerNow(lead, now); return o ? `\n🎁 पहिल्या payment वर ${o.pct}% सूट — ${whenText(o.end, now)} पर्यंत.` : ''; };
   const scoreLine = s => s ? `${s.score}/${s.total}${s.rank ? ` · ${s.of} विद्यार्थ्यांमध्ये #${s.rank}` : ''}${s.title ? `\n📝 ${s.title}` : ''}${s.weak ? `\nकमकुवत भाग: ${s.weak}` : ''}` : '';
   function mainButtons(lead, now) {
     const b = [];
-    if (!lead.paid && lead.offerEnd && now < new Date(lead.offerEnd)) b.push({ id: 'pay', label: `💳 ${CONFIG.offerPercent}% सूट — pay` });
+    const o = offerNow(lead, now);
+    if (o) b.push({ id: 'pay', label: `💳 ${o.pct}% सूट — pay` });
     if (!lead.mtReg) b.push({ id: 'mt_reg', label: '🏆 महा-Test नोंदणी' });
     if (!lead.app) b.push({ id: 'app', label: '📲 App' });
     b.push({ id: 'ask', label: '❓ प्रश्न' });
@@ -148,12 +161,12 @@
   // 🔓 the child's own course: what it opens, the price (with the offer while it runs) and the pay link — numbers from Admin
   function unlockText(lead, now) {
     if (lead.paid) return '';
-    const on = !!lead.offerEnd && now < new Date(lead.offerEnd);
-    const price = priceText(lead, on);
+    const o = offerNow(lead, now), on = !!o;
+    const price = priceText(lead, on, now);
     return `\n\n🔓 *${lead.cls || 'पूर्ण'} course* — ${lead.name} साठी:\n` +
       `✅ सगळे ${lead.totalTests ? lead.totalTests + ' ' : ''}tests${lead.freeTotal ? ` (आत्ता ${lead.freeTotal} free)` : ''} · प्रत्येक प्रश्नाचं स्पष्टीकरण\n` +
       '✅ Notes, Exercise आणि सराव · दर रविवारी महा-Test · पालकांना progress report' +
-      (price ? `\n💳 ${price}${on ? ` (${CONFIG.offerPercent}% सूट ${whenText(new Date(lead.offerEnd), now)} पर्यंत)` : ''}` : '') +
+      (price ? `\n💳 ${price}${on ? ` (${o.pct}% सूट ${whenText(o.end, now)} पर्यंत)` : ''}` : '') +
       `\n👉 ${L.pay(lead.gid)}`;
   }
   const unlockButtons = lead => lead.paid ? [{ id: 'ask', label: '❓ प्रश्न' }]
@@ -196,8 +209,8 @@
   }
   function offerMsg(lead, now, out) {
     if (lead.paid) { out.push(wa(lead, now, `✅ ${lead.name} चं account आधीच चालू आहे.`)); return; }
-    const on = lead.offerEnd && now < new Date(lead.offerEnd);
-    out.push(wa(lead, now, `${on ? `🎁 पहिल्या payment वर ${CONFIG.offerPercent}% सूट — ${whenText(new Date(lead.offerEnd), now)} पर्यंत.${priceText(lead, true) ? '\n' + priceText(lead, true) : ''}` : '📚 सगळे chapters, tests, notes आणि महा-Test'}\n👇 ${L.pay(lead.gid)}`,
+    const o = offerNow(lead, now);
+    out.push(wa(lead, now, `${o ? `🎁 पहिल्या payment वर ${o.pct}% सूट — ${whenText(o.end, now)} पर्यंत.${priceText(lead, true, now) ? '\n' + priceText(lead, true, now) : ''}` : '📚 सगळे chapters, tests, notes आणि महा-Test'}\n👇 ${L.pay(lead.gid)}`,
       [{ id: 'ask', label: '❓ प्रश्न' }, { id: 'call_me', label: '📞 Call हवा' }]));
   }
   function answer(lead, now, out, text) {
@@ -286,7 +299,7 @@
     if (t === 'got') { out.push(wa(lead, now, '👍 Test झाली की result इथे येईल.')); return out; }
     if (t === 'next') { out.push(wa(lead, now, '👍 उद्या पुढची पाठवतो.')); if (!lead.shared && lead.testsDone >= 2) shareMsg(lead, now, out); return out; }
     if (t === 'ask') { out.push(wa(lead, now, 'कोणता प्रश्न?', [{ id: 'ask:fee', label: 'फी किती?' }, { id: 'ask:app', label: 'App कसा वापरायचा?' }])); return out; }
-    if (t === 'ask:fee') { answer(lead, now, out, `${priceText(lead, false) || 'फी: pay page वर'}.${offerLine(lead, now)}\nPay नंतर सगळे tests, notes, स्वाध्याय उत्तरं आणि महा-Test.`); return out; }
+    if (t === 'ask:fee') { answer(lead, now, out, `${priceText(lead, false, now) || 'फी: pay page वर'}.${offerLine(lead, now)}\nPay नंतर सगळे tests, notes, स्वाध्याय उत्तरं आणि महा-Test.`); return out; }
     if (t === 'ask:app') { answer(lead, now, out, 'Play Store वरून install करा → login लागत नाही → Home वर "पुढचा test". Pay नंतर Student Code + PIN किंवा WhatsApp login.'); return out; }
     if (t === 'ask:pin') { answer(lead, now, out, 'App → Login → "📲 WhatsApp ने login" → नवीन PIN. 1 मिनिट.'); return out; }
     if (t === 'ask:open') { answer(lead, now, out, 'App update करा (Play Store) आणि internet चालू ठेवून एकदा उघडा.'); return out; }
@@ -411,7 +424,8 @@
       else if (canPush(lead)) out.push(push(`🌅 आजचा प्रश्न — 1 मिनिट${offerLine(lead, now).replace('\n', ' · ')}`, [{ id: 'push:OFFER', label: '💬 WhatsApp वर सूट' }]));
     });
     nudge('nudge3', new Date(offerEnd.getTime() - 3 * H), (out, now) => {
-      if (isOpen(lead, now)) out.push(wa(lead, now, `⏳ ${CONFIG.offerPercent}% सूट 3 तासांत संपेल${priceText(lead, true) ? ' (' + priceText(lead, true) + ')' : ''}.\n👇 ${L.pay(lead.gid)}\nकाही शंका असेल तर आमची team call करू शकते.`, [{ id: 'call_me', label: '📞 Call हवा' }], { own: true }));
+      const o2 = offerNow(lead, new Date(offerEnd.getTime() + 60e3));
+      if (isOpen(lead, now)) out.push(wa(lead, now, `⏳ ${CONFIG.offerPercent}% सूट 3 तासांत संपेल${priceText(lead, true, now) ? ' (' + priceText(lead, true, now) + ')' : ''}.${o2 ? `\nत्यानंतर ${whenText(o2.end, now)} पर्यंत ${o2.pct}%.` : ''}\n👇 ${L.pay(lead.gid)}\nकाही शंका असेल तर आमची team call करू शकते.`, [{ id: 'call_me', label: '📞 Call हवा' }], { own: true }));
       else if (canPush(lead)) out.push(push(`⏳ ${CONFIG.offerPercent}% सूट 3 तासांत संपेल`, [{ id: 'push:OFFER', label: '💬 WhatsApp वर सूट' }]));
     });
     // 2) the daily free test, from the day after the first test, not on Sunday

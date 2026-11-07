@@ -27,6 +27,26 @@ const { isChapterIdFree, makeChapterId } = require('../utils/contentAccess');
 
 const OFFER_PERCENT = 50;
 const OFFER_HOURS = 24;
+// the second step: after the 24 hours, 30 % until the first Sunday 11 pm (IST) after them; then the full price
+const OFFER2_PERCENT = 30;
+const IST_MS = 5.5 * 3600 * 1000;
+function _offer2End(o) {
+  const end = new Date(o.expires_at).getTime();
+  const x = new Date(end + IST_MS);
+  let d = Date.UTC(x.getUTCFullYear(), x.getUTCMonth(), x.getUTCDate(), 23, 0) - IST_MS;   // that day, 11 pm IST
+  for (let i = 0; i < 9 && (new Date(d + IST_MS).getUTCDay() !== 0 || d <= end); i++) d += 864e5;
+  return new Date(d);
+}
+// the offer right now: { percent, ends, stage } or null
+function _offerNow(lead, now = Date.now()) {
+  const o = lead?.offer;
+  if (!o?.expires_at) return null;
+  const e1 = new Date(o.expires_at).getTime();
+  if (now < e1) return { percent: o.percent || OFFER_PERCENT, ends: new Date(e1), stage: 1 };
+  const e2 = _offer2End(o);
+  if (now < e2.getTime()) return { percent: OFFER2_PERCENT, ends: e2, stage: 2 };
+  return null;
+}
 // 'ad' = a Facebook / Instagram ad's link (ref = the ad's id, Admin › Sync › Ads)
 const SOURCES = new Set(['admin', 'friend', 'teacher', 'student', 'shop', 'ad', 'web']);
 const EVENT_STEPS = new Set(['browsed', 'link_sent', 'engaged', 'shared_friend', 'shared_parent', 'offer_seen', 'checkout', 'wa_bot']);
@@ -66,11 +86,16 @@ function _profile(lead) {
 function _offerView(lead) {
   const o = lead?.offer;
   if (!o || !o.expires_at) return null;
+  const now = _offerNow(lead);
+  // percent / expires_at / active = the step running now (what the pages show and the checkout uses);
+  // steps = the whole rule, shown on the pay page
   return {
-    percent: o.percent,
-    expires_at: o.expires_at,
-    active: new Date(o.expires_at).getTime() > Date.now(),
+    percent: now ? now.percent : o.percent,
+    expires_at: now ? now.ends : o.expires_at,
+    active: !!now,
+    stage: now ? now.stage : 0,
     month: o.month,
+    steps: [{ percent: o.percent || OFFER_PERCENT, ends: o.expires_at }, { percent: OFFER2_PERCENT, ends: _offer2End(o) }],
   };
 }
 
@@ -236,7 +261,7 @@ exports.claimOffer = asyncHandler(async (req, res) => {
 });
 
 function _offerActive(lead) {
-  return !!(lead?.offer?.expires_at && new Date(lead.offer.expires_at).getTime() > Date.now());
+  return !!_offerNow(lead);
 }
 
 async function _leadByTokenOrGid(req) {
@@ -383,7 +408,7 @@ exports.checkout = asyncHandler(async (req, res) => {
   const priorPaid = await StudentSubscription.exists({ student_user_id: student.user_id, payment_verified: true, is_trial: false });
   // Owner's choice 2026-11-01: the offer is on the first payment, monthly or yearly.
   const useOffer = _offerActive(lead) && !priorPaid;
-  const percent = useOffer ? (lead.offer.percent || OFFER_PERCENT) : 0;
+  const percent = useOffer ? _offerNow(lead).percent : 0;
   const amount = Math.round(price * (1 - percent / 100));
 
   if (!lead.steps.includes('checkout')) lead.steps.push('checkout');
@@ -407,7 +432,7 @@ exports.checkout = asyncHandler(async (req, res) => {
     status: 'created',
     is_trial: false,
     discount_applied_percent: percent,
-    discount_source: useOffer ? 'test_offer' : '',
+    discount_source: useOffer ? (_offerNow(lead).stage === 2 ? 'test_offer_2' : 'test_offer') : '',
   });
 
   res.status(201).json({
@@ -853,3 +878,5 @@ exports.noteGuestAttempt = noteGuestAttempt;
 exports.freeTestCounts = _freeTestCounts;
 exports.noteLead = gid => _adLead(gid).catch(err => console.warn('[ad lead] bot', err.message));
 exports.noteAdPurchase = (sub) => noteAdPurchase(sub).catch(err => console.warn('[meta capi] purchase', err.message));
+
+exports.offerNow = _offerNow;   // the first-payment offer right now (bot + tests)

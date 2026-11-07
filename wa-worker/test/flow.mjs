@@ -55,7 +55,7 @@ const later = new Date(now.getTime() + 30 * 3600e3);
 W.inbound(lead, 'hi', later);
 out = W.event(lead, 'test_done', { n: 2, score: 9, total: 10 }, later);
 r = out.find(x => x.to === 'wa');
-ok(/Monthly ₹200 · Yearly/.test(r.text) && !/→/.test(r.text.split('🔓')[1] || ''), 'after the offer: full price, no offer line', r.text);
+ok(r.text.includes('Monthly ₹200 → ₹140') && r.text.includes('30% सूट'), 'the day after: the second step (30 %)', r.text);
 ok(r.buttons.some(b => b.id === 'pay'), 'after the offer the Unlock button stays');
 
 // 7) MAHA from the website after the महा-Test: the window opens, the result + rank + unlock come when ready
@@ -91,6 +91,28 @@ W.inbound(lead, 'hi', new Date(now.getTime() + 18 * 3600e3));
 const end = new Date(lead.offerEnd);
 out = W.tick(lead, new Date(end.getTime() - 3 * 3600e3 + 60e3));
 ok(out.some(x => x.to === 'wa' && /3 तासांत संपेल/.test(x.text)), 'offer: one reminder 3 hours before the end', JSON.stringify(out.map(x => x.text || x.what)));
+
+// 10) two-step offer: 50 % for 24 h, then 30 % until the first Sunday 11 pm, then the full price
+lead = W.createLead({ gid: 'HHHH111111', name: 'Om', cls: '8th NMMS', freeTotal: 18 }, now);
+W.event(lead, 'sync', { prices: { monthly: 200 } }, now);
+W.event(lead, 'test_done', { n: 1, score: 5, total: 10 }, now);              // Tuesday 6:30 pm → 50 % until Wednesday 6:30 pm
+const thu = new Date('2026-11-12T08:00:00Z');                                 // Thursday 1:30 pm
+out = W.inbound(lead, 'RESULT HHHH111111', thu);
+r = out.find(x => x.to === 'wa');
+ok(r.text.includes('Monthly ₹200 → ₹140') && r.text.includes('30% सूट') && /रविवारी रात्री 11/.test(r.text), 'after 24 h: 30 % until Sunday 11 pm', r.text);
+const mon = new Date('2026-11-16T08:00:00Z');                                 // Monday
+W.inbound(lead, 'hi', mon);
+out = W.event(lead, 'test_done', { n: 2, score: 6, total: 10 }, mon);
+r = out.find(x => x.to === 'wa');
+ok(r && !/सूट/.test(r.text) && r.text.includes('Monthly ₹200') && !r.text.includes('→'), 'after Sunday: the full price', r && r.text);
+lead = W.createLead({ gid: 'IIII111111', name: 'Om', cls: '8th', freeTotal: 18 }, now);
+W.event(lead, 'sync', { prices: { monthly: 200 } }, now);
+W.event(lead, 'test_done', { n: 1, score: 5, total: 10 }, now);
+W.inbound(lead, 'RESULT IIII111111', now);
+W.inbound(lead, 'hi', new Date(now.getTime() + 18 * 3600e3));
+out = W.tick(lead, new Date(new Date(lead.offerEnd).getTime() - 3 * 3600e3 + 60e3));
+r = out.find(x => x.to === 'wa' && /3 तासांत/.test(x.text));
+ok(r && /त्यानंतर .*30%/.test(r.text), 'the 3-hour reminder says what comes next (30 % until Sunday)', r && r.text);
 
 console.log(bad ? `${bad} FAILED` : 'FLOW ALL PASS');
 process.exit(bad ? 1 : 0);
