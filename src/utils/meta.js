@@ -137,12 +137,12 @@ async function _maharashtra() {
   return _region;
 }
 // 📍 area groups (NMMS: where most of the state's NMMS students register — the admin's district table,
-// 2025: the 6 districts of group A = 44% of 2,48,758). Each town + a 40 km circle; Pune district only by
-// its rural towns (the city's English-medium schools are not the NMMS audience, and cost more).
+// 2025: the 6 districts of group A = 44% of 2,48,758). Each town + a 40 km circle. Pune city too
+// (2026-11-07, the admin: many aware parents and ZP / corporation schools there).
 // A town may be known to Meta by an old name — every name is tried.
 const GEO = {
   gata: [['Kolhapur'], ['Ichalkaranji'], ['Gadhinglaj'], ['Sangli'], ['Miraj'], ['Islampur'], ['Satara'], ['Karad'], ['Phaltan'], ['Solapur'], ['Pandharpur'], ['Barshi'],
-    ['Ahilyanagar', 'Ahmednagar'], ['Shrirampur'], ['Sangamner'], ['Baramati'], ['Indapur'], ['Shirur'], ['Junnar'], ['Daund']],
+    ['Ahilyanagar', 'Ahmednagar'], ['Shrirampur'], ['Sangamner'], ['Pune'], ['Pimpri-Chinchwad', 'Pimpri'], ['Baramati'], ['Indapur'], ['Shirur'], ['Junnar'], ['Daund']],
   marathwada: [['Chhatrapati Sambhajinagar', 'Aurangabad'], ['Beed'], ['Ambajogai'], ['Latur'], ['Udgir'], ['Nanded'], ['Dharashiv', 'Osmanabad']],
   nashik: [['Nashik'], ['Malegaon'], ['Sinnar']],
   kolhapur: [['Kolhapur'], ['Ichalkaranji'], ['Gadhinglaj']],
@@ -151,7 +151,7 @@ const GEO_KM = 40;
 const _cityKeys = new Map();
 async function _city(names) {
   for (const n of names) {
-    if (_cityKeys.has(n)) return _cityKeys.get(n);
+    if (_cityKeys.has(n)) { if (_cityKeys.get(n)) return _cityKeys.get(n); continue; }   // a name Meta did not know: try the next one
     const r = await graph('search', { type: 'adgeolocation', location_types: ['city'], q: n, country_code: 'IN', limit: 10 }).catch(() => null);
     // the exact name first (e.g. Shirur, Pune — not Shirur Kasar, Beed), else a name that starts with it
     const mh = (r?.data || []).filter(x => /maharashtra/i.test(x.region || ''));
@@ -398,4 +398,17 @@ async function setBudget(adsetId, rupees, { big = false } = {}) {
   return { adset_id: s.id, name: s.name, from: old, to: want };
 }
 
-module.exports = { configured, account, insights, graph, uploadVideo, uploadImage, createAd, adsState, setAdStatus, raiseBudget, setBudget, replaceVideo, sendEvent, fbcOf, isStudentAd, datasetReady, _resetCache: () => { _cache = null; _region = null; } };
+// 📍 the group's towns again on an ad set that already runs (e.g. a town was added to the group):
+// only the places change — ages and the rest of its targeting stay
+async function retarget(adsetId, geo) {
+  if (!/^\d+$/.test(String(adsetId))) throw Object.assign(new Error('Bad ad set id'), { status: 400 });
+  if (!GEO[geo]) throw Object.assign(new Error('Unknown area'), { status: 400 });
+  const s = await graph(String(adsetId), { fields: 'id,name,account_id,targeting' });
+  if (`act_${s.account_id}` !== env().account) throw Object.assign(new Error('Not this ad account'), { status: 400 });
+  const place = await _geoOf(geo);
+  await post(String(adsetId), { targeting: { ...(s.targeting || {}), geo_locations: place.geo } });
+  _cache = null;
+  return { name: s.name, towns: place.geo.cities.length, missed: place.missed };
+}
+
+module.exports = { configured, account, insights, retarget, graph, uploadVideo, uploadImage, createAd, adsState, setAdStatus, raiseBudget, setBudget, replaceVideo, sendEvent, fbcOf, isStudentAd, datasetReady, _resetCache: () => { _cache = null; _region = null; } };
