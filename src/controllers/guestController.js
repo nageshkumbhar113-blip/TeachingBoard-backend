@@ -28,7 +28,7 @@ const OFFER_PERCENT = 50;
 const OFFER_HOURS = 12;
 // 'ad' = a Facebook / Instagram ad's link (ref = the ad's id, Admin › Sync › Ads)
 const SOURCES = new Set(['admin', 'friend', 'teacher', 'student', 'shop', 'ad', 'web']);
-const EVENT_STEPS = new Set(['browsed', 'engaged', 'shared_friend', 'shared_parent', 'offer_seen', 'checkout']);
+const EVENT_STEPS = new Set(['browsed', 'link_sent', 'engaged', 'shared_friend', 'shared_parent', 'offer_seen', 'checkout']);
 
 const _clean = (v, max = 60) => String(v || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, max);
 const _istMonth = (d = new Date()) => new Date(d.getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 7);
@@ -441,7 +441,7 @@ exports.adminDeleteExam = asyncHandler(async (req, res) => {
 
 // ── Admin ────────────────────────────────────────────────────────────────────
 
-const FUNNEL_STEPS = ['opened', 'browsed', 'engaged', 'tested', 'shared_friend', 'shared_parent', 'lead', 'offer_seen', 'checkout', 'paid'];
+const FUNNEL_STEPS = ['opened', 'browsed', 'link_sent', 'engaged', 'tested', 'shared_friend', 'shared_parent', 'lead', 'offer_seen', 'checkout', 'paid'];
 
 async function _paidCodes(codes) {
   if (!codes.length) return new Set();
