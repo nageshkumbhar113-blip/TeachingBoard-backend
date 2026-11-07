@@ -49,7 +49,7 @@ function _offerNow(lead, now = Date.now()) {
 }
 // 'ad' = a Facebook / Instagram ad's link (ref = the ad's id, Admin › Sync › Ads)
 const SOURCES = new Set(['admin', 'friend', 'teacher', 'student', 'shop', 'ad', 'web']);
-const EVENT_STEPS = new Set(['browsed', 'link_sent', 'engaged', 'shared_friend', 'shared_parent', 'offer_seen', 'checkout', 'wa_bot']);
+const EVENT_STEPS = new Set(['browsed', 'link_sent', 'engaged', 'shared_friend', 'shared_parent', 'offer_seen', 'checkout', 'wa_bot', 'lesson']);
 
 const _clean = (v, max = 60) => String(v || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, max);
 const _istMonth = (d = new Date()) => new Date(d.getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 7);
@@ -127,7 +127,7 @@ async function _freeTestCounts() {
 
 // GET /api/guest/batches — the batch picker (no token needed).
 exports.listBatches = asyncHandler(async (_req, res) => {
-  const batches = await Batch.find({ is_active: { $ne: false } }, 'name icon cover_image board medium standard subjects.name').lean();
+  const batches = await Batch.find({ is_active: { $ne: false } }, 'name icon cover_image board medium standard kind subjects.name').lean();
   const free = await _freeTestCounts().catch(() => ({}));
   res.json({
     success: true,
@@ -135,6 +135,7 @@ exports.listBatches = asyncHandler(async (_req, res) => {
       name: b.name,
       icon: b.icon || '📚',
       cover_image: b.cover_image || '',
+      kind: require('../utils/courseKind').kindOf(b),
       board: b.board || '',
       medium: b.medium || '',
       standard: b.standard || '',
@@ -242,7 +243,7 @@ exports.claimOffer = asyncHandler(async (req, res) => {
   const month = _istMonth();
   if (lead.offer?.month === month) return res.json({ success: true, offer: _offerView(lead) });
 
-  const tested = await Attempt.exists({ student_code: req.user.student_code });
+  const tested = (lead.steps || []).includes('lesson') || await Attempt.exists({ student_code: req.user.student_code });
   if (!tested) throw new AppError('Finish a test first', 400);
 
   if (lead.parent_mobile) {

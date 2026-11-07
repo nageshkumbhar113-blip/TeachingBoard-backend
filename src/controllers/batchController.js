@@ -233,8 +233,10 @@ exports.createBatch = asyncHandler(async (req, res) => {
   const board    = req.body.board    !== undefined ? String(req.body.board).trim()    : undefined;
   const medium   = req.body.medium   !== undefined ? String(req.body.medium).trim()   : undefined;
   const standard = req.body.standard !== undefined ? String(req.body.standard).trim() : undefined;
+  const kind     = req.body.kind !== undefined ? require('../utils/courseKind').cleanKind(req.body.kind) : undefined;
 
   const insertDoc = { name, icon, subjects: [], ...pricingFields };
+  if (kind        !== undefined) insertDoc.kind          = kind;
   if (description !== undefined) insertDoc.description = description;
   if (board       !== undefined) insertDoc.board        = board;
   if (medium      !== undefined) insertDoc.medium        = medium;
@@ -258,6 +260,7 @@ exports.createBatch = asyncHandler(async (req, res) => {
       board: batch.board || '',
       medium: batch.medium || '',
       standard: batch.standard || '',
+      kind: batch.kind || '',
     },
   });
 });
@@ -326,6 +329,7 @@ exports.renameBatch = asyncHandler(async (req, res) => {
   const board       = req.body.board !== undefined ? String(req.body.board).trim() : undefined;
   const medium      = req.body.medium !== undefined ? String(req.body.medium).trim() : undefined;
   const standard    = req.body.standard !== undefined ? String(req.body.standard).trim() : undefined;
+  const kind        = req.body.kind !== undefined ? require('../utils/courseKind').cleanKind(req.body.kind) : undefined;
 
   if (!oldName) throw new AppError('old name is required', 400);
   if (!newName) throw new AppError('new name is required', 400);
@@ -349,6 +353,7 @@ exports.renameBatch = asyncHandler(async (req, res) => {
   if (board !== undefined) updateFields.board = board;
   if (medium !== undefined) updateFields.medium = medium;
   if (standard !== undefined) updateFields.standard = standard;
+  if (kind !== undefined) updateFields.kind = kind;
 
   await Promise.all([
     Batch.updateOne({ name: oldName }, { $set: updateFields }),
@@ -869,8 +874,9 @@ exports.getBatchPricing = asyncHandler(async (req, res) => {
  */
 exports.getAllBatchesPricing = asyncHandler(async (req, res) => {
   const batches = await Batch.find({ is_active: true })
-    .select('name icon cover_image pricing_type monthly_price yearly_price trial_days description board medium standard')
+    .select('name icon cover_image pricing_type monthly_price yearly_price trial_days description board medium standard kind subjects.name')
     .lean();
+  const { kindOf } = require('../utils/courseKind');
 
   const data = batches.map(b => ({
     name: b.name,
@@ -887,6 +893,9 @@ exports.getAllBatchesPricing = asyncHandler(async (req, res) => {
     board: b.board || '',
     medium: b.medium || '',
     standard: b.standard || '',
+    // the course card (core/courseCard.js) is drawn from these: the type and the subjects there are now
+    kind: kindOf(b),
+    subjects: (b.subjects || []).map(s => s.name).filter(Boolean),
   }));
 
   res.json({ success: true, data });

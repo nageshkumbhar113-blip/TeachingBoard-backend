@@ -106,7 +106,7 @@
   // ── a new lead (one child of one family) ──
   function createLead(o, now) {
     return {
-      gid: o.gid, name: o.name || 'तुमचा पाल्य', cls: o.cls || '', freeTotal: o.freeTotal || 0, totalTests: o.totalTests || 0, courses: o.courses || [],
+      gid: o.gid, name: o.name || 'तुमचा पाल्य', cls: o.cls || '', freeTotal: o.freeTotal || 0, totalTests: o.totalTests || 0, kind: o.kind || '', freeLessons: o.freeLessons || 0, lessonsSent: 0, courses: o.courses || [],
       source: o.source || '', createdAt: now.toISOString(),
       via: null,                    // 'wa' | 'form' | 'app'
       firstTestAt: null, offerEnd: null, testsDone: 0, last: null,
@@ -145,7 +145,8 @@
 
   // ── texts ──
   const HINT = '\n👉 पुढची free test हवी तेव्हा फक्त *TEST* पाठवा.';
-  const tail = lead => HINT + (lead.app ? '' : `\n\nहवं असल्यास app install करा आणि सर्व उपलब्ध free tests सोडवा 👇\n${CONFIG.play}`);
+  const tail = lead => (lead.kind === 'regular' ? '\n👉 पुढचा free धडा हवा तेव्हा फक्त *TEST* पाठवा.' : HINT) +
+    (lead.app ? '' : `\n\nहवं असल्यास app install करा आणि सर्व उपलब्ध free ${lead.kind === 'regular' ? 'धडे पाहा' : 'tests सोडवा'} 👇\n${CONFIG.play}`);
   const offerLine = (lead, now) => { const o = offerNow(lead, now); return o ? `\n🎁 पहिल्या payment वर ${o.pct}% सूट — ${whenText(o.end, now)} पर्यंत.` : ''; };
   const scoreLine = s => s ? `${s.score}/${s.total}${s.rank ? ` · ${s.of} विद्यार्थ्यांमध्ये #${s.rank}` : ''}${s.title ? `\n📝 ${s.title}` : ''}${s.weak ? `\nकमकुवत भाग: ${s.weak}` : ''}` : '';
   function mainButtons(lead, now) {
@@ -163,9 +164,10 @@
     if (lead.paid) return '';
     const o = offerNow(lead, now), on = !!o;
     const price = priceText(lead, on, now);
-    return `\n\n🔓 *${lead.cls || 'पूर्ण'} course* — ${lead.name} साठी:\n` +
-      `✅ सगळे ${lead.totalTests ? lead.totalTests + ' ' : ''}tests${lead.freeTotal ? ` (आत्ता ${lead.freeTotal} free)` : ''} · प्रत्येक प्रश्नाचं स्पष्टीकरण\n` +
-      '✅ Notes, Exercise आणि सराव · दर रविवारी महा-Test · पालकांना progress report' +
+    const what = lead.kind === 'regular'
+      ? `✅ सगळ्या विषयांचे सगळे धडे${lead.freeLessons ? ` (आत्ता ${lead.freeLessons} free)` : ''}: Notes · स्वाध्याय उत्तरं · सराव\n✅ Internet नसतानाही app मध्ये · पालकांना progress report`
+      : `✅ सगळे ${lead.totalTests ? lead.totalTests + ' ' : ''}tests${lead.freeTotal ? ` (आत्ता ${lead.freeTotal} free)` : ''} · प्रत्येक प्रश्नाचं स्पष्टीकरण\n✅ Notes, Exercise आणि सराव · दर रविवारी महा-Test · पालकांना progress report`;
+    return `\n\n🔓 *${lead.cls || 'पूर्ण'} course* — ${lead.name} साठी:\n` + what +
       (price ? `\n💳 ${price}${on ? ` (${o.pct}% सूट ${whenText(o.end, now)} पर्यंत)` : ''}` : '') +
       `\n👉 ${L.pay(lead.gid)}`;
   }
@@ -181,7 +183,9 @@
   // one free test link (at most one a day on WhatsApp; Sunday is the महा-Test's day)
   function testLink(lead, now, out, own) {
     if (lead.paid) { out.push(wa(lead, now, `✅ ${lead.name} चे सगळे tests app मध्ये उघडे आहेत 👇\n${CONFIG.play}`, [], { own })); return; }
-    if (lead.testsDone >= lead.freeTotal) { out.push(wa(lead, now, `🎉 ${lead.name} चे सगळे ${lead.freeTotal} free tests पूर्ण! पुढचे chapters 👇\n${L.pay(lead.gid)}`, [], { own })); return; }
+    if (lead.kind === 'regular' ? lead.freeLessons && lead.lessonsSent >= lead.freeLessons : lead.testsDone >= lead.freeTotal) {
+      out.push(wa(lead, now, lead.kind === 'regular' ? `🎉 ${lead.name} चे सगळे ${lead.freeLessons} free धडे झाले! पुढचे धडे 👇\n${L.pay(lead.gid)}` : `🎉 ${lead.name} चे सगळे ${lead.freeTotal} free tests पूर्ण! पुढचे chapters 👇\n${L.pay(lead.gid)}`, [], { own })); return;
+    }
     if (isMtDay(now, lead)) { out.push(wa(lead, now, `🏆 आज महा-Test चा दिवस. ${lead.mtReg ? `${lead.name} ने ${whenText(nextMahaTest(now, lead) || now, now)} ला याच link वरून द्यायचा 👇\n${L.child(lead.gid)}` : 'नोंदणी करायची?'}\nउद्यापासून पुन्हा रोजची free test.`, lead.mtReg ? [] : [{ id: 'mt_reg', label: '🏆 नोंदणी' }], { own })); return; }
     if (lead.testDay === dayKey(now)) {
       const t = CONFIG.dailyTimes.find(x => x.id === lead.daily);
@@ -190,6 +194,12 @@
       return;
     }
     lead.testDay = dayKey(now);
+    if (lead.kind === 'regular') {
+      lead.lessonsSent = (lead.lessonsSent || 0) + 1;
+      const bl = [{ id: 'got', label: '👍 पाल्याला दिला' }];
+      out.push(wa(lead, now, `📚 ${lead.name} चा आजचा free धडा${lead.freeLessons ? ` (${Math.min(lead.lessonsSent + 1, lead.freeLessons)}/${lead.freeLessons})` : ''} 👇\n📒 Notes · ✍️ स्वाध्याय उत्तरं · 📝 सराव\n${L.child(lead.gid)}` + tail(lead), bl, { own }));
+      return;
+    }
     const n = lead.testsDone + 1;
     const b = [{ id: 'got', label: '👍 पाल्याला दिली' }];
     if (!lead.mtReg) b.push({ id: 'mt_reg', label: '🏆 महा-Test नोंदणी' });
@@ -260,6 +270,13 @@
         return out;
       }
       lead.awaiting = 'name'; out.push(wa(lead, now, 'नमस्कार 🙏 पाल्याचं नाव काय?')); out.push(log('CRM', 'पालक एकटे: नंबर WhatsApp वरून आपोआप, form नाही. Meta ला "Lead".')); return out; }
+    if (kw === 'TEST' && !lead.via && lead.kind === 'regular') {
+      out.push({ to: 'do', action: 'lead' }); lead.via = 'wa'; lead.testDay = dayKey(now);   // today's lesson was on the website
+      out.push(log('CRM', 'Website चं "पुढचा धडा" बटण → नंबर WhatsApp वरून आपोआप → lead. Meta ला "Lead".'));
+      out.push(wa(lead, now, `✅ नमस्कार! ${lead.name} चा आजचा free धडा झाला.\nउद्यापासून रोज 1 free धडा (Notes + स्वाध्याय उत्तरं) इथे पाठवू.` + unlockText(lead, now), unlockButtons(lead), { template: 'utility' }));
+      if (!lead.daily) out.push(wa(lead, now, '📚 रोज 1 free धडा कोणत्या वेळी पाठवू?', [...CONFIG.dailyTimes.map(x => ({ id: 'daily:' + x.id, label: x.label })), { id: 'daily:no', label: 'नको' }]));
+      return out;
+    }
     if (kw === 'TEST' && !lead.via && lead.testsDone >= 1) {
       // the first message, from the website's "next test" button: the number becomes the lead; result + daily time
       out.push({ to: 'do', action: 'lead' }); lead.via = 'wa';
@@ -268,7 +285,7 @@
     }
     if (kw === 'TEST' || t === 'टेस्ट' || t === 'पुढची' || kw === 'PUSH') {
       lead.stopped = false; testLink(lead, now, out, false);
-      if (!lead.daily && !lead.paid && !lead.app) out.push(wa(lead, now, '📝 अशी रोज 1 free test पाठवू? कोणत्या वेळी?', [...CONFIG.dailyTimes.map(x => ({ id: 'daily:' + x.id, label: x.label })), { id: 'daily:no', label: 'नको' }])); out.push(log(kw === 'PUSH' ? 'PUSH' : 'TEST', kw === 'PUSH' ? 'Push चं 💬 WhatsApp बटण → खिडकी 24 तास.' : 'पालकाने स्वतः TEST मागितलं → मोफत, खिडकी 24 तास.')); return out; }
+      if (!lead.daily && !lead.paid && !lead.app) out.push(wa(lead, now, lead.kind === 'regular' ? '📚 असा रोज 1 free धडा पाठवू? कोणत्या वेळी?' : '📝 अशी रोज 1 free test पाठवू? कोणत्या वेळी?', [...CONFIG.dailyTimes.map(x => ({ id: 'daily:' + x.id, label: x.label })), { id: 'daily:no', label: 'नको' }])); out.push(log(kw === 'PUSH' ? 'PUSH' : 'TEST', kw === 'PUSH' ? 'Push चं 💬 WhatsApp बटण → खिडकी 24 तास.' : 'पालकाने स्वतः TEST मागितलं → मोफत, खिडकी 24 तास.')); return out; }
     if (kw === 'MAHA' || t === 'mt_want') {
       // the window is open now (they wrote): the result and the rank come here as soon as the महा-Test closes
       if (!lead.via) { out.push({ to: 'do', action: 'lead' }); lead.via = 'wa'; }
@@ -344,7 +361,7 @@
     }
     if (type === 'sync') {
       // fresh facts from the server (name, class, free tests, courses, prices, next महा-Test, paid, app…); no message
-      for (const k of ['name', 'cls', 'freeTotal', 'totalTests', 'courses', 'prices', 'mtNext', 'mtReg', 'paid', 'app', 'pushOn', 'mobile', 'testsDone']) if (data[k] !== undefined && data[k] !== null) lead[k] = data[k];
+      for (const k of ['name', 'cls', 'freeTotal', 'totalTests', 'kind', 'freeLessons', 'courses', 'prices', 'mtNext', 'mtReg', 'paid', 'app', 'pushOn', 'mobile', 'testsDone']) if (data[k] !== undefined && data[k] !== null) lead[k] = data[k];
       if (data.firstTestAt && !lead.firstTestAt) { lead.firstTestAt = data.firstTestAt; lead.offerEnd = data.offerEnd || new Date(new Date(data.firstTestAt).getTime() + CONFIG.offerHours * H).toISOString(); }
       if (data.last) lead.last = data.last;
       if (lead.paid && lead.crm !== 'paid') lead.crm = 'paid';
@@ -441,7 +458,7 @@
           if (early < base && dayKey(early) === dayKey(base) && !quiet(early)) at = early;   // the same day, from 8 am
         }
         items.push({ key: 'daily:' + dayKey(base), at, run: (out, now) => {
-          if (lead.testsDone >= lead.freeTotal) return;
+          if (lead.kind === 'regular' ? lead.freeLessons && lead.lessonsSent >= lead.freeLessons : lead.testsDone >= lead.freeTotal) return;
           if (lead.closed) { if (canPush(lead)) out.push(push('आजची free test तयार 📝')); return; }
           if (lead.testDay === dayKey(now)) return;
           if (canPush(lead)) { out.push(push(`${lead.name}, आजची free test (${lead.testsDone + 1}/${lead.freeTotal}) · ${mtLeft(now, lead)}`, [{ id: 'app:open', label: '📱 App उघडा' }, { id: 'push:PUSH', label: '💬 WhatsApp वर link' }])); return; }

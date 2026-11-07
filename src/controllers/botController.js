@@ -43,6 +43,9 @@ async function syncOf(gid) {
     cls: lead.batch || '',
     freeTotal: free[lead.batch] || 0,
     totalTests: totalTests || 0,
+    // a Regular class: free chapters ("धडे") instead of free tests
+    kind: batch ? require('../utils/courseKind').kindOf(await Batch.findOne({ name: lead.batch }, 'name standard kind').lean()) : '',
+    freeLessons: lead.batch ? (await require('../utils/contentAccess').listFreeChapters().catch(() => [])).filter(f => String(f.batch).trim().toLowerCase() === String(lead.batch).trim().toLowerCase()).length : 0,
     courses: batches.map(b => b.name),
     prices: { monthly: batch?.monthly_price || 0, yearly: batch?.yearly_price || 0 },
     mtNext: next ? next.starts_at : null,
@@ -51,7 +54,7 @@ async function syncOf(gid) {
     app: !!lead.device_token,
     pushOn: !!lead.device_token,
     testsDone: lead.tests || 0,
-    firstTestAt: first?.submitted_at || null,
+    firstTestAt: first?.submitted_at || lead.offer?.issued_at || null,
     offerEnd: lead.offer?.expires_at || null,
     last: last ? { score: last.max_marks ? last.marks_obtained : last.score, total: last.max_marks || last.total_questions, title: lead.last_test || '' } : null,
   };

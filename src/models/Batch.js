@@ -44,6 +44,9 @@ const batchSchema = new mongoose.Schema(
     board:    { type: String, default: '', trim: true }, // e.g. "Maharashtra State Board"
     medium:   { type: String, default: '', trim: true }, // e.g. "English", "Semi-English", "Marathi"
     standard: { type: String, default: '', trim: true }, // e.g. "10th", "NMMS" — free text, not just a number (some batches are exam-prep, not a plain class)
+    // the course type: 'exam' = Competitive Exam (free tests), 'regular' = a school class (free chapter: notes,
+    // exercise answers, practice); '' = guessed from the name (core/courseCard.js kindOf, utils/courseKind.js)
+    kind:     { type: String, enum: ['', 'exam', 'regular'], default: '' },
 
     // Pricing
     pricing_type: { type: String, enum: ['free', 'paid'], default: 'paid' },
