@@ -103,6 +103,13 @@ async function activateStudentForBatch(student, batchName, newExpiry) {
   }
   await student.save();
   invalidateUserCache('student', student.user_id);
+  // the WhatsApp bot: this family paid — offers and pay reminders stop, the login message goes out
+  const WABOT = require('../utils/waBot');
+  if (WABOT.on() && student.student_code) {
+    require('../models/GuestLead').findOne({ converted_code: student.student_code }, 'gid').lean()
+      .then(l => { if (l) WABOT.notify(l.gid, 'paid', { code: student.student_code }); })
+      .catch(err => console.warn('[wa bot] paid', err.message));
+  }
 }
 
 // ── Public config (frontend needs the key id to open Checkout) ────────────────

@@ -82,6 +82,9 @@ const userSchema = new mongoose.Schema(
     referred_by_teacher: { type: String, default: '', trim: true },
     // Student side: the friend (student code) who shared the app with this student (set once).
     referred_by_student: { type: String, default: '', trim: true },
+    // Student side: a free visitor (GuestLead gid) shared the link before having an account;
+    // becomes referred_by_student when that visitor gets their student code.
+    referred_by_gid: { type: String, default: '', trim: true },
     // Student side: set when a YouTube Teacher Partner approves this student's
     // subscriber claim (SubscriberClaim) — gates the student-discount in
     // paymentController's resolvePaidBatch(). Kept separate from

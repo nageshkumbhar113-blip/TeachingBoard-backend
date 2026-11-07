@@ -1,0 +1,16 @@
+{
+  "name": "nks-wa-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WhatsApp parent-journey bot + CRM API (Cloudflare Worker + D1). Rules live in src/waFlow.js.",
+  "scripts": {
+    "dev": "wrangler dev --local --port 8787",
+    "db:local": "wrangler d1 execute nks-wa --local --file=schema.sql",
+    "db:remote": "wrangler d1 execute nks-wa --remote --file=schema.sql",
+    "deploy": "wrangler deploy",
+    "test": "node test/run.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "4.151.1"
+  }
+}

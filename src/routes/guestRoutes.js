@@ -1,5 +1,6 @@
 const express = require('express');
 const c = require('../controllers/guestController');
+const B = require('../controllers/botController');
 const { attachUserIfPresent, requireAdmin } = require('../middleware/auth');
 const { createRateLimiter } = require('../middleware/rateLimiter');
 
@@ -24,6 +25,11 @@ router.get('/admin/exams', requireAdmin, c.adminListExams);
 router.post('/admin/exams', requireAdmin, c.adminAddExam);
 router.delete('/admin/exams/:id', requireAdmin, c.adminDeleteExam);
 router.get('/admin/leads',  requireAdmin, c.adminLeads);
+// WhatsApp bot (Cloudflare Worker, wa-worker/): the child's facts, its requests, and Admin › CRM's token
+router.get('/bot-config', B.config);
+router.get('/bot/lead/:gid', B.requireBotKey, B.lead);
+router.post('/bot/action', B.requireBotKey, B.action);
+router.get('/admin/bot-token', requireAdmin, B.adminToken);
 router.get('/admin/funnel', requireAdmin, c.adminFunnel);
 router.get('/admin/ad-content', requireAdmin, c.adminAdContent);
 router.get('/admin/meta', requireAdmin, c.adminMeta);

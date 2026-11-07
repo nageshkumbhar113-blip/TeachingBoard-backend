@@ -1,0 +1,29 @@
+﻿# WhatsApp bot + CRM API for NKs EduOrbit (Cloudflare Workers, free plan).
+# Secrets are NOT here â€” set them in Cloudflare (wrangler secret put â€¦) or, for local runs, in .dev.vars:
+#   WA_TOKEN        WhatsApp Cloud API access token (system user, permanent)
+#   WA_PHONE_ID     the bot number's "Phone number ID" from Meta
+#   META_APP_SECRET the Meta app secret (checks that a webhook really came from Meta)
+#   VERIFY_TOKEN    any long random text, typed again in Meta's webhook settings
+#   SHARED_SECRET   the same long random text as BOT_SHARED_SECRET on Render (events + Admin tokens)
+name = "nks-wa-bot"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+GRAPH_URL = "https://graph.facebook.com"
+GRAPH_VERSION = "v26.0"
+RENDER_URL = "https://teachingboard-backend.onrender.com"
+BOT_OFF = "0"              # "1" = the bot sends nothing (messages are still saved)
+DAILY_CAP_RS = "50"        # paid (template) messages stop for the day above this many rupees
+REENGAGE_TEMPLATE = ""     # name of an approved Meta template for "Bot à¤¨à¤‚à¤¬à¤°à¤µà¤°à¥‚à¤¨ template"; empty = that button refuses
+TEMPLATE_LANG = "mr"
+BOT_NUMBER = "919226719313"   # the bot's WhatsApp number (Meta phone number id 1305896689283987, WABA 1931910161115440)
+
+[[d1_databases]]
+binding = "DB"
+database_name = "nks-wa"
+database_id = "022b3e1d-b548-47fe-b275-b099e779aa0e"
+
+[triggers]
+crons = ["*/10 * * * *"]

@@ -143,6 +143,7 @@ exports.register = asyncHandler(async (req, res) => {
     { upsert: true }
   );
   _pubCache.delete(ev.batch);   // the public page counts this registration at once
+  if (me.guest) require('../utils/waBot').notify(me.code.replace(/^GUEST-/, ''), 'sync', {}, { sync: { mtReg: true, mtNext: ev.starts_at } });
   res.json({ success: true });
 });
 

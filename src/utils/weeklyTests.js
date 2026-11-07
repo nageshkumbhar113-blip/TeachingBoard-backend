@@ -282,6 +282,9 @@ async function finalizeIfDue(event, now = new Date()) {
     code: e.student_code, hidden: hidden.has(e.student_code),
   }));
   await WeeklyEvent.updateOne({ _id: event._id }, { $set: { participants: entries.length, toppers } });
+  // the WhatsApp bot: each free visitor's result to the parent
+  const BOT = require('./waBot');
+  if (BOT.on()) for (const { e, rank } of ranked) if (e.is_guest) BOT.notify(String(e.student_code).replace(/^GUEST-/, ''), 'mt_result', { score: e.score, total: e.total, rank, of: entries.length });
   return WeeklyEvent.findById(event._id);
 }
 

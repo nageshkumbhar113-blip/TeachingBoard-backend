@@ -18,6 +18,7 @@ const Note = require('../models/Note');
 const META = require('../utils/meta');
 const GADS = require('../utils/googleAds');
 const SLSQuestion = require('../models/SLSQuestion');
+const BOT = require('../utils/waBot');
 const { isChapterIdFree, makeChapterId } = require('../utils/contentAccess');
 
 // Free part without login (docs/PLAN_guest_funnel.md). A guest gets a signed
@@ -25,10 +26,10 @@ const { isChapterIdFree, makeChapterId } = require('../utils/contentAccess');
 // free-tier student that can only read free content and submit tests.
 
 const OFFER_PERCENT = 50;
-const OFFER_HOURS = 12;
+const OFFER_HOURS = 24;
 // 'ad' = a Facebook / Instagram ad's link (ref = the ad's id, Admin › Sync › Ads)
 const SOURCES = new Set(['admin', 'friend', 'teacher', 'student', 'shop', 'ad', 'web']);
-const EVENT_STEPS = new Set(['browsed', 'link_sent', 'engaged', 'shared_friend', 'shared_parent', 'offer_seen', 'checkout']);
+const EVENT_STEPS = new Set(['browsed', 'link_sent', 'engaged', 'shared_friend', 'shared_parent', 'offer_seen', 'checkout', 'wa_bot']);
 
 const _clean = (v, max = 60) => String(v || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, max);
 const _istMonth = (d = new Date()) => new Date(d.getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 7);
@@ -130,6 +131,7 @@ exports.createSession = asyncHandler(async (req, res) => {
   if (!lead && /^[0-9A-F]{10}$/.test(resumeGid)) {
     lead = await GuestLead.findOne({ gid: resumeGid, converted_code: '' });
     if (!lead) throw new AppError('Guest session not found', 404);
+    BOT.notify(resumeGid, 'sync', {}, { sync: { app: true } });   // continued in the app (Play referrer)
   }
 
   const batchName = _clean(req.body?.batch, 120) || lead?.batch || '';
@@ -186,6 +188,8 @@ exports.saveContact = asyncHandler(async (req, res) => {
   lead.last_seen_at = new Date();
   await lead.save();
   _adLead(lead.gid).catch(err => console.warn('[ad lead] contact', err.message));
+  // typed on the website (not WhatsApp): the bot sends nothing; the family waits in Admin › CRM's call list
+  BOT.notify(lead.gid, 'form_number', {}, { mobile });
   res.json({ success: true, profile: _profile(lead) });
 });
 
@@ -194,6 +198,7 @@ exports.saveDeviceToken = asyncHandler(async (req, res) => {
   const token = String(req.body?.device_token || '').trim().slice(0, 400);
   if (!token) throw new AppError('device_token is required', 400);
   await GuestLead.updateOne({ gid: _gidOf(req) }, { $set: { device_token: token } });
+  BOT.notify(_gidOf(req), 'sync', {}, { sync: { app: true, pushOn: true } });   // the app can now carry the daily test by push
   res.json({ success: true });
 });
 
@@ -205,7 +210,7 @@ exports.getRank = asyncHandler(async (req, res) => {
 });
 
 // POST /api/guest/offer — after finishing a test: 50 % off the FIRST PAYMENT (monthly or yearly),
-// 12 hours, at most once per calendar month (per guest, and per parent mobile).
+// 24 hours, at most once per calendar month (per guest, and per parent mobile).
 // Repeated calls return the same offer (active or expired) — never a new one.
 exports.claimOffer = asyncHandler(async (req, res) => {
   const lead = await _lead(req);
@@ -283,7 +288,7 @@ async function _studentCount() {
 // POST /api/guest/checkout { gid?, name, parent_mobile, pin, period }
 // Creates the student account (free tier until the payment clears), moves the
 // guest's tests into it, and opens a Razorpay order. The first-payment offer
-// (50 %, while its 12 hours last) applies to a monthly plan only. Payment is
+// (50 %, while its 24 hours last) applies to a monthly plan only. Payment is
 // then verified by the existing /payment/verify(-public) endpoints.
 exports.checkout = asyncHandler(async (req, res) => {
   const lead = await _leadByTokenOrGid(req);
@@ -321,10 +326,18 @@ exports.checkout = asyncHandler(async (req, res) => {
     }
     // Came from a student's own share link (?free=1&ref=CODE): that student's
     // Refer & Earn friend — same rule as registration (not the same mobile).
-    let friendCode = '';
+    let friendCode = '', friendGid = '';
     if (lead.source === 'student' && lead.ref) {
       const f = await User.findOne({ role: 'student', student_code: lead.ref }).select('student_code mobile').lean();
       if (f && f.mobile !== mobile) friendCode = f.student_code;
+    }
+    // a friend's result link (?quiz=…&ref=<the sharer's gid>): the sharer's Refer & Earn — now if they
+    // already have an account, else when they get one (the same number never counts)
+    if (lead.source === 'friend' && /^[0-9A-F]{10}$/.test(lead.ref) && lead.ref !== lead.gid) {
+      const r = await GuestLead.findOne({ gid: lead.ref }, 'converted_code parent_mobile').lean();
+      const f = r?.converted_code ? await User.findOne({ role: 'student', student_code: r.converted_code }).select('student_code mobile').lean() : null;
+      if (f) { if (f.mobile !== mobile) friendCode = f.student_code; }
+      else if (r && r.parent_mobile !== mobile) friendGid = lead.ref;
     }
 
     const prefix = name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) || 'STU';
@@ -348,6 +361,7 @@ exports.checkout = asyncHandler(async (req, res) => {
       request_source: 'self',
       referred_by_teacher: teacherCode,
       referred_by_student: friendCode,
+      referred_by_gid: friendGid,
       pin_hash: User.hashPin(pin),
     });
     if (teacherCode) await User.updateOne({ role: 'teacher', teacher_code: teacherCode }, { $addToSet: { assigned_students: code } });
@@ -356,6 +370,8 @@ exports.checkout = asyncHandler(async (req, res) => {
     await Attempt.updateMany({ student_code: `GUEST-${lead.gid}` }, { $set: { student_code: code, student_name: name } });
     lead.converted_code = code;
     lead.converted_at = new Date();
+    // friends who came from this visitor's share link before this account existed
+    await User.updateMany({ role: 'student', referred_by_gid: lead.gid, referred_by_student: '', mobile: { $ne: mobile } }, { $set: { referred_by_student: code } });
     if (!lead.parent_mobile) lead.parent_mobile = mobile;
   }
 
@@ -782,7 +798,7 @@ exports.adminMetaCreateAd = asyncHandler(async (req, res) => {
 });
 
 // Called by attemptController after a guest's test is saved.
-async function noteGuestAttempt(studentCode, quizTitle, pct) {
+async function noteGuestAttempt(studentCode, quizTitle, pct, score, total) {
   const gid = String(studentCode || '').replace(/^GUEST-/, '');
   if (!gid) return;
   await GuestLead.updateOne({ gid }, {
@@ -792,6 +808,11 @@ async function noteGuestAttempt(studentCode, quizTitle, pct) {
     $set: { last_test: String(quizTitle || '').slice(0, 120), last_seen_at: new Date() },
   });
   await _adLead(gid);
+  // the WhatsApp bot: the child's result goes to the parent (and the first test starts the offer clock)
+  if (BOT.on()) {
+    const sync = await require('./botController').syncOf(gid).catch(() => null);
+    BOT.notify(gid, 'test_done', { score: Math.round(Number(score) || 0), total: Math.round(Number(total) || 0), title: String(quizTitle || '').slice(0, 60), n: sync?.testsDone || undefined }, { sync });
+  }
 }
 
 // A visitor from a parent / teacher ad became a lead → "Lead" to Meta and Google (once each), on
@@ -829,4 +850,6 @@ async function noteAdPurchase(sub) {
 exports.requireGuest = requireGuest;
 exports.normalizeMobile = normalizeMobile;
 exports.noteGuestAttempt = noteGuestAttempt;
+exports.freeTestCounts = _freeTestCounts;
+exports.noteLead = gid => _adLead(gid).catch(err => console.warn('[ad lead] bot', err.message));
 exports.noteAdPurchase = (sub) => noteAdPurchase(sub).catch(err => console.warn('[meta capi] purchase', err.message));

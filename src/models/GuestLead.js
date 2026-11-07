@@ -34,7 +34,7 @@ const guestLeadSchema = new mongoose.Schema(
     last_test:     { type: String, default: '', trim: true },
     parent_mobile: { type: String, default: '', trim: true, index: true },
     consent_at:    { type: Date, default: null },
-    // Test-completion offer: 50 % off the first payment (monthly or yearly), 12 hours, once a calendar month.
+    // Test-completion offer: 50 % off the first payment (monthly or yearly), 24 hours, once a calendar month.
     offer: {
       percent:    { type: Number, default: 0 },
       issued_at:  { type: Date, default: null },

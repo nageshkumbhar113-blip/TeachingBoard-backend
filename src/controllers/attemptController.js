@@ -164,7 +164,7 @@ exports.createAttempt = asyncHandler(async (req, res) => {
   if (req.user?.guest) {
     // Free-part visitor: funnel stats; no teachers / parents to notify.
     const pct = max_marks > 0 ? (marks_obtained / max_marks) * 100 : (totalQuestions ? (correctAnswers / totalQuestions) * 100 : 0);
-    noteGuestAttempt(studentCode, quiz.title, pct).catch(err => console.warn('guest attempt note failed:', err.message));
+    noteGuestAttempt(studentCode, quiz.title, pct, max_marks > 0 ? marks_obtained : correctAnswers, max_marks > 0 ? max_marks : totalQuestions).catch(err => console.warn('guest attempt note failed:', err.message));
   } else if (studentCode) {
     // Notify assigned teachers via FCM (non-blocking)
     _notifyTeachers(studentCode, studentName, quiz.title, marks_obtained, max_marks) // same marks the student sees
