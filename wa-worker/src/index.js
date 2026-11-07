@@ -165,11 +165,30 @@ async function adminOk(env, req) {
 }
 
 const LISTS = ['hot', 'cold', 'form', 'call', 'later', 'paid', 'closed'];
+// ☀️ call these first (Sunday): not paid, not closed, and the offer still running or a महा-Test in the last 3 days;
+// the offer ending soonest on top, then the महा-Test takers
+async function callFirst(env) {
+  const { results } = await env.DB.prepare("SELECT gid, name, cls, mobile, crm, last_in, updated_at, data FROM leads WHERE crm IS NULL OR crm NOT IN ('paid', 'closed') ORDER BY updated_at DESC LIMIT 500").all();
+  const now = new Date(), t = now.getTime();
+  const rows = [];
+  for (const r of results || []) {
+    const d = JSON.parse(r.data);
+    if (d.paid || d.closed || !r.mobile) continue;
+    const offer = d.offerEnd && new Date(d.offerEnd).getTime() > t ? new Date(d.offerEnd).getTime() : 0;
+    const mt = d.mtLast && t - new Date(d.mtLast.at).getTime() < 3 * 864e5 ? d.mtLast : null;
+    if (!offer && !mt) continue;
+    rows.push({ gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, updated_at: r.updated_at,
+      tests: d.testsDone, free_total: d.freeTotal, via: d.via, app: d.app, paid: d.paid, closed: d.closed, open: WA.isOpen(d, now),
+      offer_end: offer ? d.offerEnd : null, mt, _k: offer || 9e15 });
+  }
+  return rows.sort((a, b) => a._k - b._k).slice(0, 100).map(({ _k, ...r }) => r);
+}
 async function crm(env, req, url) {
   const parts = url.pathname.split('/').filter(Boolean);   // crm, …
   if (parts[1] === 'summary' && req.method === 'GET') {
     const { results } = await env.DB.prepare('SELECT crm, COUNT(*) AS n FROM leads GROUP BY crm').all();
     const counts = {}; for (const r of results || []) counts[r.crm || 'active'] = r.n;
+    counts.first = (await callFirst(env)).length;
     counts.nextyear = (await env.DB.prepare("SELECT COUNT(*) AS n FROM leads WHERE crm = 'closed' AND revisit_at IS NOT NULL AND revisit_at <= ?").bind(Date.now()).first()).n;
     const month = S.istDay().slice(0, 7);
     const mc = await env.DB.prepare("SELECT SUM(CAST(v AS REAL)) AS s FROM kv WHERE k LIKE ?").bind('cost:' + month + '%').first();
@@ -180,6 +199,7 @@ async function crm(env, req, url) {
       bot_off: env.BOT_OFF === '1', jobs, bot_number: WA.CONFIG.botNumber,
     } });
   }
+  if (parts[1] === 'list' && req.method === 'GET' && url.searchParams.get('list') === 'first') return json({ success: true, data: await callFirst(env) });
   if (parts[1] === 'list' && req.method === 'GET') {
     const list = url.searchParams.get('list') || 'all', q = (url.searchParams.get('q') || '').trim();
     const off = Math.max(0, Number(url.searchParams.get('offset')) || 0);
@@ -194,7 +214,8 @@ async function crm(env, req, url) {
     return json({ success: true, data: (results || []).map(r => {
       const d = JSON.parse(r.data);
       return { gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, updated_at: r.updated_at,
-        tests: d.testsDone, free_total: d.freeTotal, via: d.via, app: d.app, paid: d.paid, daily: d.daily, closed: d.closed, revisit_at: d.revisitAt, open: WA.isOpen(d, now) };
+        tests: d.testsDone, free_total: d.freeTotal, via: d.via, app: d.app, paid: d.paid, daily: d.daily, closed: d.closed, revisit_at: d.revisitAt, open: WA.isOpen(d, now),
+        offer_end: d.offerEnd || null, mt: d.mtLast || null };
     }) });
   }
   if (parts[1] === 'lead' && GID.test(parts[2] || '')) {

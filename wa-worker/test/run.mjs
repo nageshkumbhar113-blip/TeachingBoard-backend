@@ -98,8 +98,8 @@ try {
   ok(sent.length === 2, 'two answers: result + daily question', sent.length);
   ok(/Rahul चा पूर्ण result/.test(textOf(sent[0])) && /16\/20/.test(textOf(sent[0])), 'result names the child (from Render) with the score', textOf(sent[0]));
   ok(sent[0].to === '919811100001', 'sent to the parent\'s number');
-  ok(sent[0].interactive?.type === 'list', '4 choices → a WhatsApp list', JSON.stringify(sent[0].interactive?.type));
-  ok(/Monthly ₹200 → ₹100/.test(JSON.stringify(sent)) === false, 'no prices in the first answer (only offer line)');
+  ok(sent[0].interactive?.type === 'button' && sent[0].interactive.action.buttons.length === 3, 'result: 3 reply buttons (Unlock / प्रश्न / Call)', JSON.stringify(sent[0].interactive?.type));
+  ok(JSON.stringify(sent).includes('Monthly ₹200 → ₹100') && JSON.stringify(sent).includes('parent-pay.html?g=AAAA111111'), 'first answer: the unlock line with the offer price and the pay link (prices from Render)');
   ok(sent[1].interactive?.type === 'list' && sent[1].interactive.action.sections[0].rows.length === 4, 'daily-time question as a list of 4');
 
   // 3) the same message again (Meta retry) → nothing new
@@ -110,11 +110,15 @@ try {
   // 4) the parent picks 7 pm (a list reply), then asks for a test twice
   await signed(msg('919811100001', 'daily:19', 'button')); await waitSent(3);
   ok(/रोज 7 वाजता Rahul/.test(textOf(sent[2])), 'daily time saved', textOf(sent[2]));
+  // the Worker runs on the real clock: on a Sunday (IST) TEST answers with the महा-Test instead of a daily test
+  const sunday = new Date(Date.now() + 5.5 * 3600e3).getUTCDay() === 0;
   await signed(msg('919811100001', 'TEST')); await waitSent(4);
-  ok(/आजची free test \(2\/18\)/.test(textOf(sent[3])) && /student-app\/\?free=1&g=AAAA111111/.test(textOf(sent[3])), 'TEST → the next free test link', textOf(sent[3]));
+  if (sunday) ok(/आज महा-Test चा दिवस/.test(textOf(sent[3])), 'TEST on Sunday → the महा-Test', textOf(sent[3]));
+  else ok(/आजची free test \(2\/18\)/.test(textOf(sent[3])) && /student-app\/\?free=1&g=AAAA111111/.test(textOf(sent[3])), 'TEST → the next free test link', textOf(sent[3]));
   ok(sent[3].interactive?.type === 'button', '≤3 short buttons → reply buttons');
   await signed(msg('919811100001', 'TEST')); await waitSent(5);
-  ok(/आजची free test झाली आहे/.test(textOf(sent[4])), 'second TEST the same day → "today\'s is done"', textOf(sent[4]));
+  if (sunday) ok(/आज महा-Test चा दिवस/.test(textOf(sent[4])), 'second TEST on Sunday → the महा-Test again', textOf(sent[4]));
+  else ok(/आजची free test झाली आहे/.test(textOf(sent[4])), 'second TEST the same day → "today\'s is done"', textOf(sent[4]));
 
   // 5) the price question uses Render's real prices
   await signed(msg('919811100001', 'ask:fee', 'button')); await waitSent(6);
@@ -165,6 +169,10 @@ try {
   // 12) summary + the lead's chat
   s = await crm('summary');
   ok(s.data.counts.closed === 1 && s.data.last_webhook && s.data.last_tick, 'summary: counts and bot status', JSON.stringify(s.data));
+  // ☀️ "call first": unpaid families with the offer still running (soonest end on top), with the time left
+  const callFirst = await crm('list?list=first');
+  ok(Array.isArray(callFirst.data) && typeof s.data.counts.first === 'number' && callFirst.data.length === s.data.counts.first
+    && callFirst.data.every(x => !x.paid && !x.closed && (x.offer_end || x.mt)), '"call first" list: unpaid, open offer or a महा-Test', JSON.stringify(callFirst.data?.map(x => [x.gid, x.offer_end])));
   const la = await crm(`lead/${A}`);
   ok(la.data.msgs.filter(m => m.dir === 'in').length >= 5 && la.data.msgs.some(m => m.dir === 'out'), 'the chat log has both sides');
 

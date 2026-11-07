@@ -8,7 +8,7 @@
     "db:local": "wrangler d1 execute nks-wa --local --file=schema.sql",
     "db:remote": "wrangler d1 execute nks-wa --remote --file=schema.sql",
     "deploy": "wrangler deploy",
-    "test": "node test/run.mjs"
+    "test": "node test/flow.mjs && node test/run.mjs"
   },
   "devDependencies": {
     "wrangler": "4.151.1"

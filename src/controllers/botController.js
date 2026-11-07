@@ -7,6 +7,7 @@ const Attempt = require('../models/Attempt');
 const StudentSubscription = require('../models/StudentSubscription');
 const WeeklyEvent = require('../models/WeeklyEvent');
 const WeeklyEntry = require('../models/WeeklyEntry');
+const Quiz = require('../models/Quiz');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const BOT = require('../utils/waBot');
@@ -24,12 +25,13 @@ async function syncOf(gid) {
   const lead = await GuestLead.findOne({ gid }).lean();
   if (!lead) return null;
   const code = `GUEST-${gid}`;
-  const [batch, free, first, last, batches] = await Promise.all([
+  const [batch, free, first, last, batches, totalTests] = await Promise.all([
     lead.batch ? Batch.findOne({ name: lead.batch }, 'name monthly_price yearly_price').lean() : null,
     g.freeTestCounts().catch(() => ({})),
     Attempt.findOne({ student_code: lead.converted_code ? { $in: [code, lead.converted_code] } : code }, 'submitted_at').sort({ submitted_at: 1 }).lean(),
     Attempt.findOne({ student_code: lead.converted_code ? { $in: [code, lead.converted_code] } : code }, 'marks_obtained max_marks score total_questions').sort({ submitted_at: -1 }).lean(),
     Batch.find({ is_active: { $ne: false } }, 'name').sort({ name: 1 }).lean(),
+    lead.batch ? Quiz.countDocuments({ batch: lead.batch, status: 'published' }).catch(() => 0) : 0,
   ]);
   const paid = lead.converted_code ? !!(await StudentSubscription.exists({ student_code: lead.converted_code, payment_verified: true, is_trial: false })) : false;
   // the class's next महा-Test and whether this child is registered
@@ -40,6 +42,7 @@ async function syncOf(gid) {
     name: lead.name || undefined,
     cls: lead.batch || '',
     freeTotal: free[lead.batch] || 0,
+    totalTests: totalTests || 0,
     courses: batches.map(b => b.name),
     prices: { monthly: batch?.monthly_price || 0, yearly: batch?.yearly_price || 0 },
     mtNext: next ? next.starts_at : null,
