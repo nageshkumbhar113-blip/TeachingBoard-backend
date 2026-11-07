@@ -82,6 +82,36 @@ exports.my = asyncHandler(async (req, res) => {
   res.json({ success: true, data, consent: await _consented(req, me) });
 });
 
+// GET /api/weekly/public?batch=… — for the public महा-Test page (no login): the next महा-Test of
+// the class (when, length, sections, how many registered) and last week's top 10 (hidden names stay hidden)
+const _pubCache = new Map();
+async function mahaTestOf(batch) {
+  const hit = _pubCache.get(batch);
+  if (hit && Date.now() - hit.at < 60e3) return hit.data;
+  const now = _now();
+  const next = await WeeklyEvent.findOne({ batch, is_trial: { $ne: true }, status: { $ne: 'skipped' }, ends_at: { $gt: now } }).sort({ starts_at: 1 }).select('-questions').lean();
+  const last = await WeeklyEvent.findOne({ batch, is_trial: { $ne: true }, ends_at: { $lte: now } }).sort({ starts_at: -1 }).select('-questions').lean();
+  const regs = next ? await WeeklyEntry.countDocuments({ event_id: String(next._id) }) : 0;
+  const qn = async ev => ev.question_count || (await WeeklyEvent.findById(ev._id, 'questions').lean())?.questions?.length || 0;
+  const data = {
+    batch,
+    next: next ? { event_id: String(next._id), title: next.title, starts_at: next.starts_at, ends_at: next.ends_at, duration_minutes: next.duration_minutes,
+      question_count: await qn(next), sections: (next.sections || []).map(s => ({ subject: s.subject, count: s.count, marks: s.marks })), negative: next.negative || 0,
+      open_to: next.open_to || 'all', registered_count: regs, state: now < next.starts_at ? 'upcoming' : 'live' } : null,
+    last: last && now >= W.revealOf(last) ? { starts_at: last.starts_at, participants: last.participants || 0,
+      toppers: (last.toppers || []).slice(0, 10).map(t => ({ rank: t.rank, name: t.hidden ? HIDDEN_NAME : t.name, score: t.score, total: t.total })) } : null,
+  };
+  _pubCache.set(batch, { at: Date.now(), data });
+  return data;
+}
+exports.mahaTestOf = mahaTestOf;
+exports.clearPublicCache = () => _pubCache.clear();
+exports.publicInfo = asyncHandler(async (req, res) => {
+  const batch = String(req.query.batch || '').trim().slice(0, 120);
+  if (!batch) throw new AppError('batch is required', 400);
+  res.json({ success: true, data: await mahaTestOf(batch) });
+});
+
 // POST /api/weekly/:id/register
 // "माझं नाव दाखवा" is asked once, at the first महा-Test registration. Has this
 // student / visitor already answered it? (toppers_consent_at = when they answered;
@@ -112,6 +142,7 @@ exports.register = asyncHandler(async (req, res) => {
     { $setOnInsert: { name: me.name, is_guest: me.guest, registered_at: _now() } },
     { upsert: true }
   );
+  _pubCache.delete(ev.batch);   // the public page counts this registration at once
   res.json({ success: true });
 });
 

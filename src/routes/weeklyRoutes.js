@@ -18,6 +18,7 @@ router.get('/admin/events/:id', requireAdmin, c.adminEventResults);
 router.delete('/admin/events/:id', requireAdmin, c.adminDeleteEvent);
 
 router.get('/my', attachUserIfPresent, c.my);
+router.get('/public', small, c.publicInfo);
 router.post('/toppers/privacy', small, attachUserIfPresent, c.toppersPrivacy);
 router.post('/:id/register', small, attachUserIfPresent, c.register);
 router.get('/:id/paper', small, attachUserIfPresent, c.paper);

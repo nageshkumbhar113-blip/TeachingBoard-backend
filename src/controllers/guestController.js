@@ -476,6 +476,23 @@ exports.adminLeads = asyncHandler(async (req, res) => {
   }));
   if (status === 'paid') data = data.filter(l => l.paid);
   if (status === 'unpaid') data = data.filter(l => !l.paid);
+  // महा-Test: each class's next / last one, and whether this visitor registered / took it (for the admin's WhatsApp)
+  try {
+    const WK = require('./weeklyController'), WeeklyEntry = require('../models/WeeklyEntry');
+    const mt = {};
+    for (const b of [...new Set(data.map(l => l.batch).filter(Boolean))]) mt[b] = await WK.mahaTestOf(b);
+    const ids = Object.values(mt).flatMap(m => [m.next?.event_id].filter(Boolean));
+    const lastIds = (await require('../models/WeeklyEvent').find({ batch: { $in: Object.keys(mt) }, is_trial: { $ne: true }, ends_at: { $lte: new Date() } }).sort({ starts_at: -1 }).limit(30).select('_id batch starts_at').lean());
+    const lastOf = {}; for (const e of lastIds) if (!lastOf[e.batch]) lastOf[e.batch] = String(e._id);
+    const entries = await WeeklyEntry.find({ event_id: { $in: [...ids, ...Object.values(lastOf)] }, student_code: { $in: data.map(l => `GUEST-${l.gid}`) } }, 'event_id student_code submitted_at score total rank').lean();
+    const key = (ev, gid) => `${ev}|GUEST-${gid}`, E = new Map(entries.map(e => [`${e.event_id}|${e.student_code}`, e]));
+    for (const l of data) {
+      const m = mt[l.batch]; if (!m) continue;
+      const n = m.next && E.get(key(m.next.event_id, l.gid)), p = lastOf[l.batch] && E.get(key(lastOf[l.batch], l.gid));
+      l.mt = { next: m.next ? { starts_at: m.next.starts_at, duration_minutes: m.next.duration_minutes, question_count: m.next.question_count, registered_count: m.next.registered_count, registered: !!n } : null,
+        last: p?.submitted_at ? { score: p.score, total: p.total, rank: p.rank ?? null } : null };
+    }
+  } catch (err) { console.warn('[leads] maha-test', err.message); }
   res.json({ success: true, count: data.length, data });
 });
 
