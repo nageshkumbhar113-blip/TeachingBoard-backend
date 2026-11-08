@@ -114,5 +114,35 @@ out = W.tick(lead, new Date(new Date(lead.offerEnd).getTime() - 3 * 3600e3 + 60e
 r = out.find(x => x.to === 'wa' && /3 तासांत/.test(x.text));
 ok(r && /त्यानंतर .*30%/.test(r.text), 'the 3-hour reminder says what comes next (30 % until Sunday)', r && r.text);
 
+// 2026-11-08: the free account (code + PIN) in the messages; at most 2 tests on WhatsApp, then the app or the course
+lead = W.createLead({ gid: 'JJJJ111111', name: 'Riya', cls: '8th', freeTotal: 18 }, now);
+W.event(lead, 'form_number', {}, now);
+W.event(lead, 'sync', { acct: { code: 'STU123', pin: '5307' }, prices: { monthly: 200 } }, now);
+ok(lead.crm === 'form' && lead.acct.code === 'STU123', 'number from the website: form list, the account kept');
+W.event(lead, 'test_done', { n: 1, score: 6, total: 10 }, now);
+t = texts(W.inbound(lead, 'RESULT JJJJ111111', now));
+ok(t[0].includes('STU123') && t[0].includes('5307') && t[0].includes('play.google.com'), 'RESULT answer: code, PIN and the app link', t[0]);
+const d1 = new Date(now.getTime() + 24 * 3600e3), d2 = new Date(now.getTime() + 48 * 3600e3), d3 = new Date(now.getTime() + 72 * 3600e3);
+t = texts(W.inbound(lead, 'TEST', d1));
+ok(/आजची free test \(2\/18\)/.test(t[0]), 'WhatsApp test 1', t[0]);
+W.event(lead, 'test_done', { n: 2, score: 7, total: 10 }, d1);
+t = texts(W.inbound(lead, 'TEST', d2));
+ok(/आजची free test \(3\/18\)/.test(t[0]), 'WhatsApp test 2', t[0]);
+W.event(lead, 'test_done', { n: 3, score: 7, total: 10 }, d2);
+const d3b = new Date(d3.getTime() + 3600e3);
+out = W.inbound(lead, 'TEST', d3b);
+t = texts(out);
+ok(t.length >= 1 && /2 free tests झाल्या/.test(t[0]) && t[0].includes('STU123') && t[0].includes('parent-pay.html') && !/free=1&g=/.test(t[0]), 'after 2 on WhatsApp: app (code + PIN) or the course, no third link', t[0]);
+ok(out.find(x => x.to === 'wa').buttons.map(b => b.id).join() === 'app,pay,call_me', 'buttons: App · Course · Call');
+t = texts(W.inbound(lead, 'app', d3b));
+ok(/Code: \*STU123\*/.test(t[0]), 'the App button: login with code + PIN', t[0]);
+// a lead already talking on WhatsApp is not pulled back to the form list (backfill / a second number)
+W.event(lead, 'form_number', { backfill: true }, d3b);
+ok(lead.crm !== 'form', 'backfill never pulls a lead talking on WhatsApp back to the form list', lead.via + ' ' + lead.crm);
+lead = W.createLead({ gid: 'KKKK111111', name: 'Om', cls: '8th', freeTotal: 18 }, now);
+W.event(lead, 'form_number', { backfill: true }, now);
+ok(lead.via === 'form' && lead.crm === 'form', 'backfill: an old website number goes to the form list');
+ok(W.event(lead, 'form_number', { backfill: true }, now).length === 0, 'backfill twice: nothing new');
+
 console.log(bad ? `${bad} FAILED` : 'FLOW ALL PASS');
 process.exit(bad ? 1 : 0);

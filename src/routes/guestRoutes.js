@@ -25,8 +25,11 @@ router.get('/admin/exams', requireAdmin, c.adminListExams);
 router.post('/admin/exams', requireAdmin, c.adminAddExam);
 router.delete('/admin/exams/:id', requireAdmin, c.adminDeleteExam);
 router.get('/admin/leads',  requireAdmin, c.adminLeads);
+router.post('/admin/lead-pin', requireAdmin, c.adminLeadPin);
+router.post('/admin/bot-backfill', requireAdmin, c.adminBotBackfill);
 // WhatsApp bot (Cloudflare Worker, wa-worker/): the child's facts, its requests, and Admin › CRM's token
 router.get('/bot-config', B.config);
+router.post('/bot/wa-login', B.requireBotKey, B.waLogin);
 router.get('/bot/lead/:gid', B.requireBotKey, B.lead);
 router.post('/bot/action', B.requireBotKey, B.action);
 router.get('/admin/bot-token', requireAdmin, B.adminToken);

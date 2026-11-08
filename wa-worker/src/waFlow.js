@@ -32,6 +32,7 @@
     missLimit: 2,                 // (only with autoTemplates) closed-window days without a reply → stop
     revisit: { month: 6, day: 1 },// a closed lead comes back in Admin on this date of the next year (June 1: new school year)
     reportEvery: 5,               // a short report + pay link after every N free tests
+    waMaxTests: 2,                // free tests sent on WhatsApp; after these: "the app (all free tests) or the course" (owner, 2026-11-08)
     hotAfterDays: 7,              // still taking tests but not paid after N days → hot call list
     dailyTimes: [{ id: '18', label: 'संध्याकाळी 6', h: 18 }, { id: '19', label: '7', h: 19 }, { id: '20', label: '8', h: 20 }],
     mahaTest: { dow: 0, h: 9, m: 30, remindH: 8, resultH: 12 },
@@ -117,6 +118,8 @@
       paid: false, app: false, pushOn: false, mtReg: false, shared: false,
       crm: null,                    // null | 'hot' | 'cold' | 'call' | 'paid' | 'closed'
       awaiting: null,
+      acct: null,                   // the free account made when the number came: { code, pin } (pin '' = their own)
+      waTests: 0, appAsked: null,   // test links sent on WhatsApp; the day "app or course" was sent
     };
   }
 
@@ -145,8 +148,20 @@
 
   // ── texts ──
   const HINT = '\n👉 पुढची free test हवी तेव्हा फक्त *TEST* पाठवा.';
-  const tail = lead => (lead.kind === 'regular' ? '\n👉 पुढचा free धडा हवा तेव्हा फक्त *TEST* पाठवा.' : HINT) +
-    (lead.app ? '' : `\n\nहवं असल्यास app install करा आणि सर्व उपलब्ध free ${lead.kind === 'regular' ? 'धडे पाहा' : 'tests सोडवा'} 👇\n${CONFIG.play}`);
+  const freeWhat = lead => lead.kind === 'regular' ? 'free धडे' : 'free tests';
+  // the free account: "Code ABC123 · PIN 4821" (PIN '' = the one they chose themselves)
+  const acctLine = lead => lead.acct && lead.acct.code ? `👤 Code: *${lead.acct.code}* · 🔑 PIN: *${lead.acct.pin || 'तुमचाच'}*` : '';
+  const appText = lead => lead.app ? '' : lead.acct && lead.acct.code
+    ? `\n\n📲 ${lead.name} चं app account तयार — सगळ्या ${freeWhat(lead)} app मध्ये:\n${acctLine(lead)}\nApp 👇 Code + PIN टाका\n${CONFIG.play}`
+    : `\n\nहवं असल्यास app install करा आणि सर्व उपलब्ध ${freeWhat(lead)} ${lead.kind === 'regular' ? 'पाहा' : 'सोडवा'} 👇\n${CONFIG.play}`;
+  const tail = lead => (lead.kind === 'regular' ? '\n👉 पुढचा free धडा हवा तेव्हा फक्त *TEST* पाठवा.' : HINT) + appText(lead);
+  // after CONFIG.waMaxTests links on WhatsApp: the rest of the free part is in the app, or the whole course
+  function appOrCourse(lead, now, out, own) {
+    lead.appAsked = dayKey(now);
+    out.push(wa(lead, now, `✅ WhatsApp वरच्या ${CONFIG.waMaxTests} free ${lead.kind === 'regular' ? 'धडे' : 'tests'} झाल्या.\nपुढे दोन पर्याय:\n\n1️⃣ 📲 *App मध्ये* सगळ्या उरलेल्या ${freeWhat(lead)} — रोज आठवण पण app मधून${lead.acct && lead.acct.code ? '\n' + acctLine(lead) : ''}\n${CONFIG.play}\n\n2️⃣ 🔓 *पूर्ण course* उघडा${unlockText(lead, now)}`,
+      lead.paid ? [] : [{ id: 'app', label: '📲 App' }, { id: 'pay', label: '💳 Course उघडा' }, { id: 'call_me', label: '📞 Call हवा' }], { own }));
+    out.push(log('APP', `WhatsApp वर ${CONFIG.waMaxTests} tests झाल्या → app (Code + PIN) किंवा course. पुढच्या tests WhatsApp वर नाहीत.`));
+  }
   const offerLine = (lead, now) => { const o = offerNow(lead, now); return o ? `\n🎁 पहिल्या payment वर ${o.pct}% सूट — ${whenText(o.end, now)} पर्यंत.` : ''; };
   const scoreLine = s => s ? `${s.score}/${s.total}${s.rank ? ` · ${s.of} विद्यार्थ्यांमध्ये #${s.rank}` : ''}${s.title ? `\n📝 ${s.title}` : ''}${s.weak ? `\nकमकुवत भाग: ${s.weak}` : ''}` : '';
   function mainButtons(lead, now) {
@@ -193,7 +208,9 @@
       out.push(log('LIMIT', 'WhatsApp वर दिवसाला 1 free test → आजची आधीच दिली.'));
       return;
     }
+    if (!lead.paid && (lead.waTests || 0) >= CONFIG.waMaxTests) { appOrCourse(lead, now, out, own); return; }
     lead.testDay = dayKey(now);
+    lead.waTests = (lead.waTests || 0) + 1;
     if (lead.kind === 'regular') {
       lead.lessonsSent = (lead.lessonsSent || 0) + 1;
       const bl = [{ id: 'got', label: '👍 पाल्याला दिला' }];
@@ -208,7 +225,8 @@
   // the parent alone: first a note, then the child's own message — clean to forward as it is
   function childLinkMsgs(lead, now, out) {
     out.push(wa(lead, now, `👇 खालचा मेसेज ${lead.name} ला *forward* करा (मेसेज दाबून ठेवा → ↪️ Forward).\nTest दिली की result इथेच येईल.`));
-    out.push(wa(lead, now, `${lead.name}, तुझी free test (10 मिनिटं, login नाही) 📝\n👇\n${L.child(lead.gid)}`));
+    out.push(wa(lead, now, `${lead.name}, तुझी free test (10 मिनिटं, login नाही) 📝\n👇\n${L.child(lead.gid)}` +
+      (lead.acct && lead.acct.code ? `\n\n📲 App मध्ये सगळ्या ${freeWhat(lead)}: ${acctLine(lead)}\n${CONFIG.play}` : '')));
   }
   function shareMsg(lead, now, out) {
     lead.shared = true;
@@ -304,7 +322,7 @@
       return out;
     }
     if (kw === 'REPORT') { out.push(wa(lead, now, `📊 ${lead.name}: ${lead.testsDone} tests${lead.last ? `, शेवटचा ${lead.last.score}/${lead.last.total}` : ''}.\nकमकुवत: ${lead.last?.weak || '—'}\nसगळे chapters 👇 ${L.pay(lead.gid)}` + HINT, [{ id: 'ask', label: '❓ प्रश्न' }])); return out; }
-    if (kw === 'LOGIN') { out.push(wa(lead, now, `✅ हा नंबर ${lead.name} च्या account चा आहे. App मध्ये परत जा — login झाला. ${lead.paid ? 'PIN ठेवा 🔑' : ''}`)); out.push(log('LOGIN', 'Code एकदाच, 5 मिनिटं, त्याच phone साठी; नोंदवलेल्या नंबरवरूनच.')); return out; }
+    if (kw === 'LOGIN') { out.push(wa(lead, now, '🔑 PIN विसरलात? App मध्ये ❓ मदत → "Student Code / PIN विसरलो" → "📲 WhatsApp ने" दाबा. तिथून आलेला message इथे Send केला की नवीन PIN ठेवता येतो.')); out.push(log('LOGIN', 'Login: app मधला one-time code (LOGIN <24 अक्षरं>) index.js मध्ये तपासला जातो; साधा LOGIN = मार्गदर्शन.')); return out; }
     if (t.startsWith('daily:')) {
       const id = t.slice(6), c = CONFIG.dailyTimes.find(x => x.id === id);
       lead.daily = c ? id : 'no';
@@ -312,12 +330,12 @@
       out.push(log('CRM', c ? `रोजची free test: ${c.h - 12} वाजता (रविवारी महा-Test).` : 'रोजची test नको → फक्त महा-Test.'));
       return out;
     }
-    if (t === 'app') { out.push(wa(lead, now, `हे घ्या 👇\n${CONFIG.play}\nInstall केल्यावर login लागत नाही. ${lead.name} चे गुण app मध्ये आपोआप दिसतील.`)); return out; }
+    if (t === 'app') { out.push(wa(lead, now, lead.acct && lead.acct.code ? `हे घ्या 👇\n${CONFIG.play}\nApp उघडा → Login → ${acctLine(lead)}\nसगळ्या ${freeWhat(lead)} तिथे आहेत आणि रोजची आठवण app मधून येईल.` : `हे घ्या 👇\n${CONFIG.play}\nInstall केल्यावर login लागत नाही. ${lead.name} चे गुण app मध्ये आपोआप दिसतील.`)); return out; }
     if (t === 'got') { out.push(wa(lead, now, '👍 Test झाली की result इथे येईल.')); return out; }
     if (t === 'next') { out.push(wa(lead, now, '👍 उद्या पुढची पाठवतो.')); if (!lead.shared && lead.testsDone >= 2) shareMsg(lead, now, out); return out; }
     if (t === 'ask') { out.push(wa(lead, now, 'कोणता प्रश्न?', [{ id: 'ask:fee', label: 'फी किती?' }, { id: 'ask:app', label: 'App कसा वापरायचा?' }])); return out; }
     if (t === 'ask:fee') { answer(lead, now, out, `${priceText(lead, false, now) || 'फी: pay page वर'}.${offerLine(lead, now)}\nPay नंतर सगळे tests, notes, स्वाध्याय उत्तरं आणि महा-Test.`); return out; }
-    if (t === 'ask:app') { answer(lead, now, out, 'Play Store वरून install करा → login लागत नाही → Home वर "पुढचा test". Pay नंतर Student Code + PIN किंवा WhatsApp login.'); return out; }
+    if (t === 'ask:app') { answer(lead, now, out, lead.acct && lead.acct.code ? `Play Store वरून install करा → Login → ${acctLine(lead)} → Home वर "पुढचा test". PIN विसरलात तर Login वर "📲 WhatsApp ने login".` : 'Play Store वरून install करा → login लागत नाही → Home वर "पुढचा test". Pay नंतर Student Code + PIN किंवा WhatsApp login.'); return out; }
     if (t === 'ask:pin') { answer(lead, now, out, 'App → Login → "📲 WhatsApp ने login" → नवीन PIN. 1 मिनिट.'); return out; }
     if (t === 'ask:open') { answer(lead, now, out, 'App update करा (Play Store) आणि internet चालू ठेवून एकदा उघडा.'); return out; }
     if (t === 'ok') { out.push(wa(lead, now, 'धन्यवाद 🙏', mainButtons(lead, now))); return out; }
@@ -361,7 +379,7 @@
     }
     if (type === 'sync') {
       // fresh facts from the server (name, class, free tests, courses, prices, next महा-Test, paid, app…); no message
-      for (const k of ['name', 'cls', 'freeTotal', 'totalTests', 'kind', 'freeLessons', 'courses', 'prices', 'mtNext', 'mtReg', 'paid', 'app', 'pushOn', 'mobile', 'testsDone']) if (data[k] !== undefined && data[k] !== null) lead[k] = data[k];
+      for (const k of ['name', 'cls', 'freeTotal', 'totalTests', 'kind', 'freeLessons', 'courses', 'prices', 'mtNext', 'mtReg', 'paid', 'app', 'pushOn', 'mobile', 'testsDone', 'acct']) if (data[k] !== undefined && data[k] !== null) lead[k] = data[k];
       if (data.firstTestAt && !lead.firstTestAt) { lead.firstTestAt = data.firstTestAt; lead.offerEnd = data.offerEnd || new Date(new Date(data.firstTestAt).getTime() + CONFIG.offerHours * H).toISOString(); }
       if (data.last) lead.last = data.last;
       if (lead.paid && lead.crm !== 'paid') lead.crm = 'paid';
@@ -371,8 +389,10 @@
     if (type === 'form_number') {
       // typed the number on the website (no WhatsApp message from them): the bot sends nothing (it would cost);
       // the lead waits in the call list, where Admin can call or send one WhatsApp by hand
-      lead.via = 'form'; lead.crm = 'form';
-      out.push(log('FORM', 'Form वरून नंबर (संमतीची खूण). खिडकी उघडी नाही → bot काही पाठवत नाही. 📞 call यादी: call करा किंवा Admin मधून हाताने WhatsApp.'));
+      if ((lead.via && lead.via !== 'form') || lead.lastInboundAt) return out;   // already talking on WhatsApp / in the app
+      if (data.backfill && lead.via === 'form') return out;     // "जुने leads आणा" twice: nothing new
+      lead.via = 'form'; if (!lead.crm || lead.crm === 'form') lead.crm = 'form';
+      out.push(log('FORM', data.backfill ? 'जुना lead (website वरचा नंबर) CRM मध्ये आणला → call यादी. Bot काही पाठवत नाही.' : 'Form वरून नंबर (संमतीची खूण). खिडकी उघडी नाही → bot काही पाठवत नाही. 📞 call यादी: call करा किंवा Admin मधून हाताने WhatsApp.'));
       return out;
     }
     if (type === 'app_installed') {
@@ -463,6 +483,7 @@
           if (lead.testDay === dayKey(now)) return;
           if (canPush(lead)) { out.push(push(`${lead.name}, आजची free test (${lead.testsDone + 1}/${lead.freeTotal}) · ${mtLeft(now, lead)}`, [{ id: 'app:open', label: '📱 App उघडा' }, { id: 'push:PUSH', label: '💬 WhatsApp वर link' }])); return; }
           if (lead.stopped || !hasWa) return;
+          if (!lead.paid && (lead.waTests || 0) >= CONFIG.waMaxTests && lead.appAsked) return;   // asked once: app or course
           if (isOpen(lead, now)) { testLink(lead, now, out, true); return; }
           if (!CONFIG.autoTemplates) {
             // no reply, window closed: no paid message — stop and put the family on the call list

@@ -48,6 +48,9 @@ const guestLeadSchema = new mongoose.Schema(
     hide_in_toppers: { type: Boolean, default: false },   // name hidden on महा-Test toppers
     toppers_consent_at: { type: Date, default: null },     // parent's one-time tick at महा-Test registration
     converted_code: { type: String, default: '', trim: true },
+    // the PIN of the free account made when the number came (free tests only, never the full course); kept so the
+    // bot / Admin can send it again. Empty for an account the parent made themselves (pay page) or one that existed.
+    auto_pin:       { type: String, default: '' },
     converted_at:   { type: Date, default: null },
     last_seen_at:   { type: Date, default: Date.now },
   },

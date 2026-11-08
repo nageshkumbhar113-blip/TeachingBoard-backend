@@ -232,6 +232,7 @@ exports.updateOwnDeviceToken = asyncHandler(async (req, res) => {
   if (!token) throw new AppError('device_token is required', 400);
 
   await User.updateOne({ user_id: req.user.id, role: 'student' }, { $set: { device_token: token } });
+  require('../utils/waBot').appUsed(req.user.student_code, { push: true });
   res.json({ success: true, message: 'Device token updated' });
 });
 

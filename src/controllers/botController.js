@@ -8,6 +8,7 @@ const StudentSubscription = require('../models/StudentSubscription');
 const WeeklyEvent = require('../models/WeeklyEvent');
 const WeeklyEntry = require('../models/WeeklyEntry');
 const Quiz = require('../models/Quiz');
+const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const BOT = require('../utils/waBot');
@@ -34,6 +35,7 @@ async function syncOf(gid) {
     lead.batch ? Quiz.countDocuments({ batch: lead.batch, status: 'published' }).catch(() => 0) : 0,
   ]);
   const paid = lead.converted_code ? !!(await StudentSubscription.exists({ student_code: lead.converted_code, payment_verified: true, is_trial: false })) : false;
+  const acc = lead.converted_code ? await User.findOne({ role: 'student', student_code: lead.converted_code }, 'device_id device_token last_login_at').lean() : null;
   // the class's next महा-Test and whether this child is registered
   const now = new Date();
   const next = lead.batch ? await WeeklyEvent.findOne({ batch: lead.batch, is_trial: { $ne: true }, status: { $ne: 'skipped' }, ends_at: { $gt: now } }).sort({ starts_at: 1 }).select('_id starts_at').lean() : null;
@@ -51,8 +53,9 @@ async function syncOf(gid) {
     mtNext: next ? next.starts_at : null,
     mtReg,
     paid,
-    app: !!lead.device_token,
-    pushOn: !!lead.device_token,
+    app: !!(lead.device_token || acc?.device_id || acc?.last_login_at),
+    pushOn: !!(lead.device_token || acc?.device_token),
+    acct: lead.converted_code ? { code: lead.converted_code, pin: lead.auto_pin || '' } : null,
     testsDone: lead.tests || 0,
     firstTestAt: first?.submitted_at || lead.offer?.issued_at || null,
     offerEnd: lead.offer?.expires_at || null,
@@ -111,6 +114,13 @@ const action = asyncHandler(async (req, res) => {
   throw new AppError('Unknown action', 400);
 });
 
+// POST /api/guest/bot/wa-login { nonce, mobile } — "LOGIN <nonce>" from WhatsApp (forgot PIN): the parent's number checks the account
+const waLogin = asyncHandler(async (req, res) => {
+  const nonce = String(req.body?.nonce || '').toLowerCase();
+  if (!/^[0-9a-f]{24}$/.test(nonce)) throw new AppError('nonce?', 400);
+  res.json({ success: true, data: await require('./helpController').waLoginFromBot(nonce, req.body?.mobile) });
+});
+
 // GET /api/guest/bot-config — public: the bot's WhatsApp number when the bot is on ('' = website keeps its forms)
 const config = (_req, res) => {
   const n = String(process.env.WA_BOT_NUMBER || '').replace(/\D/g, '');
@@ -123,4 +133,4 @@ const adminToken = asyncHandler(async (_req, res) => {
   res.json({ success: true, data: { ready: true, url: process.env.WA_WORKER_URL.replace(/\/$/, ''), token: BOT.adminToken() } });
 });
 
-module.exports = { requireBotKey, lead, action, adminToken, syncOf, config };
+module.exports = { requireBotKey, lead, action, adminToken, syncOf, config, waLogin };

@@ -237,6 +237,16 @@ exports.login = asyncHandler(async (req, res) => {
     student.device_bound_at = new Date();
   }
   await student.save();
+  require('../utils/waBot').appUsed(student.student_code);   // a free visitor's account: CRM shows the app
+  // the account was made in the middle of a website test (with the parent's number): the tests taken on the
+  // website after that are still under the visitor's code — they come into the account at this login
+  if (student.free_tier) {
+    try {
+      const GuestLead = require('../models/GuestLead'), Attempt = require('../models/Attempt');
+      const gl = await GuestLead.findOne({ converted_code: student.student_code }, 'gid').lean();
+      if (gl) await Attempt.updateMany({ student_code: `GUEST-${gl.gid}` }, { $set: { student_code: student.student_code, student_name: student.name } });
+    } catch (err) { console.warn('[login] guest tests', err.message); }
+  }
 
   return res.json({
     success: true,

@@ -49,6 +49,58 @@ exports.recover = asyncHandler(async (req, res) => {
   res.json({ ok: true, student_code: u.student_code, name: u.name, ticket });
 });
 
+// ── WhatsApp login (forgot PIN) ─────────────────────────────────────────
+// 1) the app: POST /api/help/wa-start { device_id } -> { ok, nonce, bot }   (one-time code, 10 minutes)
+// 2) the parent sends "LOGIN <nonce>" to our WhatsApp bot; the bot calls waLoginFromBot with their number
+// 3) the app polls GET /api/help/wa-status/:nonce?device_id= -> { status, accounts: [{ student_code, name, ticket }] }
+// The number comes from WhatsApp itself (not typed), and the account must be bound to the phone that asked.
+const WA_LOGIN_MS = 10 * 60 * 1000;
+const _waLogins = new Map();   // nonce -> { device_id, exp, status, accounts }
+function _waSweep() { const now = Date.now(); for (const [k, v] of _waLogins) if (v.exp < now) _waLogins.delete(k); }
+
+exports.waStart = asyncHandler(async (req, res) => {
+  const deviceId = _clean(req.body?.device_id, 100);
+  const bot = String(process.env.WA_BOT_NUMBER || '').replace(/\D/g, '');
+  if (!deviceId) throw new AppError('device_id?', 400);
+  if (!/^91\d{10}$/.test(bot) || !process.env.WA_WORKER_URL) return res.json({ ok: false, reason: 'no_bot' });
+  _waSweep();
+  if (_waLogins.size > 5000) throw new AppError('थोड्या वेळाने पुन्हा प्रयत्न करा', 429);
+  const nonce = crypto.randomBytes(12).toString('hex');   // 24 hex, never a 10-hex visitor id
+  _waLogins.set(nonce, { device_id: deviceId, exp: Date.now() + WA_LOGIN_MS, status: 'waiting', accounts: [] });
+  res.json({ ok: true, nonce, bot });
+});
+
+// called by the bot (botController, X-Bot-Key) with the WhatsApp number that sent "LOGIN <nonce>"
+exports.waLoginFromBot = async (nonce, mobile) => {
+  _waSweep();
+  const e = _waLogins.get(String(nonce || '').toLowerCase());
+  if (!e) return { status: 'expired' };
+  if (e.status === 'ok') return { status: 'ok', names: e.accounts.map(a => a.name) };
+  const m = normalizeMobile(mobile);
+  const students = m ? await User.find({ role: 'student', mobile: m }).select('user_id name student_code device_id status').lean() : [];
+  const live = students.filter(u => u.status !== 'blocked');
+  const hits = live.filter(u => u.device_id && u.device_id === e.device_id);
+  if (!hits.length) { e.status = live.length ? 'other_device' : 'no_match'; return { status: e.status }; }
+  e.accounts = [];
+  for (const u of hits) {
+    const ticket = crypto.randomBytes(24).toString('hex');
+    await User.updateOne({ user_id: u.user_id }, { $set: { pin_reset_hash: _hash(ticket), pin_reset_expires: new Date(Date.now() + TICKET_MS) } });
+    e.accounts.push({ student_code: u.student_code, name: u.name, ticket });
+  }
+  e.status = 'ok';
+  return { status: 'ok', names: e.accounts.map(a => a.name) };
+};
+
+exports.waStatus = asyncHandler(async (req, res) => {
+  _waSweep();
+  const nonce = String(req.params.nonce || '').toLowerCase();
+  const e = /^[0-9a-f]{24}$/.test(nonce) ? _waLogins.get(nonce) : null;
+  if (!e || e.device_id !== _clean(req.query.device_id, 100)) return res.json({ ok: true, status: 'expired' });
+  if (e.status !== 'ok') return res.json({ ok: true, status: e.status });
+  _waLogins.delete(nonce);   // the tickets go out once, to the phone that asked
+  res.json({ ok: true, status: 'ok', accounts: e.accounts });
+});
+
 // POST /api/help/reset-pin { student_code, ticket, pin }
 exports.resetPin = asyncHandler(async (req, res) => {
   const code = _clean(req.body?.student_code, 30).toUpperCase();

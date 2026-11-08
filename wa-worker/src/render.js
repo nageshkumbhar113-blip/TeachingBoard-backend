@@ -18,6 +18,12 @@ async function call(env, path, init = {}, ms = 8000) {
   } finally { clearTimeout(timer); }
 }
 
+// WhatsApp login (forgot PIN): Render checks the number against the account bound to the phone that asked
+export async function waLogin(env, nonce, mobile) {
+  try { return (await call(env, '/api/guest/bot/wa-login', { method: 'POST', body: JSON.stringify({ nonce, mobile }) }, 25000)).data || null; }
+  catch { return null; }
+}
+
 // the facts the rules need about a child (name, class, free tests, prices, next महा-Test…), or null
 export async function leadInfo(env, gid) {
   try { return (await call(env, `/api/guest/bot/lead/${encodeURIComponent(gid)}`, {}, 6000)).data || null; }

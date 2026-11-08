@@ -9,7 +9,7 @@
 import WA from './waFlow.js';
 import { validSignature, bodiesFor, templateBody, post, inboundText, hmacHex, sameHex } from './meta.js';
 import * as S from './store.js';
-import { leadInfo, queue, runJobs } from './render.js';
+import { leadInfo, queue, runJobs, waLogin } from './render.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Bot-Key', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'Content-Type': 'application/json', ...CORS } });
@@ -111,6 +111,20 @@ async function onMessage(env, m) {
   const mobile = String(m.from || '').replace(/\D/g, '').slice(-10);
   if (!/^\d{10}$/.test(mobile)) return;
   const text = inboundText(m).trim();
+  // "LOGIN <one-time code>" from the app's "WhatsApp ने login": not a lead message
+  const login = text.match(/^LOGIN\s+([0-9a-f]{24})$/i);
+  if (login) {
+    await S.addMsg(env, { mobile, dir: 'in', body: 'LOGIN …', wa_id: m.id });
+    const r = await waLogin(env, login[1].toLowerCase(), mobile);
+    const names = (r?.names || []).join(', ');
+    const reply = !r ? '⏳ आत्ता तपासता आलं नाही. 1 मिनिटाने पुन्हा Send करा.'
+      : r.status === 'ok' ? `✅ ${names}: नंबर पक्का झाला. आता app मध्ये परत जा आणि नवीन PIN ठेवा (10 मिनिटांत).`
+      : r.status === 'other_device' ? '📱 हे account दुसऱ्या phone वर जोडलेलं आहे. त्याच phone वरून करा, किंवा app मधल्या मदत मधून Admin ला request पाठवा.'
+      : r.status === 'no_match' ? '❌ हा WhatsApp नंबर कोणत्याही विद्यार्थ्याच्या account शी जोडलेला नाही. Register करताना दिलेल्या पालकांच्या नंबरवरून पाठवा.'
+      : '⌛ वेळ संपली. App मध्ये पुन्हा "WhatsApp ने login" दाबा.';
+    if (env.BOT_OFF !== '1') for (const b of bodiesFor('91' + mobile, reply, [])) { const id = await post(env, b); await S.addMsg(env, { mobile, dir: 'out', kind: 'service', body: reply, wa_id: id, status: 'sent' }); }
+    return;
+  }
   const code = (text.toUpperCase().match(/\b([0-9A-F]{10})\b/) || [])[1];
   if (code) await S.setPhone(env, mobile, code);
   const gid = code || await S.phoneGid(env, mobile);
@@ -176,12 +190,26 @@ async function callFirst(env) {
     if (d.paid || d.closed || !r.mobile) continue;
     const offer = d.offerEnd && new Date(d.offerEnd).getTime() > t ? new Date(d.offerEnd).getTime() : 0;
     const mt = d.mtLast && t - new Date(d.mtLast.at).getTime() < 3 * 864e5 ? d.mtLast : null;
-    if (!offer && !mt) continue;
+    // gave the number but no test yet (the last 7 days): call them too, after the running offers
+    const noTest = !offer && !mt && !d.testsDone && !d.app && d.createdAt && t - new Date(d.createdAt).getTime() < 7 * 864e5;
+    if (!offer && !mt && !noTest) continue;
     rows.push({ gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, updated_at: r.updated_at,
       tests: d.testsDone, free_total: d.freeTotal, via: d.via, app: d.app, paid: d.paid, closed: d.closed, open: WA.isOpen(d, now),
-      offer_end: offer ? d.offerEnd : null, mt, _k: offer || 9e15 });
+      offer_end: offer ? d.offerEnd : null, mt, no_test: noTest, acct: !!(d.acct && d.acct.code), push_on: !!d.pushOn, _k: offer || (mt ? 9e15 : 9.5e15) });
   }
   return rows.sort((a, b) => a._k - b._k).slice(0, 100).map(({ _k, ...r }) => r);
+}
+// 📲 the free account exists (code + PIN) but the app is not in use yet: call and help install
+async function noApp(env) {
+  const { results } = await env.DB.prepare("SELECT gid, name, cls, mobile, crm, last_in, updated_at, data FROM leads WHERE crm IS NULL OR crm NOT IN ('paid', 'closed') ORDER BY updated_at DESC LIMIT 500").all();
+  const rows = [], now = new Date();
+  for (const r of results || []) {
+    const d = JSON.parse(r.data);
+    if (d.paid || d.closed || d.app || !r.mobile || !(d.acct && d.acct.code)) continue;
+    rows.push({ gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, updated_at: r.updated_at,
+      tests: d.testsDone, free_total: d.freeTotal, via: d.via, app: false, open: WA.isOpen(d, now), offer_end: d.offerEnd || null, acct: true });
+  }
+  return rows.slice(0, 100);
 }
 async function crm(env, req, url) {
   const parts = url.pathname.split('/').filter(Boolean);   // crm, …
@@ -189,6 +217,7 @@ async function crm(env, req, url) {
     const { results } = await env.DB.prepare('SELECT crm, COUNT(*) AS n FROM leads GROUP BY crm').all();
     const counts = {}; for (const r of results || []) counts[r.crm || 'active'] = r.n;
     counts.first = (await callFirst(env)).length;
+    counts.noapp = (await noApp(env)).length;
     counts.nextyear = (await env.DB.prepare("SELECT COUNT(*) AS n FROM leads WHERE crm = 'closed' AND revisit_at IS NOT NULL AND revisit_at <= ?").bind(Date.now()).first()).n;
     const month = S.istDay().slice(0, 7);
     const mc = await env.DB.prepare("SELECT SUM(CAST(v AS REAL)) AS s FROM kv WHERE k LIKE ?").bind('cost:' + month + '%').first();
@@ -200,6 +229,7 @@ async function crm(env, req, url) {
     } });
   }
   if (parts[1] === 'list' && req.method === 'GET' && url.searchParams.get('list') === 'first') return json({ success: true, data: await callFirst(env) });
+  if (parts[1] === 'list' && req.method === 'GET' && url.searchParams.get('list') === 'noapp') return json({ success: true, data: await noApp(env) });
   if (parts[1] === 'list' && req.method === 'GET') {
     const list = url.searchParams.get('list') || 'all', q = (url.searchParams.get('q') || '').trim();
     const off = Math.max(0, Number(url.searchParams.get('offset')) || 0);
@@ -215,7 +245,7 @@ async function crm(env, req, url) {
       const d = JSON.parse(r.data);
       return { gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, updated_at: r.updated_at,
         tests: d.testsDone, free_total: d.freeTotal, via: d.via, app: d.app, paid: d.paid, daily: d.daily, closed: d.closed, revisit_at: d.revisitAt, open: WA.isOpen(d, now),
-        offer_end: d.offerEnd || null, mt: d.mtLast || null };
+        offer_end: d.offerEnd || null, mt: d.mtLast || null, acct: !!(d.acct && d.acct.code), push_on: !!d.pushOn };
     }) });
   }
   if (parts[1] === 'lead' && GID.test(parts[2] || '')) {

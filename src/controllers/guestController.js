@@ -49,7 +49,7 @@ function _offerNow(lead, now = Date.now()) {
 }
 // 'ad' = a Facebook / Instagram ad's link (ref = the ad's id, Admin › Sync › Ads)
 const SOURCES = new Set(['admin', 'friend', 'teacher', 'student', 'shop', 'ad', 'web']);
-const EVENT_STEPS = new Set(['browsed', 'link_sent', 'engaged', 'shared_friend', 'shared_parent', 'offer_seen', 'checkout', 'wa_bot', 'lesson']);
+const EVENT_STEPS = new Set(['browsed', 'link_sent', 'engaged', 'shared_friend', 'shared_parent', 'offer_seen', 'checkout', 'wa_bot', 'lesson', 'app_click']);
 
 const _clean = (v, max = 60) => String(v || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, max);
 const _istMonth = (d = new Date()) => new Date(d.getTime() + 5.5 * 3600 * 1000).toISOString().slice(0, 7);
@@ -152,12 +152,14 @@ exports.createSession = asyncHandler(async (req, res) => {
   let lead = req.user?.guest ? await GuestLead.findOne({ gid: _gidOf(req) }) : null;
   // App installed from the website ("continue in the app"): the Play referrer
   // carries the visitor's id, so the same lead (and their tests) continues.
-  // A lead that already became an account cannot be resumed this way.
+  // (Also after the free account exists: the website keeps the visitor; the app asks for the code + PIN.)
   const resumeGid = String(req.body?.resume_gid || '').trim().toUpperCase();
   if (!lead && /^[0-9A-F]{10}$/.test(resumeGid)) {
-    lead = await GuestLead.findOne({ gid: resumeGid, converted_code: '' });
+    lead = await GuestLead.findOne({ gid: resumeGid });
     if (!lead) throw new AppError('Guest session not found', 404);
-    BOT.notify(resumeGid, 'sync', {}, { sync: { app: true } });   // continued in the app (Play referrer)
+    // continued in the app (Play referrer) — not the child's own link opened in a browser; an older app sends no
+    // flag, its Android WebView says "; wv)"
+    if (req.body?.app === true || /;\s*wv\)/.test(String(req.get('user-agent') || ''))) BOT.notify(resumeGid, 'sync', {}, { sync: { app: true } });
   }
 
   const batchName = _clean(req.body?.batch, 120) || lead?.batch || '';
@@ -214,9 +216,11 @@ exports.saveContact = asyncHandler(async (req, res) => {
   lead.last_seen_at = new Date();
   await lead.save();
   _adLead(lead.gid).catch(err => console.warn('[ad lead] contact', err.message));
+  // the free account (code + PIN: free tests only) — shown on the result, sent by the bot inside its free window
+  const account = await autoAccount(lead).catch(err => { console.warn('[auto account]', err.message); return null; });
   // typed on the website (not WhatsApp): the bot sends nothing; the family waits in Admin › CRM's call list
-  BOT.notify(lead.gid, 'form_number', {}, { mobile });
-  res.json({ success: true, profile: _profile(lead) });
+  BOT.notify(lead.gid, 'form_number', {}, { mobile, sync: { name: lead.name || undefined, acct: account ? { code: account.code, pin: account.pin } : undefined } });
+  res.json({ success: true, profile: _profile(lead), account });
 });
 
 // POST /api/guest/device-token { device_token } — app only, for the evening reminder.
@@ -291,6 +295,7 @@ exports.publicSummary = asyncHandler(async (req, res) => {
       last_test: lead.last_test,
       parent_mobile_known: !!lead.parent_mobile,
       converted: !!lead.converted_code,
+      auto_account: !!lead.auto_pin,   // made with the parent's number: its PIN came on the result / WhatsApp
       // The code is useless without the PIN the parent chose; the app needs it
       // to log in once the payment (done in the browser) is through.
       student_code: lead.converted_code || '',
@@ -311,6 +316,138 @@ async function _studentCount() {
   return _countCache.n;
 }
 
+// The student account for a free visitor: free tier (free tests and chapters only) until a payment clears.
+// Used by the pay page's checkout and, with a random PIN, as soon as the parent's number arrives (autoAccount).
+// Moves the visitor's tests into it and keeps the Refer & Earn links.
+async function _makeAccount(lead, name, mobile, pin) {
+  const batch = await Batch.findOne({ name: lead.batch, is_active: { $ne: false } }, 'name').lean();
+  if (!batch) throw new AppError('हा class आता उपलब्ध नाही', 400);
+
+  let teacherCode = '';
+  if ((lead.source === 'teacher' || lead.source === 'shop') && lead.ref) {
+    const t = await User.findOne({ role: 'teacher', teacher_code: lead.ref }).select('teacher_code partner_type mobile').lean();
+    // a shop's own number never counts for the shop
+    if (t && !(t.partner_type === 'shop' && t.mobile === mobile)) teacherCode = t.teacher_code;
+  }
+  // Came from a student's own share link (?free=1&ref=CODE): that student's
+  // Refer & Earn friend — same rule as registration (not the same mobile).
+  let friendCode = '', friendGid = '';
+  if (lead.source === 'student' && lead.ref) {
+    const f = await User.findOne({ role: 'student', student_code: lead.ref }).select('student_code mobile').lean();
+    if (f && f.mobile !== mobile) friendCode = f.student_code;
+  }
+  // a friend's result link (?quiz=…&ref=<the sharer's gid>): the sharer's Refer & Earn — now if they
+  // already have an account, else when they get one (the same number never counts)
+  if (lead.source === 'friend' && /^[0-9A-F]{10}$/.test(lead.ref) && lead.ref !== lead.gid) {
+    const r = await GuestLead.findOne({ gid: lead.ref }, 'converted_code parent_mobile').lean();
+    const f = r?.converted_code ? await User.findOne({ role: 'student', student_code: r.converted_code }).select('student_code mobile').lean() : null;
+    if (f) { if (f.mobile !== mobile) friendCode = f.student_code; }
+    else if (r && r.parent_mobile !== mobile) friendGid = lead.ref;
+  }
+
+  const prefix = name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) || 'STU';
+  let code, tries = 0;
+  // 3 digits first; many free accounts share a prefix (STU for a Marathi name), so then 5 digits
+  do {
+    code = prefix + (tries < 10 ? String(Math.floor(100 + Math.random() * 900)) : String(Math.floor(10000 + Math.random() * 90000)));
+    tries++;
+  } while (tries < 30 && await User.exists({ student_code: code }));
+
+  const student = await User.create({
+    user_id: `student-${randomUUID()}`,
+    name,
+    role: 'student',
+    student_code: code,
+    mobile,
+    status: 'active',
+    free_tier: true,
+    assigned_batches: [batch.name],
+    approved_at: new Date(),
+    approved_by: 'auto',
+    request_source: 'self',
+    referred_by_teacher: teacherCode,
+    referred_by_student: friendCode,
+    referred_by_gid: friendGid,
+    pin_hash: User.hashPin(pin),
+  });
+  if (teacherCode) await User.updateOne({ role: 'teacher', teacher_code: teacherCode }, { $addToSet: { assigned_students: code } });
+
+  // Everything done as a guest now belongs to the account.
+  await Attempt.updateMany({ student_code: `GUEST-${lead.gid}` }, { $set: { student_code: code, student_name: name } });
+  lead.converted_code = code;
+  lead.converted_at = new Date();
+  // friends who came from this visitor's share link before this account existed
+  await User.updateMany({ role: 'student', referred_by_gid: lead.gid, referred_by_student: '', mobile: { $ne: mobile } }, { $set: { referred_by_student: code } });
+  if (!lead.parent_mobile) lead.parent_mobile = mobile;
+  return student;
+}
+
+// A random PIN that is not an easy one (1234, 1111, 1212…)
+function _randomPin() {
+  for (let i = 0; i < 50; i++) { const p = String(Math.floor(1000 + Math.random() * 9000)); if (!isWeakPin(p)) return p; }
+  return '4825';
+}
+
+// The free account as soon as the parent's number comes (owner's choice 2026-11-08): a code and a random PIN,
+// free tests only — the full course only through the pay page. The same child already registered on this number
+// (same name) keeps that account (its PIN stays the parent's own). Returns { code, pin } (pin '' = their own PIN).
+async function autoAccount(lead) {
+  if (!lead.parent_mobile || !lead.batch) return null;
+  if (lead.converted_code) return { code: lead.converted_code, pin: lead.auto_pin || '' };
+  const name = _clean(lead.name, 40) || 'Student';
+  const same = await User.find({ role: 'student', mobile: lead.parent_mobile }).select('name student_code').lean();
+  const dupe = lead.name ? same.find(s => String(s.name || '').trim().toLowerCase() === name.toLowerCase()) : null;
+  if (dupe) {
+    lead.converted_code = dupe.student_code; lead.converted_at = new Date();
+    await Attempt.updateMany({ student_code: `GUEST-${lead.gid}` }, { $set: { student_code: dupe.student_code, student_name: dupe.name } });
+    await lead.save();
+    return { code: dupe.student_code, pin: '' };
+  }
+  const pin = _randomPin();
+  await _makeAccount(lead, name, lead.parent_mobile, pin);
+  lead.auto_pin = pin;
+  await lead.save();
+  return { code: lead.converted_code, pin };
+}
+exports.autoAccount = autoAccount;
+
+// POST /api/guest/admin/lead-pin { gid, fresh? } — Admin › CRM "🔑 Code + PIN": the free account's code and PIN
+// (made now if it does not exist yet); fresh = a new PIN (the old one stops working).
+exports.adminLeadPin = asyncHandler(async (req, res) => {
+  const gid = String(req.body?.gid || '').trim().toUpperCase();
+  const lead = /^[0-9A-F]{10}$/.test(gid) ? await GuestLead.findOne({ gid }) : null;
+  if (!lead) throw new AppError('Lead सापडला नाही', 404);
+  if (!lead.parent_mobile) throw new AppError('या lead चा नंबर नाही', 400);
+  let acc = await autoAccount(lead);
+  if (!acc) throw new AppError('Class नाही — account बनवता आलं नाही', 400);
+  if (req.body?.fresh || !acc.pin) {
+    const u = await User.findOne({ role: 'student', student_code: acc.code });
+    if (!u) throw new AppError('Account सापडलं नाही', 404);
+    const paid = (await _paidCodes([acc.code])).has(acc.code);
+    if (paid && !req.body?.fresh) return res.json({ success: true, data: { code: acc.code, pin: '', paid: true, name: u.name } });
+    const pin = _randomPin();
+    u.pin_hash = User.hashPin(pin); await u.save();
+    lead.auto_pin = pin; await lead.save();
+    acc = { code: acc.code, pin };
+  }
+  BOT.notify(lead.gid, 'sync', {}, { sync: { acct: acc } });
+  res.json({ success: true, data: { ...acc, name: lead.name || '' } });
+});
+
+// POST /api/guest/admin/bot-backfill — Admin › CRM "🔄 जुने leads आणा": every visitor with a parent's number goes
+// to the bot's CRM once (the CRM started later than the website). No message is sent to anyone.
+exports.adminBotBackfill = asyncHandler(async (_req, res) => {
+  if (!BOT.on()) throw new AppError('Bot जोडलेला नाही', 400);
+  const leads = await GuestLead.find({ parent_mobile: { $nin: ['', null] } }, 'gid parent_mobile name').sort({ created_at: -1 }).limit(1000).lean();
+  let n = 0;
+  for (const l of leads) {
+    BOT.notify(l.gid, 'form_number', { backfill: true }, { mobile: l.parent_mobile, sync: { name: l.name || undefined } });
+    n++;
+    if (n % 10 === 0) await new Promise(r => setTimeout(r, 400));   // gently: the Worker makes one lead at a time
+  }
+  res.json({ success: true, data: { sent: n } });
+});
+
 // POST /api/guest/checkout { gid?, name, parent_mobile, pin, period }
 // Creates the student account (free tier until the payment clears), moves the
 // guest's tests into it, and opens a Razorpay order. The first-payment offer
@@ -321,84 +458,24 @@ exports.checkout = asyncHandler(async (req, res) => {
   const period = String(req.body?.period || '').trim();
   if (!['monthly', 'yearly'].includes(period)) throw new AppError('Plan निवडा', 400);
   const pin = String(req.body?.pin || '').trim();
-  if (!/^\d{4}$/.test(pin)) throw new AppError('PIN 4 अंकी असावा', 400);
+  if (!lead.converted_code && !/^\d{4}$/.test(pin)) throw new AppError('PIN 4 अंकी असावा', 400);
 
   let student;
   if (lead.converted_code) {
-    // Second try (closed the payment window, other plan…): same account.
+    // The account already exists (made with the parent's number, or a second try): it is paid for without its PIN.
+    // Paying only ever opens the course for this child, and the page never shows the PIN (owner, 2026-11-08).
     student = await User.findOne({ role: 'student', student_code: lead.converted_code });
-    if (!student || !student.verifyPin(pin)) {
-      throw new AppError(`हे account आधीच तयार आहे (Code ${lead.converted_code}). त्याचाच PIN टाका.`, 403);
-    }
+    if (!student) throw new AppError('Account सापडलं नाही — आमच्याशी संपर्क करा', 404);
   } else {
     const name = _clean(req.body?.name || lead.name, 40);
     if (!name) throw new AppError('विद्यार्थ्याचं नाव लिहा', 400);
     if (isWeakPin(pin)) throw new AppError('PIN सोपा आहे — 1234, 1111 असा नको', 400);
     const mobile = normalizeMobile(req.body?.parent_mobile || lead.parent_mobile);
     if (!mobile) throw new AppError('पालकांचा योग्य 10 अंकी mobile नंबर द्या', 400);
-    const batch = await Batch.findOne({ name: lead.batch, is_active: { $ne: false } }, 'name').lean();
-    if (!batch) throw new AppError('हा class आता उपलब्ध नाही', 400);
-
-    // Same child already registered on this number → use that account instead.
     const sameMobile = await User.find({ role: 'student', mobile }).select('name student_code').lean();
     const dupe = sameMobile.find(s => String(s.name || '').trim().toLowerCase() === name.toLowerCase());
     if (dupe) throw new AppError(`${name} आधीच registered आहे (Code ${dupe.student_code}). App मध्ये त्या code ने login करून pay करा.`, 409);
-
-    let teacherCode = '';
-    if ((lead.source === 'teacher' || lead.source === 'shop') && lead.ref) {
-      const t = await User.findOne({ role: 'teacher', teacher_code: lead.ref }).select('teacher_code partner_type mobile').lean();
-      // a shop's own number never counts for the shop
-      if (t && !(t.partner_type === 'shop' && t.mobile === mobile)) teacherCode = t.teacher_code;
-    }
-    // Came from a student's own share link (?free=1&ref=CODE): that student's
-    // Refer & Earn friend — same rule as registration (not the same mobile).
-    let friendCode = '', friendGid = '';
-    if (lead.source === 'student' && lead.ref) {
-      const f = await User.findOne({ role: 'student', student_code: lead.ref }).select('student_code mobile').lean();
-      if (f && f.mobile !== mobile) friendCode = f.student_code;
-    }
-    // a friend's result link (?quiz=…&ref=<the sharer's gid>): the sharer's Refer & Earn — now if they
-    // already have an account, else when they get one (the same number never counts)
-    if (lead.source === 'friend' && /^[0-9A-F]{10}$/.test(lead.ref) && lead.ref !== lead.gid) {
-      const r = await GuestLead.findOne({ gid: lead.ref }, 'converted_code parent_mobile').lean();
-      const f = r?.converted_code ? await User.findOne({ role: 'student', student_code: r.converted_code }).select('student_code mobile').lean() : null;
-      if (f) { if (f.mobile !== mobile) friendCode = f.student_code; }
-      else if (r && r.parent_mobile !== mobile) friendGid = lead.ref;
-    }
-
-    const prefix = name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) || 'STU';
-    let code, tries = 0;
-    do {
-      code = prefix + String(Math.floor(100 + Math.random() * 900));
-      tries++;
-    } while (tries < 10 && await User.exists({ student_code: code }));
-
-    student = await User.create({
-      user_id: `student-${randomUUID()}`,
-      name,
-      role: 'student',
-      student_code: code,
-      mobile,
-      status: 'active',
-      free_tier: true,
-      assigned_batches: [batch.name],
-      approved_at: new Date(),
-      approved_by: 'auto',
-      request_source: 'self',
-      referred_by_teacher: teacherCode,
-      referred_by_student: friendCode,
-      referred_by_gid: friendGid,
-      pin_hash: User.hashPin(pin),
-    });
-    if (teacherCode) await User.updateOne({ role: 'teacher', teacher_code: teacherCode }, { $addToSet: { assigned_students: code } });
-
-    // Everything done as a guest now belongs to the account.
-    await Attempt.updateMany({ student_code: `GUEST-${lead.gid}` }, { $set: { student_code: code, student_name: name } });
-    lead.converted_code = code;
-    lead.converted_at = new Date();
-    // friends who came from this visitor's share link before this account existed
-    await User.updateMany({ role: 'student', referred_by_gid: lead.gid, referred_by_student: '', mobile: { $ne: mobile } }, { $set: { referred_by_student: code } });
-    if (!lead.parent_mobile) lead.parent_mobile = mobile;
+    student = await _makeAccount(lead, name, mobile, pin);
   }
 
   const batchDoc = await Batch.findOne({ name: student.assigned_batches[0] || lead.batch });
