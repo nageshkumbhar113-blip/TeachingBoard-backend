@@ -49,6 +49,8 @@ const batchSchema = new mongoose.Schema(
     kind:     { type: String, enum: ['', 'exam', 'regular'], default: '' },
     // the course card's colours: 0-7 = one of core/courseCard.js's 8 gradients; -1 = picked from the name
     card_color: { type: Number, default: -1, min: -1, max: 7 },
+    // what the course card shows: 'card' = the card drawn by the app (default), 'image' = the uploaded cover picture
+    card_mode: { type: String, enum: ['card', 'image'], default: 'card' },
 
     // Pricing
     pricing_type: { type: String, enum: ['free', 'paid'], default: 'paid' },

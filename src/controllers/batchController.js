@@ -235,8 +235,10 @@ exports.createBatch = asyncHandler(async (req, res) => {
   const standard = req.body.standard !== undefined ? String(req.body.standard).trim() : undefined;
   const kind     = req.body.kind !== undefined ? require('../utils/courseKind').cleanKind(req.body.kind) : undefined;
   const cardColor = req.body.card_color !== undefined ? Math.max(-1, Math.min(7, parseInt(req.body.card_color, 10))) : undefined;
+  const cardMode  = req.body.card_mode === 'image' || req.body.card_mode === 'card' ? req.body.card_mode : undefined;
 
   const insertDoc = { name, icon, subjects: [], ...pricingFields };
+  if (cardMode !== undefined) insertDoc.card_mode = cardMode;
   if (cardColor !== undefined && !Number.isNaN(cardColor)) insertDoc.card_color = cardColor;
   if (kind        !== undefined) insertDoc.kind          = kind;
   if (description !== undefined) insertDoc.description = description;
@@ -333,6 +335,7 @@ exports.renameBatch = asyncHandler(async (req, res) => {
   const standard    = req.body.standard !== undefined ? String(req.body.standard).trim() : undefined;
   const kind        = req.body.kind !== undefined ? require('../utils/courseKind').cleanKind(req.body.kind) : undefined;
   const cardColor   = req.body.card_color !== undefined ? Math.max(-1, Math.min(7, parseInt(req.body.card_color, 10))) : undefined;
+  const cardMode    = req.body.card_mode === 'image' || req.body.card_mode === 'card' ? req.body.card_mode : undefined;
 
   if (!oldName) throw new AppError('old name is required', 400);
   if (!newName) throw new AppError('new name is required', 400);
@@ -358,6 +361,7 @@ exports.renameBatch = asyncHandler(async (req, res) => {
   if (standard !== undefined) updateFields.standard = standard;
   if (kind !== undefined) updateFields.kind = kind;
   if (cardColor !== undefined && !Number.isNaN(cardColor)) updateFields.card_color = cardColor;
+  if (cardMode !== undefined) updateFields.card_mode = cardMode;
 
   await Promise.all([
     Batch.updateOne({ name: oldName }, { $set: updateFields }),
@@ -878,7 +882,7 @@ exports.getBatchPricing = asyncHandler(async (req, res) => {
  */
 exports.getAllBatchesPricing = asyncHandler(async (req, res) => {
   const batches = await Batch.find({ is_active: true })
-    .select('name icon cover_image pricing_type monthly_price yearly_price trial_days description board medium standard kind card_color subjects.name')
+    .select('name icon cover_image pricing_type monthly_price yearly_price trial_days description board medium standard kind card_color card_mode subjects.name')
     .lean();
   const { kindOf } = require('../utils/courseKind');
   const facts = await require('../utils/courseFacts').courseFacts().catch(() => ({}));
@@ -904,6 +908,7 @@ exports.getAllBatchesPricing = asyncHandler(async (req, res) => {
     // what the course holds (subjects, chapters, Notes, answers, free part) for the card's moving line
     facts: facts[b.name] || null,
     card_color: Number.isInteger(b.card_color) ? b.card_color : -1,
+    card_mode: b.card_mode === 'image' ? 'image' : 'card',
   }));
 
   res.json({ success: true, data });
