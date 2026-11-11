@@ -268,6 +268,16 @@
     lead.awaiting = 'name';
     out.push(wa(lead, now, `${hello ? 'नमस्कार 🙏 NKs EduOrbit मध्ये स्वागत!\n' : ''}${lead.cls ? lead.cls + ' ची ' : ''}free test (10 मिनिटं, login नाही) 📝\nResult, क्रमांक आणि कुठे सराव हवा ते इथेच पाठवतो.\n\n✍️ पाल्याचं (मुलाचं / मुलीचं) नाव लिहा 👇`));
   }
+  // owner (2026-11-12): a parent from a class's ad is not asked again — the class's test link goes at once (to forward
+  // or open here); the child types the name on the website, and the free account (Code + PIN) follows from there
+  function linkFirst(lead, now, out, hello) {
+    lead.awaiting = null;
+    out.push(wa(lead, now, `${hello ? 'नमस्कार 🙏 NKs EduOrbit मध्ये स्वागत!\n' : ''}👇 खालचा मेसेज पाल्याला *forward* करा, किंवा याच phone वर उघडा.\nTest दिली की result आणि क्रमांक इथेच येईल.`));
+    out.push(wa(lead, now, `${lead.cls} ची free test 📝 (10 मिनिटं, login नाही)\n👇\n${L.child(lead.gid)}`));
+    if (lead.ctwaUntil && !lead.mtReg && lead.mtNext && new Date(lead.mtNext) > now)
+      out.push(wa(lead, now, `🏆 ${whenText(new Date(lead.mtNext), now)} ला ${lead.cls} चा महा-Test — सगळ्यांमध्ये क्रमांक कळेल. नोंदणी करू? (मोफत)`, [{ id: 'mt_reg', label: '🏆 हो, नोंदणी करा' }]));
+    out.push(log('CRM', `Class माहीत (${lead.cls}) → test ची link लगेच, काही विचारलं नाही. नाव मूल website वर लिहील; मग app account (Code + PIN) इथे.`));
+  }
   function welcome(lead, raw, now) {
     const out = [];
     lead.lastInboundAt = now.toISOString(); lead.unanswered = 0; lead.via = 'wa'; lead.welcomed = true;
@@ -277,7 +287,8 @@
       out.push(wa(lead, now, 'नमस्कार 🙏 NKs EduOrbit मध्ये स्वागत!\nपाल्याची free test (10 मिनिटं, login नाही) 📝\nकोणत्या class साठी?', clsButtons(lead)));
       return out;
     }
-    askName(lead, now, out, true);
+    if (lead.cls) linkFirst(lead, now, out, true);
+    else askName(lead, now, out, true);   // nothing known about the class and no list (Render asleep): the name first
     return out;
   }
 
@@ -296,7 +307,7 @@
     if (lead.awaiting === 'cls') {
       const m = t.match(/^cls:(\d+)$/);
       const c = m ? (lead.courses || [])[Number(m[1])] : (lead.courses || []).find(x => x.toLowerCase() === t.toLowerCase());
-      if (c) { lead.cls = c; out.push({ to: 'do', action: 'batch', data: { batch: c } }); out.push(log('CRM', `Class WhatsApp वर निवडला: ${c}.`)); askName(lead, now, out, false); return out; }
+      if (c) { lead.cls = c; out.push({ to: 'do', action: 'batch', data: { batch: c } }); out.push(log('CRM', `Class WhatsApp वर निवडला: ${c}.`)); linkFirst(lead, now, out, false); return out; }
       if (!/^[a-z_]+:/i.test(t) && !['TEST', 'STOP'].includes(kw)) { out.push(wa(lead, now, 'खालच्या यादीतून class निवडा 👇', clsButtons(lead))); return out; }
     }
     if (lead.awaiting === 'name' && !/^[A-Z_]+:/.test(up) && !['TEST', 'STOP'].includes(kw) && !BUTTON_IDS.includes(t)) {
@@ -582,7 +593,7 @@
         if (lead.testsDone || lead.paid || lead.closed || lead.stopped || !isOpen(lead, now)) return;
         if (lead.awaiting === 'cls') out.push(wa(lead, now, '🙏 पाल्याची free test अजून बाकी आहे. कोणत्या class साठी? 👇', clsButtons(lead), { own: true }));
         else if (lead.awaiting === 'name') out.push(wa(lead, now, `🙏 ${lead.cls ? lead.cls + ' ची ' : ''}free test अजून बाकी आहे (10 मिनिटं).\n${testOfferLine}\n✍️ पाल्याचं नाव लिहा — link लगेच पाठवतो 👇`, [], { own: true }));
-        else (lead.courseAsked = true, out.push(wa(lead, now, `📝 ${lead.name} ने free test दिली का? फक्त 10 मिनिटं, login नाही 👇\n${L.child(lead.gid)}\n\n${testOfferLine}\n${shortCourse(lead, now)}`, [{ id: 'got', label: '👍 पाल्याला दिली' }, ...courseButtons], { own: true })));
+        else (lead.courseAsked = true, out.push(wa(lead, now, `📝 ${lead.name === 'तुमचा पाल्य' ? 'पाल्याने' : lead.name + ' ने'} free test दिली का? फक्त 10 मिनिटं, login नाही 👇\n${L.child(lead.gid)}\n\n${testOfferLine}\n${shortCourse(lead, now)}`, [{ id: 'got', label: '👍 पाल्याला दिली' }, ...courseButtons], { own: true })));
       } });
     }
     let last = new Date(end.getTime() - 3 * H);

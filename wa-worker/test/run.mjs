@@ -138,8 +138,9 @@ try {
 
   // 8) an unknown number without a code → a free welcome
   const before = sent.length;
-  await signed(msg('919822200002', 'hi')); await waitSent(before + 1);
-  ok(/free test/.test(textOf(sent[before])) && sent[before].to === '919822200002', 'unknown number → welcome with the free link', textOf(sent[before]));
+  await signed(msg('919822200002', 'hi')); await waitSent(before + 1); await sleep(1500);
+  const welcomeMsgs = sent.slice(before).filter(m => m.to === '919822200002').map(textOf);
+  ok(welcomeMsgs.some(x => /स्वागत/.test(x)) && welcomeMsgs.some(x => /free test/.test(x)), 'unknown number → welcome + the free test (or the class / name asked)', welcomeMsgs.join(' | '));
 
   // 9) a form-number lead (no WhatsApp): nothing is sent, it waits in the call list
   const n9 = sent.length;

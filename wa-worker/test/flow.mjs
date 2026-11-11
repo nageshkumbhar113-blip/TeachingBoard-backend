@@ -153,14 +153,11 @@ out = W.welcome(lead, 'Hello! Can I get more info on this?', thuAd);
 let wm = out.find(x => x.to === 'wa');
 ok(wm && /कोणत्या class/.test(wm.text) && wm.buttons.length === 2 && wm.buttons[0].id === 'cls:0', 'ad, no class known: the class is asked (list)', wm && wm.text);
 out = W.inbound(lead, 'cls:0', new Date(thuAd.getTime() + 60e3));
-ok(lead.cls === '8th NMMS EXAM 26-27 BATCH' && out.some(x => x.to === 'do' && x.action === 'batch' && x.data.batch === lead.cls) && /नाव लिहा/.test(texts(out)[0]), 'class chosen → Render told, the name asked', texts(out)[0]);
-ok(texts(W.inbound(lead, 'call_me', new Date(thuAd.getTime() + 90e3))).length && lead.name === 'तुमचा पाल्य', 'a button id is never taken as the name');
-lead.crm = null;
-out = W.inbound(lead, 'Atharv', new Date(thuAd.getTime() + 120e3));
 t = texts(out);
-ok(lead.name === 'Atharv' && out.some(x => x.to === 'do' && x.action === 'name') && t.some(x => /free=1&g=CTWA111111/.test(x)), 'name → the child\'s link to forward', t.join(' | '));
-ok(t.some(x => /महा-Test/.test(x) && /नोंदणी करू/.test(x)), 'from an ad: the महा-Test registration asked at once', t.join(' | '));
-out = W.event(lead, 'sync', { acct: { code: 'ATH201', pin: '4826' } }, new Date(thuAd.getTime() + 180e3));
+ok(lead.cls === '8th NMMS EXAM 26-27 BATCH' && out.some(x => x.to === 'do' && x.action === 'batch' && x.data.batch === lead.cls) && t.some(x => /free=1&g=CTWA111111/.test(x)) && !t.some(x => /नाव लिहा/.test(x)) && !lead.awaiting, 'class chosen → Render told, the test link at once (no name asked)', t.join(' | '));
+ok(t.some(x => /forward/.test(x)) && t.some(x => /महा-Test/.test(x) && /नोंदणी करू/.test(x)), 'forward note + the महा-Test registration asked at once', t.join(' | '));
+// the child types the name on the website → Render: the name and the free account
+out = W.event(lead, 'sync', { name: 'Atharv', acct: { code: 'ATH201', pin: '4826' } }, new Date(thuAd.getTime() + 180e3));
 ok(texts(out).some(x => x.includes('ATH201') && x.includes('4826') && x.includes('play.google.com')), 'the free account arrives → one message with Code + PIN', texts(out).join(' | '));
 ok(texts(W.event(lead, 'sync', { acct: { code: 'ATH201', pin: '4826' } }, new Date(thuAd.getTime() + 200e3))).length === 0, 'the account message only once');
 // still open after 24 h (ad window 72 h), the reminders inside it
@@ -185,8 +182,14 @@ ok(/आठवण इथेच येईल/.test(t[0]) && W.isOpen(lead, new Dat
 lead = W.createLead({ gid: 'HIHI111111' }, thuAd); lead.mobile = '9822200042';
 W.event(lead, 'sync', { cls: '10th', courses: ['10th'] }, thuAd);
 t = texts(W.welcome(lead, 'hi', thuAd));
-ok(/10th ची free test/.test(t[0]) && lead.awaiting === 'name' && !W.isOpen(lead, new Date(thuAd.getTime() + 25 * 3600e3)), 'a new number ("hi"): the name asked; 24 h window', t[0]);
+ok(t.some(x => /10th ची free test/.test(x) && /g=HIHI111111/.test(x)) && !lead.awaiting && !W.isOpen(lead, new Date(thuAd.getTime() + 25 * 3600e3)), 'a new number ("hi"), class known: the link at once; 24 h window', t.join(' | '));
 ok(W.tick(lead, new Date(thuAd.getTime() + 31 * 3600e3)).length === 0, 'not from an ad: no reminders of its own');
+lead = W.createLead({ gid: 'ADAD111111' }, thuAd); lead.mobile = '9822200043'; lead.ctwaUntil = new Date(thuAd.getTime() + 72 * 3600e3).toISOString();
+W.event(lead, 'sync', { cls: '8th NMMS', courses: ['8th NMMS', '10th'] }, thuAd);
+t = texts(W.welcome(lead, 'Hello! Can I get more info on this?', thuAd));
+ok(/स्वागत/.test(t[0]) && t.some(x => /8th NMMS ची free test/.test(x) && /g=ADAD111111/.test(x)) && !t.some(x => /class साठी\?|नाव लिहा/.test(x)), 'ad with its class: the class test link straight away, no question', t.join(' | '));
+t = texts(W.tick(lead, new Date('2026-11-13T13:31:00Z')));
+ok(t.some(x => /पाल्याने free test दिली का/.test(x)), 'no name yet: "पाल्याने free test दिली का?"', t.join(' | '));
 
 console.log(bad ? `${bad} FAILED` : 'FLOW ALL PASS');
 process.exit(bad ? 1 : 0);

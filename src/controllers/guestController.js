@@ -187,6 +187,12 @@ exports.createSession = asyncHandler(async (req, res) => {
   if (name) lead.name = name;
   lead.last_seen_at = new Date();
   await lead.save();
+  // the number came first (WhatsApp ad / bot) and the child now typed the name: the free account (code + PIN) —
+  // the bot sends it to the parent
+  if (name && lead.parent_mobile && !lead.converted_code) {
+    const acct = await autoAccount(lead).catch(err => { console.warn('[guest] account', err.message); return null; });
+    if (acct && BOT.on()) BOT.notify(lead.gid, 'sync', {}, { sync: await require('./botController').syncOf(lead.gid).catch(() => ({ name: lead.name, acct })) });
+  }
 
   res.status(201).json({
     success: true,
