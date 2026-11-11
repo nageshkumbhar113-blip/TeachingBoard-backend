@@ -173,7 +173,7 @@ try {
   // ☀️ "call first": unpaid families with the offer still running (soonest end on top), with the time left
   const callFirst = await crm('list?list=first');
   ok(Array.isArray(callFirst.data) && typeof s.data.counts.first === 'number' && callFirst.data.length === s.data.counts.first
-    && callFirst.data.every(x => !x.paid && !x.closed && (x.offer_end || x.mt)), '"call first" list: unpaid, open offer or a महा-Test', JSON.stringify(callFirst.data?.map(x => [x.gid, x.offer_end])));
+    && callFirst.data.every(x => !x.paid && !x.closed && (x.offer_end || x.mt || x.no_test)), '"call first" list: unpaid, open offer, a महा-Test or a number without a test', JSON.stringify(callFirst.data?.map(x => [x.gid, x.offer_end])));
   const la = await crm(`lead/${A}`);
   ok(la.data.msgs.filter(m => m.dir === 'in').length >= 5 && la.data.msgs.some(m => m.dir === 'out'), 'the chat log has both sides');
 

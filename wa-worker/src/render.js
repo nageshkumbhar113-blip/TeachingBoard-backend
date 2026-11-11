@@ -24,6 +24,16 @@ export async function waLogin(env, nonce, mobile) {
   catch { return null; }
 }
 
+// a family that wrote first: Render makes (or finds by the number) its lead → { gid, …the facts }, or null
+export async function newLead(env, body) {
+  try { return (await call(env, '/api/guest/bot/action', { method: 'POST', body: JSON.stringify({ ...body, action: 'new_lead' }) }, 20000)).data || null; }
+  catch { return null; }
+}
+// keep Render awake (its free plan sleeps after 15 idle minutes)
+export async function ping(env) {
+  try { await fetch(env.RENDER_URL + '/api/health', { signal: AbortSignal.timeout(60000) }); } catch { /* asleep: the next one wakes it */ }
+}
+
 // the facts the rules need about a child (name, class, free tests, prices, next महा-Test…), or null
 export async function leadInfo(env, gid) {
   try { return (await call(env, `/api/guest/bot/lead/${encodeURIComponent(gid)}`, {}, 6000)).data || null; }
@@ -36,7 +46,7 @@ export const queue = (env, gid, action, body) => env.DB.prepare(
 
 // run due jobs (from the cron); a job that keeps failing waits 1, 2, 4 … min, and is dropped after 12 tries (~2 days)
 export async function runJobs(env, limit = 10) {
-  const { results } = await env.DB.prepare('SELECT * FROM jobs WHERE next_at <= ? ORDER BY next_at LIMIT ?').bind(nowMs(), limit).all();
+  const { results } = await env.DB.prepare('SELECT * FROM jobs WHERE next_at <= ? ORDER BY next_at, id LIMIT ?').bind(nowMs(), limit).all();
   let done = 0;
   for (const j of results || []) {
     try {

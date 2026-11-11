@@ -208,15 +208,18 @@ async function createAd(o) {
   // With a Meta dataset (results sent by our server) ad sets run for the result itself —
   // a free test given (Lead) / a teacher registered — not for clicks. Never for student ads.
   const ds = process.env.META_DATASET_ID || '';
-  let conv = !!ds && o.audience !== 'student', note = '';
-  let campaignName = conv ? `${A.campaign} · Leads` : A.campaign;
-  let adsetName = conv ? `${o.adset}-lead` : o.adset;
+  // 💬 a click-to-WhatsApp ad (o.dest === 'wa'): the button opens a chat with the bot's number (linked to the Page);
+  // Meta runs it for conversations, and the bot may write free for 72 h to whoever wrote
+  const toWa = o.dest === 'wa';
+  let conv = !toWa && !!ds && o.audience !== 'student', note = '';
+  let campaignName = toWa ? `${A.campaign} · WhatsApp` : conv ? `${A.campaign} · Leads` : A.campaign;
+  let adsetName = toWa ? `${o.adset}-wa` : conv ? `${o.adset}-lead` : o.adset;
   const existing = (await graphAll(`${e.account}/ads`, { fields: 'id,name,status,adset{name}', filtering: [{ field: 'name', operator: 'EQUAL', value: o.name }], limit: '25' }))
     .find(x => x.name === o.name && !GONE.includes(x.status) && (!x.adset?.name || x.adset.name === adsetName));
   if (existing) return { exists: true, ad_id: existing.id, status: existing.status };
 
   const makeCampaign = async () => (await _findByName('campaigns', campaignName)) || post(`${e.account}/campaigns`, {
-    name: campaignName, objective: conv ? 'OUTCOME_LEADS' : 'OUTCOME_TRAFFIC', status: 'PAUSED', special_ad_categories: [], is_adset_budget_sharing_enabled: false,
+    name: campaignName, objective: toWa ? 'OUTCOME_ENGAGEMENT' : conv ? 'OUTCOME_LEADS' : 'OUTCOME_TRAFFIC', status: 'PAUSED', special_ad_categories: [], is_adset_budget_sharing_enabled: false,
   });
   let campaign, adset;
   try {
@@ -236,8 +239,8 @@ async function createAd(o) {
     return post(`${e.account}/adsets`, {
       name: adsetName, campaign_id: campaign.id, status: 'PAUSED',
       daily_budget: Math.max(100, Math.round(Number(o.daily_budget) || 0)) * 100,   // paise
-      billing_event: 'IMPRESSIONS', bid_strategy: 'LOWEST_COST_WITHOUT_CAP', destination_type: 'WEBSITE',
-      ...(conv
+      billing_event: 'IMPRESSIONS', bid_strategy: 'LOWEST_COST_WITHOUT_CAP', destination_type: toWa ? 'WHATSAPP' : 'WEBSITE',
+      ...(toWa ? { optimization_goal: 'CONVERSATIONS', promoted_object: { page_id: e.page } } : conv
         ? { optimization_goal: 'OFFSITE_CONVERSIONS', promoted_object: { pixel_id: ds, custom_event_type: o.audience === 'parent' ? 'LEAD' : 'COMPLETE_REGISTRATION' } }
         : { optimization_goal: 'LINK_CLICKS' }),
       targeting: {
@@ -252,7 +255,7 @@ async function createAd(o) {
   if (!ready) return { pending: true, campaign_id: campaign.id, adset_id: adset.id, note };
   const creative = await _creative(o);
   const ad = await post(`${e.account}/ads`, { name: o.name, adset_id: adset.id, creative: { creative_id: creative.id }, status: 'PAUSED' });
-  return { created: true, mode: conv ? 'lead' : 'clicks', note, ad_id: ad.id, adset_id: adset.id, campaign_id: campaign.id, creative_id: creative.id,
+  return { created: true, mode: toWa ? 'whatsapp' : conv ? 'lead' : 'clicks', note, ad_id: ad.id, adset_id: adset.id, campaign_id: campaign.id, creative_id: creative.id,
     manager: `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${e.account.replace(/^act_/, '')}&selected_ad_ids=${ad.id}` };
 }
 
@@ -266,7 +269,9 @@ function _creative(o) {
       ...(process.env.META_IG_ACTOR_ID ? { instagram_user_id: process.env.META_IG_ACTOR_ID } : {}),
       video_data: {
         video_id: o.video_id, image_hash: o.image_hash, message: o.message, title: o.headline,
-        call_to_action: { type: o.cta === 'SIGN_UP' ? 'SIGN_UP' : 'LEARN_MORE', value: { link: o.link } },
+        call_to_action: o.dest === 'wa'
+          ? { type: 'WHATSAPP_MESSAGE', value: { app_destination: 'WHATSAPP' } }
+          : { type: o.cta === 'SIGN_UP' ? 'SIGN_UP' : 'LEARN_MORE', value: { link: o.link } },
       },
     },
   });
@@ -279,7 +284,7 @@ async function replaceVideo(o) {
   const ad = await graph(String(o.ad_id), { fields: 'id,name,account_id' });
   if (`act_${ad.account_id}` !== env().account) throw Object.assign(new Error('Not this ad account'), { status: 400 });
   if (!(await _videoReady(o.video_id, 90000))) throw Object.assign(new Error('Meta अजून नवीन video तयार करत आहे — 2 मिनिटांनी पुन्हा "Video बदला" दाबा (video पुन्हा बनणार नाही)'), { status: 400, code: 'pending' });
-  const creative = await _creative({ ...o, name: ad.name });
+  const creative = await _creative({ ...o, name: ad.name, dest: /-wa$/.test(ad.name) ? 'wa' : o.dest });
   await post(String(o.ad_id), { creative: { creative_id: creative.id } });
   _cache = null;
   return { name: ad.name, ad_id: ad.id, creative_id: creative.id };

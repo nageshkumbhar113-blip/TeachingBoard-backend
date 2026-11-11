@@ -9,7 +9,7 @@
 import WA from './waFlow.js';
 import { validSignature, bodiesFor, templateBody, post, inboundText, hmacHex, sameHex } from './meta.js';
 import * as S from './store.js';
-import { leadInfo, queue, runJobs, waLogin } from './render.js';
+import { leadInfo, queue, runJobs, waLogin, newLead, ping } from './render.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Bot-Key', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'Content-Type': 'application/json', ...CORS } });
@@ -61,7 +61,7 @@ async function deliver(env, lead, outs) {
       continue;
     }
     if (o.to === 'do') {
-      await queue(env, gid, o.action, { mobile, name: o.name || '' });
+      await queue(env, gid, o.action, { mobile, name: o.name || '', ...(o.data || {}) });
       await S.addMsg(env, { gid, mobile, dir: 'do', kind: o.action, body: o.name || '' });
       continue;
     }
@@ -129,17 +129,50 @@ async function onMessage(env, m) {
   if (code) await S.setPhone(env, mobile, code);
   const gid = code || await S.phoneGid(env, mobile);
   if (!gid) {
-    // an unknown number without a code ("hi"): they wrote first, so a free welcome with the free test link
-    await S.addMsg(env, { mobile, dir: 'in', body: text || `[${m.type}]` });
-    if (env.BOT_OFF === '1') return;
-    const body = `नमस्कार 🙏 NKs EduOrbit.\nपाल्याची free test (10 मिनिटं, login नाही) 👇\n${WA.CONFIG.site}/student-app/?free=1\nTest दिली की result इथेच मिळेल.`;
-    for (const b of bodiesFor('91' + mobile, body, [])) { const id = await post(env, b); await S.addMsg(env, { mobile, dir: 'out', kind: 'service', body, wa_id: id, status: 'sent' }); }
+    // a number the bot does not know, without a code: a click-to-WhatsApp ad (m.referral), or just "hi"
+    if (env.BOT_OFF === '1') { await S.addMsg(env, { mobile, dir: 'in', body: text || `[${m.type}]` }); return; }
+    await newFamily(env, m, mobile, text);
+  } else {
+    await withLead(env, gid, mobile, async (lead, now) => {
+      await S.addMsg(env, { gid, mobile, dir: 'in', body: text || `[${m.type}]`, wa_id: m.id });
+      // a photo / voice note: the window opens anyway; tell them what works
+      return WA.inbound(lead, text || '?', now);
+    });
+  }
+  // what the message asked Render to do (the child's name → the free account, the class…): now, not at the next cron
+  await runJobs(env, 5).catch(() => {});
+}
+
+// ── a new family on WhatsApp: Render makes the lead (the same one if this number came from the website), the bot
+// asks the class (if the ad does not say it) and the child's name. From an ad: the free window is 72 h ──
+const newGid = () => [...crypto.getRandomValues(new Uint8Array(5))].map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+async function newFamily(env, m, mobile, text) {
+  const ref = m.referral && (m.referral.source_type === 'ad' || m.referral.source_id) ? m.referral : null;
+  const now = new Date();
+  const body = { mobile, text: String(text || '').slice(0, 200), ad_id: ref ? String(ref.source_id || '').slice(0, 30) : '',
+    headline: ref ? String(ref.headline || '').slice(0, 120) : '', ad_body: ref ? String(ref.body || '').slice(0, 300) : '' };
+  let gid = newGid();
+  const info = await newLead(env, { gid, ...body });   // Render asleep → null: the job below makes it later
+  if (info && GID.test(info.gid || '')) gid = info.gid;
+  else await queue(env, gid, 'new_lead', { ...body, queued: true });   // Render tells the bot the facts when it makes it
+  await S.setPhone(env, mobile, gid);
+  if (!(await S.getLead(env, gid))) {
+    const lead = WA.createLead({ gid, source: ref ? 'ctwa' : 'wa' }, now);
+    lead.mobile = mobile;
+    if (ref) { lead.ctwaUntil = new Date(now.getTime() + WA.CONFIG.ctwaHours * 3600e3).toISOString(); lead.ctwaAd = body.ad_id; }
+    if (info) { WA.event(lead, 'sync', info, now); lead.syncedAt = now.toISOString(); }
+    await S.ensureRow(env, lead);
+    await withLead(env, gid, mobile, async (l, t) => {
+      await S.addMsg(env, { gid, mobile, dir: 'in', body: (ref ? '📣 Ad: ' : '') + (text || `[${m.type}]`), wa_id: m.id });
+      return WA.welcome(l, text, t);
+    });
     return;
   }
-  await withLead(env, gid, mobile, async (lead, now) => {
+  // a family already known here (Render matched the number to an older lead): the usual conversation
+  await withLead(env, gid, mobile, async (l, t) => {
     await S.addMsg(env, { gid, mobile, dir: 'in', body: text || `[${m.type}]`, wa_id: m.id });
-    // a photo / voice note: the window opens anyway; tell them what works
-    return WA.inbound(lead, text || '?', now);
+    if (ref && !l.ctwaUntil) l.ctwaUntil = new Date(t.getTime() + WA.CONFIG.ctwaHours * 3600e3).toISOString();
+    return WA.inbound(l, text || '?', t);
   });
 }
 
@@ -475,5 +508,8 @@ export default {
   async scheduled(event, env, ctx) {
     configure(env);
     ctx.waitUntil(runTick(env));
+    // keep Render (free plan, sleeps after 15 min) awake 6 am – 11 pm IST, so a parent's page and the bot never wait for it
+    const h = (new Date(Date.now() + 5.5 * 3600e3)).getUTCHours();
+    if (env.KEEP_AWAKE !== '0' && h >= 6 && h < 23) ctx.waitUntil(ping(env));
   },
 };

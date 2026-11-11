@@ -434,6 +434,43 @@ exports.adminLeadPin = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { ...acc, name: lead.name || '' } });
 });
 
+// GET /api/guest/admin/mt-list — Admin › CRM "🏆 महा-Test": the families registered for the coming महा-Tests (the
+// next 8 days), with the parent's number — the bot may not write to them first (no free window), so the team sends
+// the reminder from its own WhatsApp / SMS. Students with full access are left out (the app reminds them).
+exports.adminMtList = asyncHandler(async (_req, res) => {
+  const WeeklyEvent = require('../models/WeeklyEvent'), WeeklyEntry = require('../models/WeeklyEntry');
+  const now = new Date();
+  const events = await WeeklyEvent.find({ is_trial: { $ne: true }, status: { $ne: 'skipped' }, ends_at: { $gt: now }, starts_at: { $lt: new Date(now.getTime() + 8 * 864e5) } })
+    .sort({ starts_at: 1 }).select('_id batch title starts_at ends_at').lean();
+  const out = [];
+  for (const ev of events) {
+    const entries = await WeeklyEntry.find({ event_id: String(ev._id) }, 'student_code name submitted_at team_reminders registered_at').lean();
+    const guestGids = entries.map(e => /^GUEST-/.test(e.student_code) ? e.student_code.slice(6) : null).filter(Boolean);
+    const codes = entries.map(e => e.student_code).filter(c => !/^GUEST-/.test(c));
+    const leads = await GuestLead.find({ $or: [{ gid: { $in: guestGids } }, { converted_code: { $in: codes } }] }, 'gid name batch parent_mobile converted_code').lean();
+    const users = codes.length ? await User.find({ role: 'student', student_code: { $in: codes } }, 'role student_code free_tier expiry_date').lean() : [];
+    const full = new Set(users.filter(u => require('../utils/contentAccess').hasFullAccess(u)).map(u => u.student_code));
+    const rows = [];
+    for (const e of entries) {
+      const lead = /^GUEST-/.test(e.student_code) ? leads.find(l => l.gid === e.student_code.slice(6)) : leads.find(l => l.converted_code === e.student_code);
+      if (!lead || !lead.parent_mobile || full.has(e.student_code)) continue;
+      rows.push({ gid: lead.gid, name: lead.name || e.name || '', cls: lead.batch || ev.batch, mobile: lead.parent_mobile, student_code: e.student_code,
+        submitted: !!e.submitted_at, reminders: (e.team_reminders || []).map(d => new Date(d).getTime()), registered_at: e.registered_at });
+    }
+    out.push({ event_id: String(ev._id), batch: ev.batch, title: ev.title || 'महा-Test', starts_at: ev.starts_at, ends_at: ev.ends_at, registered: entries.length, rows });
+  }
+  res.json({ success: true, data: out });
+});
+
+// POST /api/guest/admin/mt-reminded { event_id, student_code } — the team opened WhatsApp / SMS with the reminder
+exports.adminMtReminded = asyncHandler(async (req, res) => {
+  const WeeklyEntry = require('../models/WeeklyEntry');
+  const event_id = String(req.body?.event_id || ''), student_code = String(req.body?.student_code || '').slice(0, 40);
+  if (!/^[0-9a-f]{24}$/.test(event_id) || !student_code) throw new AppError('event / code?', 400);
+  const r = await WeeklyEntry.updateOne({ event_id, student_code }, { $push: { team_reminders: new Date() } });
+  res.json({ success: true, data: { updated: r.modifiedCount || 0 } });
+});
+
 // POST /api/guest/admin/leads-add { rows: [{ mobile, name?, batch?, place?, note? }], label?, consent: true, source: 'manual'|'import' }
 // Admin › CRM "➕ नवीन पालक" (one row) and "📤 Import" (up to 500): each number becomes a lead in the CRM (no message
 // is sent to anyone). A number already known is never made twice: only what it lacks (name, class, place) is filled.
@@ -924,8 +961,11 @@ function _ages(min, max) {
 exports.adminMetaCreateAd = asyncHandler(async (req, res) => {
   if (!META.configured().ok) throw new AppError('Meta जोडलेलं नाही', 400);
   const b = req.body || {};
-  const name = _clean(b.name, 60).toLowerCase().replace(/[^a-z0-9-]/g, '');
+  const toWa = b.dest === 'wa';
+  // a click-to-WhatsApp ad has its own name (…-wa): the website ad of the same video can run beside it
+  const name = (s => toWa && s && !s.endsWith('-wa') ? s + '-wa' : s)(_clean(b.name, 57).toLowerCase().replace(/[^a-z0-9-]/g, ''));
   const adset = _clean(b.adset, 80).toLowerCase().replace(/[^a-z0-9-]/g, '');
+  if (toWa && !(String(b.audience || '') === 'parent' || /^parent/.test(String(b.audience || '')))) throw new AppError('WhatsApp ad फक्त पालकांसाठी', 400);
   const link = String(b.link || '');
   if (!name || !adset) throw new AppError('Ad name missing', 400);
   if (!/^https:\/\/(nkseduorbit\.in|www\.nkseduorbit\.in|teachingboard-frontend\.vercel\.app)\//.test(link)) throw new AppError('Link must be the app link', 400);   // new domain + the old address
@@ -935,7 +975,7 @@ exports.adminMetaCreateAd = asyncHandler(async (req, res) => {
       name, adset, audience: String(b.audience || ''), daily_budget: Number(b.daily_budget) || 0,
       video_id: String(b.video_id), image_hash: String(b.image_hash),
       message: String(b.message || '').slice(0, 2000), headline: String(b.headline || '').slice(0, 120),
-      cta: b.cta === 'SIGN_UP' ? 'SIGN_UP' : 'LEARN_MORE', link,
+      cta: b.cta === 'SIGN_UP' ? 'SIGN_UP' : 'LEARN_MORE', link, dest: toWa ? 'wa' : 'web',
       geo: ['gata', 'marathwada', 'nashik', 'kolhapur'].includes(b.geo) ? b.geo : 'all',
       ..._ages(b.age_min, b.age_max),
     });

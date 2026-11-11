@@ -79,7 +79,7 @@ const satAsk = W.tick(lead, new Date('2026-11-14T15:01:00Z'));   // 8:31 pm
 const ask = satAsk.find(x => x.to === 'wa' && /महा-Test/.test(x.text));
 ok(ask && ask.buttons.some(b => b.id === 'mt_want'), 'Saturday 8:30 pm: "result on WhatsApp?" with ✅', JSON.stringify(satAsk.map(x => x.text || x.what)));
 out = W.inbound(lead, 'mt_want', new Date('2026-11-14T15:05:00Z'));
-ok(/उद्या महा-Test नंतर/.test(texts(out)[0]), '✅: "the result will come here tomorrow"', texts(out)[0]);
+ok(/✅ ठीक आहे! महा-Test नंतर/.test(texts(out)[0]), '✅: "the result will come here after the महा-Test"', texts(out)[0]);
 const rem = W.tick(lead, new Date('2026-11-15T04:01:00Z'));   // 9:31 am
 ok(rem.some(x => x.to === 'wa' && /महा-Test/.test(x.text)), 'Sunday 9:30: the reminder 30 minutes before', JSON.stringify(rem.map(x => x.text || x.what)));
 
@@ -143,6 +143,46 @@ lead = W.createLead({ gid: 'KKKK111111', name: 'Om', cls: '8th', freeTotal: 18 }
 W.event(lead, 'form_number', { backfill: true }, now);
 ok(lead.via === 'form' && lead.crm === 'form', 'backfill: an old website number goes to the form list');
 ok(W.event(lead, 'form_number', { backfill: true }, now).length === 0, 'backfill twice: nothing new');
+
+// 2026-11-12: a family from a click-to-WhatsApp ad (72 h free), or a new number writing "hi"
+const thuAd = new Date('2026-11-12T06:30:00Z');   // Thursday noon IST
+lead = W.createLead({ gid: 'CTWA111111' }, thuAd);
+lead.mobile = '9822200041'; lead.ctwaUntil = new Date(thuAd.getTime() + 72 * 3600e3).toISOString();
+W.event(lead, 'sync', { cls: '', courses: ['8th NMMS EXAM 26-27 BATCH', '10th'], mtNext: '2026-11-15T04:30:00Z', freeTotal: 18 }, thuAd);
+out = W.welcome(lead, 'Hello! Can I get more info on this?', thuAd);
+let wm = out.find(x => x.to === 'wa');
+ok(wm && /कोणत्या class/.test(wm.text) && wm.buttons.length === 2 && wm.buttons[0].id === 'cls:0', 'ad, no class known: the class is asked (list)', wm && wm.text);
+out = W.inbound(lead, 'cls:0', new Date(thuAd.getTime() + 60e3));
+ok(lead.cls === '8th NMMS EXAM 26-27 BATCH' && out.some(x => x.to === 'do' && x.action === 'batch' && x.data.batch === lead.cls) && /नाव लिहा/.test(texts(out)[0]), 'class chosen → Render told, the name asked', texts(out)[0]);
+ok(texts(W.inbound(lead, 'call_me', new Date(thuAd.getTime() + 90e3))).length && lead.name === 'तुमचा पाल्य', 'a button id is never taken as the name');
+lead.crm = null;
+out = W.inbound(lead, 'Atharv', new Date(thuAd.getTime() + 120e3));
+t = texts(out);
+ok(lead.name === 'Atharv' && out.some(x => x.to === 'do' && x.action === 'name') && t.some(x => /free=1&g=CTWA111111/.test(x)), 'name → the child\'s link to forward', t.join(' | '));
+ok(t.some(x => /महा-Test/.test(x) && /नोंदणी करू/.test(x)), 'from an ad: the महा-Test registration asked at once', t.join(' | '));
+out = W.event(lead, 'sync', { acct: { code: 'ATH201', pin: '4826' } }, new Date(thuAd.getTime() + 180e3));
+ok(texts(out).some(x => x.includes('ATH201') && x.includes('4826') && x.includes('play.google.com')), 'the free account arrives → one message with Code + PIN', texts(out).join(' | '));
+ok(texts(W.event(lead, 'sync', { acct: { code: 'ATH201', pin: '4826' } }, new Date(thuAd.getTime() + 200e3))).length === 0, 'the account message only once');
+// still open after 24 h (ad window 72 h), the reminders inside it
+const fri = new Date('2026-11-13T13:31:00Z');   // Friday 7:01 pm IST, 31 h after the message
+ok(W.isOpen(lead, fri), 'window still open after 31 h (ad: 72 h)');
+out = W.tick(lead, fri);
+ok(texts(out).some(x => /free test दिली का/.test(x) && x.includes('g=CTWA111111')), 'next evening: "did the child take the test?"', texts(out).join(' | '));
+out = W.tick(lead, new Date('2026-11-14T15:01:00Z'));   // Saturday 8:31 pm
+ok(texts(out).some(x => /उद्या .*महा-Test/.test(x)), 'Saturday evening: the महा-Test question (inside the 72 h)', texts(out).join(' | '));
+out = W.tick(lead, new Date('2026-11-15T03:31:00Z'));   // Sunday 9:01 am, window ends at noon
+ok(texts(out).some(x => /आठवण आता थांबेल/.test(x)) && out.find(x => /आठवण आता थांबेल/.test(x.text || '')).buttons[0].id === 'keep', 'near the end of the 72 h: "keep the reminders?"', texts(out).join(' | '));
+out = W.tick(lead, new Date('2026-11-15T04:01:00Z'));   // 9:31 am
+ok(texts(out).some(x => /महा-Test/.test(x)), 'Sunday 9:31: the महा-Test reminder still free', texts(out).join(' | '));
+ok(!W.isOpen(lead, new Date('2026-11-15T07:00:00Z')), 'after 72 h the window is closed');
+t = texts(W.inbound(lead, 'keep', new Date('2026-11-15T05:00:00Z')));
+ok(/आठवण इथेच येईल/.test(t[0]) && W.isOpen(lead, new Date('2026-11-16T04:00:00Z')), '"keep" → the window again for 24 h', t[0]);
+// a plain "hi" from a new number with the class known: the name straight away, 24 h only
+lead = W.createLead({ gid: 'HIHI111111' }, thuAd); lead.mobile = '9822200042';
+W.event(lead, 'sync', { cls: '10th', courses: ['10th'] }, thuAd);
+t = texts(W.welcome(lead, 'hi', thuAd));
+ok(/10th ची free test/.test(t[0]) && lead.awaiting === 'name' && !W.isOpen(lead, new Date(thuAd.getTime() + 25 * 3600e3)), 'a new number ("hi"): the name asked; 24 h window', t[0]);
+ok(W.tick(lead, new Date(thuAd.getTime() + 31 * 3600e3)).length === 0, 'not from an ad: no reminders of its own');
 
 console.log(bad ? `${bad} FAILED` : 'FLOW ALL PASS');
 process.exit(bad ? 1 : 0);

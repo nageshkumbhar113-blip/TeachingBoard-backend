@@ -66,6 +66,62 @@ async function syncOf(gid) {
   };
 }
 
+// ── a family that wrote to the bot first ──
+const _slug = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24);
+const _adNames = new Map();   // Meta ad id → our ad name (Admin › Ads names every Meta ad with our ad id)
+async function _adName(adId) {
+  if (!/^\d{5,25}$/.test(String(adId || ''))) return '';
+  if (_adNames.has(adId)) return _adNames.get(adId);
+  let name = '';
+  try { const META = require('../utils/meta'); if (META.configured().ok) name = String((await META.graph(adId, { fields: 'name' }))?.name || ''); } catch (err) { console.warn('[wa bot] ad name', err.message); }
+  name = name.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40);
+  _adNames.set(adId, name);
+  return name;
+}
+// the class: our ad's name starts with the class's slug ("8th-nmms-exam-26-27-batc-…"); else a class named in the
+// ad's text / the parent's message ("8th NMMS"); else none (the bot asks)
+async function _guessBatch(adName, text) {
+  const all = await Batch.find({ is_active: { $ne: false } }, 'name').lean();
+  if (adName) {
+    const hit = all.map(b => ({ b, s: _slug(b.name) })).filter(x => x.s && adName.startsWith(x.s + '-')).sort((a, c) => c.s.length - a.s.length)[0];
+    if (hit) return hit.b.name;
+  }
+  const words = String(text || '').toLowerCase().match(/[a-z0-9ऀ-ॿ]+/g) || [];
+  if (!words.length) return '';
+  // every word of the class's short form (e.g. "8th" + "nmms") must be in the text; the most specific wins
+  const scored = all.map(b => {
+    const key = String(b.name).toLowerCase().match(/[a-z0-9ऀ-ॿ]+/g) || [];
+    const core = key.filter(w => !/^(exam|batch|\d\d-\d\d|\d{2})$/.test(w)).slice(0, 3);
+    return { b, n: core.length && core.every(w => words.includes(w)) ? core.length : 0 };
+  }).filter(x => x.n).sort((a, c) => c.n - a.n);
+  return scored.length === 1 || (scored[0] && scored[0].n > (scored[1]?.n || 0)) ? scored[0].b.name : '';
+}
+async function _newLead(gid, b) {
+  const g = require('./guestController');
+  const mobile = g.normalizeMobile(b.mobile);
+  if (!mobile) throw new AppError('mobile?', 400);
+  // this number already came from the website (or an earlier chat): the same family
+  const known = await GuestLead.findOne({ $or: [{ gid }, { parent_mobile: mobile }] }).sort({ created_at: -1 });
+  let lead = known;
+  if (!lead) {
+    const ad = String(b.ad_id || '');
+    const adName = ad ? await _adName(ad) : '';
+    const batch = await _guessBatch(adName, [b.text, b.headline, b.ad_body].filter(Boolean).join(' '));
+    lead = new GuestLead({
+      gid, source: ad ? 'ad' : 'whatsapp',
+      // a click-to-WhatsApp ad: our ad's name (+ "-wa"), else Meta's own ad id
+      ref: ad ? (adName ? (adName.endsWith('-wa') ? adName : adName + '-wa') : 'wa-' + ad).slice(0, 40) : '',
+      batch, parent_mobile: mobile, consent_at: new Date(), steps: ['opened', 'lead'],
+    });
+    await lead.save();
+  } else if (!lead.parent_mobile) {
+    lead.parent_mobile = mobile; lead.consent_at = new Date();
+    if (!lead.steps.includes('lead')) lead.steps.push('lead');
+    await lead.save();
+  }
+  return { gid: lead.gid, ...(await syncOf(lead.gid)), mobile };
+}
+
 // GET /api/guest/bot/lead/:gid
 const lead = asyncHandler(async (req, res) => {
   const gid = String(req.params.gid || '').toUpperCase();
@@ -81,6 +137,14 @@ const action = asyncHandler(async (req, res) => {
   const gid = String(req.body?.gid || '').toUpperCase();
   const act = String(req.body?.action || '');
   if (!GID.test(gid)) throw new AppError('gid?', 400);
+  // a parent wrote to the bot from a number it does not know (a click-to-WhatsApp ad, or just "hi"): a lead with
+  // that number (they wrote first = the consent). Same number already here from the website → that lead.
+  if (act === 'new_lead') {
+    const data = await _newLead(gid, req.body || {});
+    // made later from the bot's job queue (Render was asleep): the bot gets the facts (class, courses…) now
+    if (req.body?.queued) BOT.notify(data.gid, 'sync', {}, { sync: data });
+    return res.json({ success: true, data });
+  }
   const lead = await GuestLead.findOne({ gid });
   if (!lead) return res.json({ success: true, skipped: 'no lead' });   // nothing to do; don't make the Worker retry
 
@@ -96,7 +160,19 @@ const action = asyncHandler(async (req, res) => {
   if (act === 'name') {
     const name = String(req.body?.name || '').trim().slice(0, 30);
     if (name && !lead.name) { lead.name = name; await lead.save(); }
+    // name + number from WhatsApp: the free account (code + PIN, free tests only) as on the website
+    if (lead.parent_mobile && lead.batch && !lead.converted_code) {
+      const acct = await g.autoAccount(lead).catch(err => { console.warn('[wa bot] account', err.message); return null; });
+      if (acct) BOT.notify(gid, 'sync', {}, { sync: await syncOf(gid) });
+    }
     return res.json({ success: true });
+  }
+  if (act === 'batch') {
+    // the parent chose the class on WhatsApp
+    const want = String(req.body?.batch || '').trim();
+    const b = want ? await Batch.findOne({ name: want, is_active: { $ne: false } }, 'name').lean() : null;
+    if (b && !lead.batch) { lead.batch = b.name; await lead.save(); }
+    return res.json({ success: true, data: await syncOf(gid) });
   }
   if (act === 'mt_register') {
     const ev = lead.batch ? await WeeklyEvent.findOne({ batch: lead.batch, is_trial: { $ne: true }, status: { $ne: 'skipped' }, ends_at: { $gt: new Date() } }).sort({ starts_at: 1 }).lean() : null;
