@@ -191,5 +191,26 @@ ok(/स्वागत/.test(t[0]) && t.some(x => /8th NMMS ची free test/.te
 t = texts(W.tick(lead, new Date('2026-11-13T13:31:00Z')));
 ok(t.some(x => /पाल्याने free test दिली का/.test(x)), 'no name yet: "पाल्याने free test दिली का?"', t.join(' | '));
 
+// WhatsApp Manager icebreakers / commands → the bot's own keywords
+lead = W.createLead({ gid: 'ICEB111111', name: 'Om', cls: '8th NMMS', freeTotal: 18 }, thuAd); lead.mobile = '9822200044';
+W.event(lead, 'sync', { prices: { monthly: 149, yearly: 499 }, mtNext: '2026-11-15T04:30:00Z' }, thuAd);
+let o2 = W.inbound(lead, '📝 Free test द्यायची आहे', thuAd);
+ok(texts(o2).some(x => /आजची free test/.test(x) && /g=ICEB111111/.test(x)), 'icebreaker "Free test द्यायची आहे" = TEST', texts(o2).join(' | '));
+o2 = W.inbound(lead, '/fee', thuAd);
+ok(texts(o2).some(x => /₹149/.test(x) && /parent-pay\.html\?g=ICEB111111/.test(x) && /50% सूट/.test(x)), '/fee: price, "test → 50 %", pay link', texts(o2).join(' | '));
+ok(texts(W.inbound(lead, '💳 फी किती आहे?', thuAd)).some(x => /₹149/.test(x)), 'icebreaker "फी किती आहे?" = /fee');
+o2 = W.inbound(lead, '🏆 महा-Test नोंदणी', thuAd);
+ok(o2.some(x => x.to === 'do' && x.action === 'mt_register') && lead.mtReg, 'icebreaker / /mahatest: registered', texts(o2).join(' | '));
+o2 = W.inbound(lead, '/call', thuAd);
+ok(lead.crm === 'call' && texts(o2).some(x => /call करेल/.test(x)), '/call: "team will call" + the call list', texts(o2).join(' | '));
+lead = W.createLead({ gid: 'ICEC111111' }, thuAd); lead.mobile = '9822200045'; lead.awaiting = 'name';
+W.inbound(lead, '📞 मला call करा', thuAd);
+ok(lead.name === 'तुमचा पाल्य' && lead.crm === 'call', 'an icebreaker is never taken as the child\'s name');
+
+lead = W.createLead({ gid: 'ICED111111' }, thuAd); lead.mobile = '9822200046'; lead.ctwaUntil = new Date(thuAd.getTime() + 72 * 3600e3).toISOString();
+W.event(lead, 'sync', { cls: '8th NMMS', courses: ['8th NMMS'], prices: { monthly: 149, yearly: 499 } }, thuAd);
+t = texts(W.welcome(lead, '💳 फी किती आहे?', thuAd));
+ok(t.some(x => /g=ICED111111/.test(x)) && t.some(x => /₹149/.test(x)), 'first message an icebreaker (fee): the test link and the price', t.join(' | '));
+
 console.log(bad ? `${bad} FAILED` : 'FLOW ALL PASS');
 process.exit(bad ? 1 : 0);

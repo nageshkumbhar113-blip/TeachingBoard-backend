@@ -262,7 +262,7 @@
   // ── a family that wrote first from a number the bot does not know (a click-to-WhatsApp ad, or "hi") ──
   // the number is the lead; the class (from the ad, else asked), then the child's name → the child's link + Code + PIN
   // a button's own id coming back is never a name
-  const BUTTON_IDS = ['keep', 'call_me', 'got', 'mt_reg', 'mt_want', 'ask', 'ok', 'more', 'next', 'app', 'pay', 'share_done', 'rules'];
+  const BUTTON_IDS = ['fee', 'keep', 'call_me', 'got', 'mt_reg', 'mt_want', 'ask', 'ok', 'more', 'next', 'app', 'pay', 'share_done', 'rules'];
   const clsButtons = lead => (lead.courses || []).slice(0, 10).map((c, i) => ({ id: 'cls:' + i, label: c }));
   function askName(lead, now, out, hello) {
     lead.awaiting = 'name';
@@ -288,14 +288,27 @@
       return out;
     }
     if (lead.cls) linkFirst(lead, now, out, true);
-    else askName(lead, now, out, true);   // nothing known about the class and no list (Render asleep): the name first
+    else { askName(lead, now, out, true); return out; }   // nothing known about the class and no list (Render asleep): the name first
+    // the first message was an icebreaker / command (fee, call, महा-Test): answer that too
+    const first = alias(String(raw || ''));
+    if (['fee', 'call_me', 'mt_reg'].includes(first)) out.push(...inbound(lead, first, now).filter(x => !(first === 'mt_reg' && x.to === 'wa' && /नोंदणी करू/.test(x.text || ''))));
     return out;
   }
 
   // ── the parent's message (or a button tap) ──
+  // WhatsApp Manager › Automations: the icebreakers (ready questions in a new chat) and the "/" commands come in as
+  // plain text — the same as the bot's own keywords / buttons
+  function alias(t) {
+    const x = t.trim().toLowerCase();
+    if (x === '/test' || /free test द्यायची/.test(x)) return 'TEST';
+    if (x === '/fee' || /फी किती/.test(x)) return 'fee';
+    if (x === '/mahatest' || /महा-test नोंदणी/.test(x)) return 'mt_reg';
+    if (x === '/call' || /मला call करा/.test(x)) return 'call_me';
+    return t;
+  }
   function inbound(lead, raw, now) {
     const out = [];
-    const t = String(raw || '').trim();
+    const t = alias(String(raw || '').trim());
     const up = t.toUpperCase();
     lead.lastInboundAt = now.toISOString(); lead.unanswered = 0; lead.miss = 0;
     if (lead.closed && lead.closed !== 'STOP' && up !== 'STOP') { out.push(log('CRM', `Closed lead (${lead.closed}) ने स्वतः मेसेज केला → पुन्हा उघडला, प्रवास पुन्हा सुरू.`)); lead.closed = null; lead.stopped = false; lead.crm = null; lead.revisitAt = null; }
@@ -384,6 +397,7 @@
     if (t === 'got') { out.push(wa(lead, now, '👍 Test झाली की result इथे येईल.')); return out; }
     if (t === 'next') { out.push(wa(lead, now, '👍 उद्या पुढची पाठवतो.')); if (!lead.shared && lead.testsDone >= 2) shareMsg(lead, now, out); return out; }
     if (t === 'ask') { out.push(wa(lead, now, 'कोणता प्रश्न?', [{ id: 'ask:fee', label: 'फी किती?' }, { id: 'ask:app', label: 'App कसा वापरायचा?' }])); return out; }
+    if (t === 'fee') { out.push(wa(lead, now, `💳 ${priceText(lead, true, now) || 'फी pay page वर'}${offerLine(lead, now)}${offerNow(lead, now) || lead.testsDone ? '' : '\n🎁 Free test दिली की 50% सूट (24 तास).'}\nसगळे tests, notes आणि महा-Test 👇\n${L.pay(lead.gid)}`, [{ id: 'pay', label: '💳 Course घ्या' }, { id: 'call_me', label: '📞 Call हवा' }])); return out; }
     if (t === 'ask:fee') { answer(lead, now, out, `${priceText(lead, false, now) || 'फी: pay page वर'}.${offerLine(lead, now)}\nPay नंतर सगळे tests, notes, स्वाध्याय उत्तरं आणि महा-Test.`); return out; }
     if (t === 'ask:app') { answer(lead, now, out, lead.acct && lead.acct.code ? `Play Store वरून install करा → Login → ${acctLine(lead)} → Home वर "पुढचा test". PIN विसरलात तर Login वर "📲 WhatsApp ने login".` : 'Play Store वरून install करा → login लागत नाही → Home वर "पुढचा test". Pay नंतर Student Code + PIN किंवा WhatsApp login.'); return out; }
     if (t === 'ask:pin') { answer(lead, now, out, 'App → Login → "📲 WhatsApp ने login" → नवीन PIN. 1 मिनिट.'); return out; }
