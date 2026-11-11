@@ -195,6 +195,7 @@
 
   // the first WhatsApp answer: full result, offer, share line, then "daily test?"
   function firstAnswer(lead, now, out) {
+    lead.courseAsked = true;
     out.push(wa(lead, now, `🎯 ${lead.name} चा पूर्ण result!\n${scoreLine(lead.last)}\n👇 result पाहा: ${L.result(lead.gid)}${unlockText(lead, now)}\n\n📲 मित्रांनाही free test पाठवा 👉 ${L.share(lead.gid)}` + tail(lead), unlockButtons(lead), { template: 'utility' }));
     if (!lead.daily) out.push(wa(lead, now, `📝 रोज 1 free test WhatsApp वर पाठवू? ${lead.cls ? lead.cls + ' चे ' : ''}${lead.freeTotal} free tests आहेत. कोणत्या वेळी?`,
       [...CONFIG.dailyTimes.map(t => ({ id: 'daily:' + t.id, label: t.label })), { id: 'daily:no', label: 'नको' }], { template: 'utility' }));
@@ -565,6 +566,12 @@
   }
   // a family from a click-to-WhatsApp ad that has not taken a test yet: inside the free 72 h, two gentle reminders
   // (the next two evenings), the महा-Test's own reminders if it falls inside, and one "keep the reminders?" near the end
+  // owner (2026-11-12): within the 72 h every family is asked at least once to take the course — "give the test, get
+  // 50 % off, take the course" (the offer starts with the first test: 50 % for 24 h, then 30 % until Sunday night)
+  const testOfferLine = '🎁 Test दिली की course वर *50% सूट* (24 तास), मग रविवारपर्यंत 30%.';
+  // short (owner: as little text as possible): one line of what the course is, the price, the link
+  const shortCourse = (lead, now) => `🔓 ${lead.cls || 'पूर्ण'} course: सगळे tests + स्पष्टीकरण, notes, महा-Test${priceText(lead, false, now) ? '\n💳 ' + priceText(lead, false, now) : ''}\n👉 ${L.pay(lead.gid)}`;
+  const courseButtons = [{ id: 'pay', label: '💳 Course घ्या' }, { id: 'call_me', label: '📞 Call हवा' }];
   function ctwaItems(lead, items) {
     const start = new Date(lead.createdAt), end = new Date(lead.ctwaUntil);
     const mtEve = lead.mtNext ? atIST(new Date(lead.mtNext), 20, 30, -1) : null;
@@ -574,16 +581,19 @@
       if (at < end) items.push({ key: 'ctwa:' + d, at, run: (out, now) => {
         if (lead.testsDone || lead.paid || lead.closed || lead.stopped || !isOpen(lead, now)) return;
         if (lead.awaiting === 'cls') out.push(wa(lead, now, '🙏 पाल्याची free test अजून बाकी आहे. कोणत्या class साठी? 👇', clsButtons(lead), { own: true }));
-        else if (lead.awaiting === 'name') out.push(wa(lead, now, `🙏 ${lead.cls ? lead.cls + ' ची ' : ''}free test अजून बाकी आहे (10 मिनिटं).\n✍️ पाल्याचं नाव लिहा — link लगेच पाठवतो 👇`, [], { own: true }));
-        else out.push(wa(lead, now, `📝 ${lead.name} ने free test दिली का? फक्त 10 मिनिटं, login नाही 👇\n${L.child(lead.gid)}${mtLeft(now, lead) ? '\n' + mtLeft(now, lead) : ''}`, [{ id: 'got', label: '👍 पाल्याला दिली' }], { own: true }));
+        else if (lead.awaiting === 'name') out.push(wa(lead, now, `🙏 ${lead.cls ? lead.cls + ' ची ' : ''}free test अजून बाकी आहे (10 मिनिटं).\n${testOfferLine}\n✍️ पाल्याचं नाव लिहा — link लगेच पाठवतो 👇`, [], { own: true }));
+        else (lead.courseAsked = true, out.push(wa(lead, now, `📝 ${lead.name} ने free test दिली का? फक्त 10 मिनिटं, login नाही 👇\n${L.child(lead.gid)}\n\n${testOfferLine}\n${shortCourse(lead, now)}`, [{ id: 'got', label: '👍 पाल्याला दिली' }, ...courseButtons], { own: true })));
       } });
     }
     let last = new Date(end.getTime() - 3 * H);
     if (quiet(last)) last = hourOf(last) < CONFIG.quiet.to ? atIST(last, 20, 30, -1) : atIST(last, 20, 30, 0);
     if (last > start) items.push({ key: 'ctwa:end', at: last, run: (out, now) => {
       if (lead.paid || lead.closed || !isOpen(lead, now)) return;
-      if (lead.lastInboundAt && Date.parse(lead.lastInboundAt) + CONFIG.windowHours * H > end.getTime()) return;   // they wrote lately: the window goes on anyway
-      out.push(wa(lead, now, `🙏 ${lead.name === 'तुमचा पाल्य' ? 'तुमच्या पाल्या' : lead.name}साठी आमची आठवण आता थांबेल.\nपुढची free test, result आणि महा-Test ची आठवण हवी असेल तर खालचं बटण दाबा.`, [{ id: 'keep', label: '✅ हो, आठवण हवी' }, { id: 'call_me', label: '📞 Call हवा' }], { own: true }));
+      // they wrote lately (the window goes on anyway) and the course was already offered: nothing more
+      if (lead.courseAsked && lead.lastInboundAt && Date.parse(lead.lastInboundAt) + CONFIG.windowHours * H > end.getTime()) return;
+      lead.courseAsked = true;
+      const who = lead.name === 'तुमचा पाल्य' ? 'तुमच्या पाल्यासाठी' : lead.name + ' साठी';
+      out.push(wa(lead, now, `🙏 ${who} course घ्यायचा आहे का?${lead.testsDone ? '' : '\n' + testOfferLine}\n👉 ${L.pay(lead.gid)}\n\nपुढच्या आठवणी हव्या असतील तर ✅ दाबा.`, [{ id: 'keep', label: '✅ हो, आठवण हवी' }, ...courseButtons], { own: true }));
     } });
     if (lead.mtNext) mtItems(lead, items, [new Date(lead.mtNext)], true);
   }

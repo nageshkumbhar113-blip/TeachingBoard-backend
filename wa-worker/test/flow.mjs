@@ -168,10 +168,14 @@ const fri = new Date('2026-11-13T13:31:00Z');   // Friday 7:01 pm IST, 31 h afte
 ok(W.isOpen(lead, fri), 'window still open after 31 h (ad: 72 h)');
 out = W.tick(lead, fri);
 ok(texts(out).some(x => /free test दिली का/.test(x) && x.includes('g=CTWA111111')), 'next evening: "did the child take the test?"', texts(out).join(' | '));
+let ev7 = out.find(x => /free test दिली का/.test(x.text || ''));
+ok(/50% सूट/.test(ev7.text) && ev7.text.includes('parent-pay.html?g=CTWA111111') && ev7.buttons.map(x => x.id).join() === 'got,pay,call_me', 'it also says: test → 50 % off → course, with the pay link and 💳 button', ev7.text);
+ok(ev7.text.length < 600, 'the message stays short', ev7.text.length);
 out = W.tick(lead, new Date('2026-11-14T15:01:00Z'));   // Saturday 8:31 pm
 ok(texts(out).some(x => /उद्या .*महा-Test/.test(x)), 'Saturday evening: the महा-Test question (inside the 72 h)', texts(out).join(' | '));
 out = W.tick(lead, new Date('2026-11-15T03:31:00Z'));   // Sunday 9:01 am, window ends at noon
-ok(texts(out).some(x => /आठवण आता थांबेल/.test(x)) && out.find(x => /आठवण आता थांबेल/.test(x.text || '')).buttons[0].id === 'keep', 'near the end of the 72 h: "keep the reminders?"', texts(out).join(' | '));
+let endMsg = out.find(x => /course घ्यायचा आहे का/.test(x.text || ''));
+ok(endMsg && endMsg.text.includes('parent-pay.html?g=CTWA111111') && endMsg.buttons.map(x => x.id).join() === 'keep,pay,call_me', 'near the end of the 72 h: "take the course?" + link, keep the reminders', texts(out).join(' | '));
 out = W.tick(lead, new Date('2026-11-15T04:01:00Z'));   // 9:31 am
 ok(texts(out).some(x => /महा-Test/.test(x)), 'Sunday 9:31: the महा-Test reminder still free', texts(out).join(' | '));
 ok(!W.isOpen(lead, new Date('2026-11-15T07:00:00Z')), 'after 72 h the window is closed');
