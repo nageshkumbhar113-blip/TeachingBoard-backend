@@ -34,8 +34,11 @@ async function syncOf(gid) {
     Batch.find({ is_active: { $ne: false } }, 'name').sort({ name: 1 }).lean(),
     lead.batch ? Quiz.countDocuments({ batch: lead.batch, status: 'published' }).catch(() => 0) : 0,
   ]);
-  const paid = lead.converted_code ? !!(await StudentSubscription.exists({ student_code: lead.converted_code, payment_verified: true, is_trial: false })) : false;
-  const acc = lead.converted_code ? await User.findOne({ role: 'student', student_code: lead.converted_code }, 'device_id device_token last_login_at').lean() : null;
+  const acc = lead.converted_code ? await User.findOne({ role: 'student', student_code: lead.converted_code }, 'role free_tier expiry_date device_id device_token last_login_at').lean() : null;
+  // paid = a Razorpay payment, or an account with full access (Admin activated it: not free tier, not expired) —
+  // such a child must never get "free test" / offer messages
+  const paid = lead.converted_code ? !!((await StudentSubscription.exists({ student_code: lead.converted_code, payment_verified: true, is_trial: false }))
+    || (acc && require('../utils/contentAccess').hasFullAccess(acc))) : false;
   // the class's next महा-Test and whether this child is registered
   const now = new Date();
   const next = lead.batch ? await WeeklyEvent.findOne({ batch: lead.batch, is_trial: { $ne: true }, status: { $ne: 'skipped' }, ends_at: { $gt: now } }).sort({ starts_at: 1 }).select('_id starts_at').lean() : null;
@@ -107,6 +110,9 @@ const action = asyncHandler(async (req, res) => {
     return res.json({ success: true });
   }
   if (act === 'push') {
+    // the phone now belongs to a student account with full access: no free-test / offer push from the bot
+    const owner = lead.device_token ? await User.findOne({ role: 'student', device_token: lead.device_token }, 'role free_tier expiry_date').lean() : null;
+    if (owner && require('../utils/contentAccess').hasFullAccess(owner)) return res.json({ success: true, skipped: 'paid student' });
     if (lead.device_token) await sendToUser(lead.device_token, 'NKs EduOrbit', String(req.body?.text || '').slice(0, 180), { kind: 'wa_bot', buttons: JSON.stringify(req.body?.buttons || []) }).catch(err => console.warn('[wa bot] push', err.message));
     return res.json({ success: true });
   }

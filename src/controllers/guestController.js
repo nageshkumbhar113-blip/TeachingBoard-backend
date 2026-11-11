@@ -434,6 +434,49 @@ exports.adminLeadPin = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { ...acc, name: lead.name || '' } });
 });
 
+// POST /api/guest/admin/leads-add { rows: [{ mobile, name?, batch?, place?, note? }], label?, consent: true, source: 'manual'|'import' }
+// Admin › CRM "➕ नवीन पालक" (one row) and "📤 Import" (up to 500): each number becomes a lead in the CRM (no message
+// is sent to anyone). A number already known is never made twice: only what it lacks (name, class, place) is filled.
+exports.adminLeadsAdd = asyncHandler(async (req, res) => {
+  if (req.body?.consent !== true) throw new AppError('पालकांच्या परवानगीची खूण हवी', 400);
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 500) : [];
+  if (!rows.length) throw new AppError('एकही नंबर नाही', 400);
+  const source = req.body?.source === 'import' ? 'import' : 'manual';
+  const label = _clean(req.body?.label, 60);
+  const batches = await Batch.find({ is_active: { $ne: false } }, 'name').lean();
+  const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9\u0900-\u097f]/g, '');
+  // the class as typed → a real class ("8th" → "8th NMMS EXAM 26-27 BATCH"); '' when nothing fits
+  const classOf = typed => {
+    const t = norm(typed); if (!t) return '';
+    return (batches.find(b => norm(b.name) === t) || batches.find(b => norm(b.name).startsWith(t)) || batches.find(b => norm(b.name).includes(t)) || {}).name || '';
+  };
+  const out = { added: 0, updated: 0, same: 0, bad: [], gids: [] };
+  const seen = new Set();
+  for (const [i, r] of rows.entries()) {
+    const mobile = normalizeMobile(r?.mobile);
+    if (!mobile) { out.bad.push({ row: i + 1, mobile: String(r?.mobile || '').slice(0, 20), why: 'नंबर चुकीचा' }); continue; }
+    if (seen.has(mobile)) { out.same++; continue; }
+    seen.add(mobile);
+    const name = _clean(r?.name, 40), batch = classOf(r?.batch), place = _clean(r?.place, 80), note = _clean(r?.note, 200);
+    let lead = await GuestLead.findOne({ parent_mobile: mobile }).sort({ created_at: -1 });
+    if (lead) {
+      let changed = false;
+      if (name && !lead.name) { lead.name = name; changed = true; }
+      if (batch && !lead.batch) { lead.batch = batch; changed = true; }
+      if (place && !lead.place) { lead.place = place; changed = true; }
+      if (changed) { await lead.save(); out.updated++; } else out.same++;
+    } else {
+      lead = await GuestLead.create({ gid: _newGid(), source, ref: label.toLowerCase().replace(/[^a-z0-9\u0900-\u097f-]+/g, '-').slice(0, 40), name, batch, place,
+        parent_mobile: mobile, consent_at: new Date(), steps: ['lead'] });
+      out.added++;
+    }
+    out.gids.push(lead.gid);
+    BOT.notify(lead.gid, 'form_number', { [source]: true, label, note, place }, { mobile, sync: { name: lead.name || undefined, cls: lead.batch || undefined } });
+    if (out.gids.length % 10 === 0) await new Promise(r2 => setTimeout(r2, 300));   // the Worker makes one lead at a time
+  }
+  res.json({ success: true, data: out });
+});
+
 // POST /api/guest/admin/bot-backfill — Admin › CRM "🔄 जुने leads आणा": every visitor with a parent's number goes
 // to the bot's CRM once (the CRM started later than the website). No message is sent to anyone.
 exports.adminBotBackfill = asyncHandler(async (_req, res) => {

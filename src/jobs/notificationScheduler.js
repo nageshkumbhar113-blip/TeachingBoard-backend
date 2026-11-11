@@ -272,6 +272,20 @@ async function _runGuestRemindersIfNeeded() {
   await require('../utils/guestReminders').sendGuestReminders(ist.date).catch(err => console.warn('guest reminders failed:', err.message));
 }
 
+// Paid / activated students without a Study Plan (utils/studyNudges.js): one study push at 7 pm IST.
+// STUDY_NUDGE_HOUR_IST tunes the hour; STUDY_NUDGES=off switches it off without a deploy.
+const STUDY_NUDGE_HOUR_IST = Number(process.env.STUDY_NUDGE_HOUR_IST) || 19;
+async function _runStudyNudgesIfNeeded() {
+  if (String(process.env.STUDY_NUDGES || '').toLowerCase() === 'off') return;
+  const ist = _istNow();
+  if (ist.hour < STUDY_NUDGE_HOUR_IST) return;
+  const KEY = 'study_nudges';
+  const state = await SchedulerState.findOne({ key: KEY }).lean();
+  if (state?.last_run_date === ist.date) return;
+  await SchedulerState.updateOne({ key: KEY }, { $set: { last_run_date: ist.date } }, { upsert: true });
+  await require('../utils/studyNudges').sendStudyNudges().catch(err => console.warn('study nudges failed:', err.message));
+}
+
 async function _runStudyPlanTeacherDigestIfNeeded() {
   const KEY = 'study_plan_teacher_weekly';
   const week = _isoWeekKey();
@@ -315,6 +329,7 @@ function start() {
     _runStudyPlanEveningJobsIfNeeded().catch(err => console.warn('study plan evening check failed:', err.message));
     _runStudyPlanTeacherDigestIfNeeded().catch(err => console.warn('study plan teacher digest check failed:', err.message));
     _runGuestRemindersIfNeeded().catch(err => console.warn('guest reminders check failed:', err.message));
+    _runStudyNudgesIfNeeded().catch(err => console.warn('study nudges check failed:', err.message));
     // Weekly महा-Test: next week's test ready ahead of time; ranks once a window closes.
     const W = require('../utils/weeklyTests');
     W.ensureUpcoming().catch(err => console.warn('weekly ensure failed:', err.message));

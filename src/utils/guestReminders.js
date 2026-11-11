@@ -34,8 +34,13 @@ async function sendGuestReminders(todayIst, now = new Date()) {
     last_seen_at: { $gte: since },
     last_reminder_date: { $ne: todayIst },
   }).limit(2000).lean();
+  // the same phone now logged in as a student (the app keeps one push token): no "free test" nudge for them —
+  // a student with an account gets the study notifications instead
+  const User = require('../models/User');
+  const taken = new Set((await User.find({ role: 'student', device_token: { $in: leads.map(l => l.device_token) } }, 'device_token').lean()).map(u => u.device_token));
   let sent = 0;
   for (const lead of leads) {
+    if (taken.has(lead.device_token)) continue;
     const [title, body] = messageFor(lead, now);
     try {
       await sendToUser(lead.device_token, title, body, { type: 'guest_reminder' });

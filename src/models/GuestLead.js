@@ -51,6 +51,7 @@ const guestLeadSchema = new mongoose.Schema(
     // the PIN of the free account made when the number came (free tests only, never the full course); kept so the
     // bot / Admin can send it again. Empty for an account the parent made themselves (pay page) or one that existed.
     auto_pin:       { type: String, default: '' },
+    place:          { type: String, default: '', trim: true },   // a typed / imported family: village or school
     converted_at:   { type: Date, default: null },
     last_seen_at:   { type: Date, default: Date.now },
   },

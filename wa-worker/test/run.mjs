@@ -114,7 +114,8 @@ try {
   const sunday = new Date(Date.now() + 5.5 * 3600e3).getUTCDay() === 0;
   await signed(msg('919811100001', 'TEST')); await waitSent(4);
   if (sunday) ok(/आज महा-Test चा दिवस/.test(textOf(sent[3])), 'TEST on Sunday → the महा-Test', textOf(sent[3]));
-  else ok(/आजची free test \(2\/18\)/.test(textOf(sent[3])) && /student-app\/\?free=1&g=AAAA111111/.test(textOf(sent[3])), 'TEST → the next free test link', textOf(sent[3]));
+  // one free test a day wherever it was taken: the child's first test was today → "today's is done" (+ the app)
+  else ok(/आजची free test झाली आहे/.test(textOf(sent[3])) && /play\.google\.com/.test(textOf(sent[3])), 'TEST after today\'s test → "today\'s is done" + the app', textOf(sent[3]));
   ok(sent[3].interactive?.type === 'button', '≤3 short buttons → reply buttons');
   await signed(msg('919811100001', 'TEST')); await waitSent(5);
   if (sunday) ok(/आज महा-Test चा दिवस/.test(textOf(sent[4])), 'second TEST on Sunday → the महा-Test again', textOf(sent[4]));

@@ -261,8 +261,8 @@
     const up = t.toUpperCase();
     lead.lastInboundAt = now.toISOString(); lead.unanswered = 0; lead.miss = 0;
     if (lead.closed && lead.closed !== 'STOP' && up !== 'STOP') { out.push(log('CRM', `Closed lead (${lead.closed}) ने स्वतः मेसेज केला → पुन्हा उघडला, प्रवास पुन्हा सुरू.`)); lead.closed = null; lead.stopped = false; lead.crm = null; lead.revisitAt = null; }
-    else if (lead.stopped && lead.closed !== 'STOP' && up !== 'STOP') { out.push(log('RESUME', 'Reply आला → call यादीतून बाहेर, रोजचा प्रवास पुन्हा सुरू.')); lead.stopped = false; if (lead.crm === 'cold' || lead.crm === 'form') lead.crm = null; }
-    if (lead.crm === 'form' && up !== 'STOP') { lead.crm = null; out.push(log('RESUME', 'Form ने नंबर दिलेल्या पालकांनी reply दिला → WhatsApp प्रवास सुरू.')); }
+    else if (lead.stopped && lead.closed !== 'STOP' && up !== 'STOP') { out.push(log('RESUME', 'Reply आला → call यादीतून बाहेर, रोजचा प्रवास पुन्हा सुरू.')); lead.stopped = false; if (lead.crm === 'cold' || lead.crm === 'form' || lead.crm === 'import') lead.crm = null; }
+    if ((lead.crm === 'form' || lead.crm === 'import') && up !== 'STOP') { lead.crm = null; out.push(log('RESUME', 'Form ने नंबर दिलेल्या पालकांनी reply दिला → WhatsApp प्रवास सुरू.')); }
     if (up === 'STOP') { lead.closed = 'STOP'; lead.stopped = true; out.push({ to: 'wa', kind: 'service', cost: 0, text: '🙏 ठीक आहे, आता मेसेज बंद. पुन्हा हवं असेल तर START पाठवा.', buttons: [] }); return out; }
     if (up === 'START' && lead.closed === 'STOP') { lead.closed = null; lead.stopped = false; out.push(wa(lead, now, '🙏 परत स्वागत!', mainButtons(lead, now))); return out; }
     const kw = up.split(/\s+/)[0];
@@ -388,10 +388,21 @@
     if (type === 'mt_result') { mtResult(lead, now, out, data); return out; }
     if (type === 'form_number') {
       // typed the number on the website (no WhatsApp message from them): the bot sends nothing (it would cost);
-      // the lead waits in the call list, where Admin can call or send one WhatsApp by hand
+      // the lead waits in the call list, where Admin can call or send one WhatsApp by hand.
+      // Admin's "➕ नवीन पालक" / "📤 Import" come here too (data.manual / data.import): the 📥 list, with a label.
+      if (data.labelId) lead.labels = [...new Set([...(lead.labels || []), data.labelId])];
+      if (data.place && !lead.place) lead.place = data.place;
+      if (data.note) out.push(log('NOTE', data.note));
+      const added = !!(data.import || data.manual);
       if ((lead.via && lead.via !== 'form') || lead.lastInboundAt) return out;   // already talking on WhatsApp / in the app
-      if (data.backfill && lead.via === 'form') return out;     // "जुने leads आणा" twice: nothing new
-      lead.via = 'form'; if (!lead.crm || lead.crm === 'form') lead.crm = 'form';
+      if ((data.backfill || added) && lead.via === 'form') return out;     // already in the CRM: nothing new
+      lead.via = 'form';
+      if (added) {
+        if (!lead.crm) lead.crm = 'import';
+        out.push(log('IMPORT', `${data.import ? '📤 Import' : '➕ Admin ने हाताने'}${data.label ? ' (' + data.label + ')' : ''} → 📥 यादी. Bot काही पाठवत नाही: call करा किंवा टीमच्या WhatsApp वरून message.`));
+        return out;
+      }
+      if (!lead.crm || lead.crm === 'form') lead.crm = 'form';
       out.push(log('FORM', data.backfill ? 'जुना lead (website वरचा नंबर) CRM मध्ये आणला → call यादी. Bot काही पाठवत नाही.' : 'Form वरून नंबर (संमतीची खूण). खिडकी उघडी नाही → bot काही पाठवत नाही. 📞 call यादी: call करा किंवा Admin मधून हाताने WhatsApp.'));
       return out;
     }

@@ -178,7 +178,20 @@ async function adminOk(env, req) {
   catch { return false; }
 }
 
-const LISTS = ['hot', 'cold', 'form', 'call', 'later', 'paid', 'closed'];
+const LISTS = ['hot', 'cold', 'form', 'call', 'later', 'paid', 'closed', 'import'];
+// Admin's labels (like WhatsApp Business lists): [{ id, name, color }] in kv 'labels'
+const LABEL_COLORS = ['#e11d48', '#ea580c', '#ca8a04', '#16a34a', '#0891b2', '#2563eb', '#7c3aed', '#c026d3', '#a16207', '#475569'];
+async function getLabels(env) { try { return JSON.parse((await S.kvGet(env, 'labels')) || '[]'); } catch { return []; } }
+async function labelIdFor(env, name) {
+  const n = String(name || '').trim().slice(0, 40); if (!n) return null;
+  const all = await getLabels(env);
+  const hit = all.find(l => l.name.toLowerCase() === n.toLowerCase());
+  if (hit) return hit.id;
+  const id = 'l' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  all.push({ id, name: n, color: LABEL_COLORS[all.length % LABEL_COLORS.length] });
+  await S.kvSet(env, 'labels', JSON.stringify(all));
+  return id;
+}
 // ☀️ call these first (Sunday): not paid, not closed, and the offer still running or a महा-Test in the last 3 days;
 // the offer ending soonest on top, then the महा-Test takers
 async function callFirst(env) {
@@ -191,7 +204,7 @@ async function callFirst(env) {
     const offer = d.offerEnd && new Date(d.offerEnd).getTime() > t ? new Date(d.offerEnd).getTime() : 0;
     const mt = d.mtLast && t - new Date(d.mtLast.at).getTime() < 3 * 864e5 ? d.mtLast : null;
     // gave the number but no test yet (the last 7 days): call them too, after the running offers
-    const noTest = !offer && !mt && !d.testsDone && !d.app && d.createdAt && t - new Date(d.createdAt).getTime() < 7 * 864e5;
+    const noTest = !offer && !mt && !d.testsDone && !d.app && r.crm !== 'import' && d.createdAt && t - new Date(d.createdAt).getTime() < 7 * 864e5;
     if (!offer && !mt && !noTest) continue;
     rows.push({ gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, updated_at: r.updated_at,
       tests: d.testsDone, free_total: d.freeTotal, via: d.via, app: d.app, paid: d.paid, closed: d.closed, open: WA.isOpen(d, now),
@@ -199,6 +212,46 @@ async function callFirst(env) {
   }
   return rows.sort((a, b) => a._k - b._k).slice(0, 100).map(({ _k, ...r }) => r);
 }
+// ── 📋 follow-up steps ──
+const FU_DEFAULT = [
+  { name: 'पहिला संपर्क', color: '#e11d48', tpl: 'hello', wait: 1 },
+  { name: 'Test आठवण', color: '#ea580c', tpl: 'remind', wait: 2 },
+  { name: 'Result / सवलत', color: '#ca8a04', tpl: 'result', wait: 1 },
+  { name: 'App Code + PIN', color: '#7c3aed', tpl: 'acct', wait: 2 },
+  { name: 'पूर्ण course', color: '#2563eb', tpl: 'course', wait: 3 },
+  { name: 'शेवटचा call', color: '#64748b', tpl: 'missed', wait: 0 },
+];
+async function fuSteps(env) { try { const s = JSON.parse((await S.kvGet(env, 'fu_steps')) || 'null'); return Array.isArray(s) && s.length ? s : FU_DEFAULT; } catch { return FU_DEFAULT; } }
+const IST_MS = 5.5 * 3600e3;
+const endOfToday = (t = Date.now()) => { const d = new Date(t + IST_MS); d.setUTCHours(23, 59, 59, 999); return d.getTime() - IST_MS; };
+// where this family stands now: { step (1-based), due (ms) } — or null (not in the follow-up)
+function fuOf(r, d, now, steps) {
+  if (!r.mobile || d.paid || d.closed || (d.fu && d.fu.done)) return null;
+  if (WA.isOpen(d, now)) return null;                         // talking to the bot right now: the bot does the work
+  const f = d.fu ? { ...d.fu } : { step: 1, due: Date.parse(d.createdAt || '') || 0 };
+  const at = name => steps.findIndex(s => s.tpl === name) + 1;   // a step by its message (0 = not in the list)
+  const result = at('result'), app = at('acct');
+  // what the family did, or the bot already sent, moves it on (never back)
+  if (d.testsDone && result && f.step < result) { f.step = result; f.due = now.getTime(); }
+  if (d.testsDone && d.lastInboundAt && result && f.step === result && (!d.fu || Date.parse(d.lastInboundAt) > (d.fu.setAt || 0))) { f.step = result + 1; f.due = now.getTime(); }
+  if ((d.app || d.appAsked) && app && f.step === app) { f.step = app + 1; f.due = now.getTime(); }
+  if (f.step > steps.length) return null;
+  return f;
+}
+async function fuRows(env, now) {
+  const steps = await fuSteps(env);
+  const { results } = await env.DB.prepare("SELECT gid, name, cls, mobile, crm, last_in, updated_at, data FROM leads WHERE mobile IS NOT NULL AND (crm IS NULL OR crm NOT IN ('paid', 'closed')) ORDER BY updated_at DESC LIMIT 3000").all();
+  const rows = [];
+  for (const r of results || []) {
+    const d = JSON.parse(r.data), f = fuOf(r, d, now, steps);
+    if (!f) continue;
+    rows.push({ gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, updated_at: r.updated_at,
+      tests: d.testsDone, free_total: d.freeTotal, app: d.app, acct: !!(d.acct && d.acct.code), labels: d.labels || [], place: d.place || '', sent: d.teamSent || 0,
+      offer_end: d.offerEnd || null, fu_step: f.step, fu_due: f.due });
+  }
+  return { steps, rows };
+}
+
 // 📲 the free account exists (code + PIN) but the app is not in use yet: call and help install
 async function noApp(env) {
   const { results } = await env.DB.prepare("SELECT gid, name, cls, mobile, crm, last_in, updated_at, data FROM leads WHERE crm IS NULL OR crm NOT IN ('paid', 'closed') ORDER BY updated_at DESC LIMIT 500").all();
@@ -218,6 +271,7 @@ async function crm(env, req, url) {
     const counts = {}; for (const r of results || []) counts[r.crm || 'active'] = r.n;
     counts.first = (await callFirst(env)).length;
     counts.noapp = (await noApp(env)).length;
+    counts.team_today = Number(await S.kvGet(env, 'teamwa:' + S.istDay())) || 0;
     counts.nextyear = (await env.DB.prepare("SELECT COUNT(*) AS n FROM leads WHERE crm = 'closed' AND revisit_at IS NOT NULL AND revisit_at <= ?").bind(Date.now()).first()).n;
     const month = S.istDay().slice(0, 7);
     const mc = await env.DB.prepare("SELECT SUM(CAST(v AS REAL)) AS s FROM kv WHERE k LIKE ?").bind('cost:' + month + '%').first();
@@ -238,6 +292,8 @@ async function crm(env, req, url) {
     else if (list === 'active') where.push('crm IS NULL');
     else if (list === 'nextyear') { where.push("crm = 'closed' AND revisit_at IS NOT NULL AND revisit_at <= ?"); args.push(Date.now()); }
     if (q) { where.push('(name LIKE ? OR mobile LIKE ? OR gid LIKE ?)'); args.push(`%${q}%`, `%${q}%`, `%${q.toUpperCase()}%`); }
+    const lab = String(url.searchParams.get('label') || '');
+    if (/^l[a-z0-9]{3,20}$/.test(lab)) { where.push('data LIKE ?'); args.push(`%"${lab}"%`); }
     const sql = `SELECT gid, name, cls, mobile, crm, last_in, updated_at, data FROM leads ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY updated_at DESC LIMIT 50 OFFSET ?`;
     const { results } = await env.DB.prepare(sql).bind(...args, off).all();
     const now = new Date();
@@ -245,8 +301,52 @@ async function crm(env, req, url) {
       const d = JSON.parse(r.data);
       return { gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, updated_at: r.updated_at,
         tests: d.testsDone, free_total: d.freeTotal, via: d.via, app: d.app, paid: d.paid, daily: d.daily, closed: d.closed, revisit_at: d.revisitAt, open: WA.isOpen(d, now),
-        offer_end: d.offerEnd || null, mt: d.mtLast || null, acct: !!(d.acct && d.acct.code), push_on: !!d.pushOn };
+        offer_end: d.offerEnd || null, mt: d.mtLast || null, acct: !!(d.acct && d.acct.code), push_on: !!d.pushOn, labels: d.labels || [], place: d.place || '', sent: d.teamSent || 0 };
     }) });
+  }
+  // 📋 follow-up: the steps with their counts (all / due today), one step's families, the steps' settings
+  if (parts[1] === 'fu' && !parts[2] && req.method === 'GET') {
+    const now = new Date(), { steps, rows } = await fuRows(env, now), end = endOfToday();
+    return json({ success: true, data: { steps, counts: steps.map((s, i) => ({ step: i + 1, total: rows.filter(r => r.fu_step === i + 1).length, due: rows.filter(r => r.fu_step === i + 1 && r.fu_due <= end).length })) } });
+  }
+  if (parts[1] === 'fu' && parts[2] === 'list' && req.method === 'GET') {
+    const now = new Date(), { rows } = await fuRows(env, now), end = endOfToday();
+    const step = Number(url.searchParams.get('step')) || 1, dueOnly = url.searchParams.get('due') === '1';
+    return json({ success: true, data: rows.filter(r => r.fu_step === step && (!dueOnly || r.fu_due <= end)).sort((a, b) => a.fu_due - b.fu_due).slice(0, 300) });
+  }
+  if (parts[1] === 'fu' && parts[2] === 'steps' && req.method === 'POST') {
+    const body = await req.json().catch(() => ({}));
+    const list = (Array.isArray(body.steps) ? body.steps : []).slice(0, 12).map((s, i) => ({
+      name: String(s.name || '').trim().slice(0, 40), color: /^#[0-9a-f]{6}$/i.test(s.color || '') ? s.color : LABEL_COLORS[i % LABEL_COLORS.length],
+      tpl: String(s.tpl || '').slice(0, 30), wait: Math.max(0, Math.min(30, Number(s.wait) || 0)),
+    })).filter(s => s.name && s.tpl);
+    await S.kvSet(env, 'fu_steps', JSON.stringify(list.length ? list : FU_DEFAULT));
+    return json({ success: true, data: list.length ? list : FU_DEFAULT });
+  }
+  if (parts[1] === 'labels' && req.method === 'GET') return json({ success: true, data: await getLabels(env) });
+  if (parts[1] === 'labels' && req.method === 'POST') {
+    const body = await req.json().catch(() => ({}));
+    const list = (Array.isArray(body.labels) ? body.labels : []).slice(0, 40).map((l, i) => ({
+      id: /^l[a-z0-9]{3,20}$/.test(l.id || '') ? l.id : 'l' + Date.now().toString(36) + i,
+      name: String(l.name || '').trim().slice(0, 40), color: /^#[0-9a-f]{6}$/i.test(l.color || '') ? l.color : LABEL_COLORS[i % LABEL_COLORS.length],
+    })).filter(l => l.name);
+    await S.kvSet(env, 'labels', JSON.stringify(list));
+    return json({ success: true, data: list });
+  }
+  if (parts[1] === 'templates' && req.method === 'GET') { let t = null; try { t = JSON.parse((await S.kvGet(env, 'templates')) || 'null'); } catch {} return json({ success: true, data: t }); }
+  if (parts[1] === 'templates' && req.method === 'POST') {
+    const body = await req.json().catch(() => ({}));
+    const list = Array.isArray(body.templates) ? body.templates.slice(0, 30).map(t => ({ id: String(t.id || '').slice(0, 30), title: String(t.title || '').slice(0, 60), when: String(t.when || '').slice(0, 80), text: String(t.text || '').slice(0, 1500) })).filter(t => t.title && t.text) : null;
+    await S.kvSet(env, 'templates', JSON.stringify(list));
+    return json({ success: true, data: list });
+  }
+  if (parts[1] === 'label-stats' && req.method === 'GET') {
+    const lab = String(url.searchParams.get('label') || '');
+    if (!/^l[a-z0-9]{3,20}$/.test(lab)) return json({ success: false }, 400);
+    const { results } = await env.DB.prepare('SELECT crm, data FROM leads WHERE data LIKE ?').bind(`%"${lab}"%`).all();
+    const s = { total: 0, sent: 0, replied: 0, tested: 0, app: 0, paid: 0 };
+    for (const r of results || []) { const d = JSON.parse(r.data); s.total++; if (d.teamSent) s.sent++; if (d.lastInboundAt) s.replied++; if (d.testsDone) s.tested++; if (d.app) s.app++; if (d.paid) s.paid++; }
+    return json({ success: true, data: s });
   }
   if (parts[1] === 'lead' && GID.test(parts[2] || '')) {
     const gid = parts[2];
@@ -254,7 +354,8 @@ async function crm(env, req, url) {
       const lead = await S.getLead(env, gid);
       if (!lead) return json({ success: false, message: 'Lead नाही' }, 404);
       const { results } = await env.DB.prepare('SELECT dir, kind, cost, body, status, at FROM msgs WHERE gid = ? ORDER BY at DESC, id DESC LIMIT 300').bind(gid).all();
-      return json({ success: true, data: { lead, open: WA.isOpen(lead, new Date()), msgs: (results || []).reverse() } });
+      const steps = await fuSteps(env);
+      return json({ success: true, data: { lead, open: WA.isOpen(lead, new Date()), msgs: (results || []).reverse(), fu: fuOf({ mobile: lead.mobile }, lead, new Date(), steps), fu_steps: steps } });
     }
     if (req.method !== 'POST') return json({ success: false }, 405);
     const body = await req.json().catch(() => ({}));
@@ -273,6 +374,43 @@ async function crm(env, req, url) {
       let closed = false;
       await withLead(env, gid, null, (lead, now) => { if (!WA.isOpen(lead, now)) { closed = true; return []; } return [{ to: 'wa', kind: 'service', cost: 0, text, buttons: [] }]; });
       return closed ? json({ success: false, message: 'खिडकी बंद आहे — टीमच्या WhatsApp वरून पाठवा.' }, 409) : json({ success: true });
+    }
+    if (parts[3] === 'labels') {
+      const ids = (Array.isArray(body.labels) ? body.labels : []).filter(x => /^l[a-z0-9]{3,20}$/.test(x)).slice(0, 20);
+      await withLead(env, gid, null, lead => { lead.labels = ids; return []; });
+      return json({ success: true });
+    }
+    // the team opened WhatsApp / SMS with a ready message (from its own phone): counted, noted in the chat
+    if (parts[3] === 'sent') {
+      const via = body.via === 'sms' ? 'SMS' : 'WhatsApp', tpl = String(body.tpl || '').slice(0, 60);
+      const steps = await fuSteps(env);
+      let moved = '';
+      await withLead(env, gid, null, (lead, now) => {
+        lead.teamSent = (lead.teamSent || 0) + 1; lead.teamSentAt = now.toISOString();
+        const f = fuOf({ mobile: lead.mobile }, lead, now, steps);
+        // this step's message (or "advance" from 📤 आजचे पाठवा): on to the next step, due after this step's days
+        if (f && (body.advance || (body.tpl_id && steps[f.step - 1] && steps[f.step - 1].tpl === body.tpl_id))) {
+          const cur = steps[f.step - 1];
+          lead.fu = f.step >= steps.length ? { step: f.step, done: true, setAt: now.getTime() } : { step: f.step + 1, due: now.getTime() + (cur.wait || 0) * 864e5, setAt: now.getTime() };
+          moved = lead.fu.done ? ` → 📋 follow-up पूर्ण` : ` → 📋 Step ${lead.fu.step} (${steps[lead.fu.step - 1].name})`;
+        }
+        return [];
+      });
+      await S.addMsg(env, { gid, dir: 'team', body: `📱 टीमने ${via} उघडला: ${tpl}${moved}${body.text ? '\n' + String(body.text).slice(0, 800) : ''}` });
+      if (via === 'WhatsApp') await env.DB.prepare("INSERT INTO kv (k, v) VALUES (?1, '1') ON CONFLICT(k) DO UPDATE SET v = CAST(CAST(v AS INTEGER) + 1 AS TEXT)").bind('teamwa:' + S.istDay()).run();
+      return json({ success: true });
+    }
+    if (parts[3] === 'fu') {
+      const steps = await fuSteps(env), t = Date.now();
+      await withLead(env, gid, null, (lead, now) => {
+        const f = fuOf({ mobile: lead.mobile }, lead, now, steps) || { step: 1 };
+        if (body.action === 'snooze') lead.fu = { step: f.step, due: endOfToday() + 1, setAt: t };                 // tomorrow
+        else if (body.action === 'set') lead.fu = { step: Math.max(1, Math.min(steps.length, Number(body.step) || 1)), due: t, setAt: t };
+        else if (body.action === 'done') lead.fu = { step: f.step, done: true, setAt: t };
+        else if (body.action === 'restart') lead.fu = { step: 1, due: t, setAt: t };
+        return [];
+      });
+      return json({ success: true });
     }
     if (parts[3] === 'note') { await S.addMsg(env, { gid, dir: 'log', kind: 'NOTE', body: String(body.text || '').slice(0, 500) }); return json({ success: true }); }
   }
@@ -303,6 +441,8 @@ export default {
         const b = await req.json().catch(() => ({}));
         const gid = String(b.gid || '').toUpperCase();
         if (!GID.test(gid) || !b.type) return json({ success: false, message: 'gid / type?' }, 400);
+        if (b.type === 'form_number' && b.data && b.data.label) b.data.labelId = await labelIdFor(env, b.data.label);
+        if (b.type === 'form_number' && b.mobile && !(await S.phoneGid(env, String(b.mobile).slice(-10)))) await S.setPhone(env, String(b.mobile).slice(-10), gid);
         const r = await withLead(env, gid, b.mobile ? String(b.mobile).slice(-10) : null, (lead, now) => {
           const out = [];
           if (b.sync) {

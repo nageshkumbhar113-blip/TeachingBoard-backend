@@ -27,6 +27,7 @@ router.delete('/admin/exams/:id', requireAdmin, c.adminDeleteExam);
 router.get('/admin/leads',  requireAdmin, c.adminLeads);
 router.post('/admin/lead-pin', requireAdmin, c.adminLeadPin);
 router.post('/admin/bot-backfill', requireAdmin, c.adminBotBackfill);
+router.post('/admin/leads-add', requireAdmin, c.adminLeadsAdd);
 // WhatsApp bot (Cloudflare Worker, wa-worker/): the child's facts, its requests, and Admin › CRM's token
 router.get('/bot-config', B.config);
 router.post('/bot/wa-login', B.requireBotKey, B.waLogin);

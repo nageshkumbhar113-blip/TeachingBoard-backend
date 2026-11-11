@@ -127,6 +127,8 @@ const userSchema = new mongoose.Schema(
     // job (jobs/notificationScheduler.js) — without this it would re-fire
     // every single day once a student goes quiet, instead of once per gap.
     last_inactivity_reminder_at: { type: Date, default: null },
+    study_nudge_date: { type: String, default: '' },     // IST day of the last 7 pm study notification
+    comeback_at:      { type: Date, default: null },     // the last "come back" push (after 14 quiet days)
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
