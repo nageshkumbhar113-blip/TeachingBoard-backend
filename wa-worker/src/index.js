@@ -241,10 +241,12 @@ async function callFirst(env) {
     if (!offer && !mt && !noTest) continue;
     rows.push({ gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, updated_at: r.updated_at,
       tests: d.testsDone, free_total: d.freeTotal, via: d.via, app: d.app, paid: d.paid, closed: d.closed, open: WA.isOpen(d, now),
-      offer_end: offer ? d.offerEnd : null, mt, no_test: noTest, acct: !!(d.acct && d.acct.code), push_on: !!d.pushOn, _k: offer || (mt ? 9e15 : 9.5e15) });
+      offer_end: offer ? d.offerEnd : null, offer: offerOf(d, now), mt, no_test: noTest, acct: !!(d.acct && d.acct.code), push_on: !!d.pushOn, _k: offer || (mt ? 9e15 : 9.5e15) });
   }
   return rows.sort((a, b) => a._k - b._k).slice(0, 100).map(({ _k, ...r }) => r);
 }
+// the first-payment offer right now: { pct, end } or null (50 % for 24 h, then 30 % until Sunday night)
+const offerOf = (d, now) => { const o = d.paid ? null : WA.offerNow(d, now); return o ? { pct: o.pct, end: o.end.toISOString() } : null; };
 // ── 📋 follow-up steps ──
 const FU_DEFAULT = [
   { name: 'पहिला संपर्क', color: '#e11d48', tpl: 'hello', wait: 1 },
@@ -280,7 +282,7 @@ async function fuRows(env, now) {
     if (!f) continue;
     rows.push({ gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, updated_at: r.updated_at,
       tests: d.testsDone, free_total: d.freeTotal, app: d.app, acct: !!(d.acct && d.acct.code), labels: d.labels || [], place: d.place || '', sent: d.teamSent || 0,
-      offer_end: d.offerEnd || null, fu_step: f.step, fu_due: f.due });
+      offer: offerOf(d, now), fu_step: f.step, fu_due: f.due });
   }
   return { steps, rows };
 }
@@ -293,7 +295,7 @@ async function noApp(env) {
     const d = JSON.parse(r.data);
     if (d.paid || d.closed || d.app || !r.mobile || !(d.acct && d.acct.code)) continue;
     rows.push({ gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, updated_at: r.updated_at,
-      tests: d.testsDone, free_total: d.freeTotal, via: d.via, app: false, open: WA.isOpen(d, now), offer_end: d.offerEnd || null, acct: true });
+      tests: d.testsDone, free_total: d.freeTotal, via: d.via, app: false, open: WA.isOpen(d, now), offer: offerOf(d, now), acct: true });
   }
   return rows.slice(0, 100);
 }
@@ -334,7 +336,7 @@ async function crm(env, req, url) {
       const d = JSON.parse(r.data);
       return { gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, updated_at: r.updated_at,
         tests: d.testsDone, free_total: d.freeTotal, via: d.via, app: d.app, paid: d.paid, daily: d.daily, closed: d.closed, revisit_at: d.revisitAt, open: WA.isOpen(d, now),
-        offer_end: d.offerEnd || null, mt: d.mtLast || null, acct: !!(d.acct && d.acct.code), push_on: !!d.pushOn, labels: d.labels || [], place: d.place || '', sent: d.teamSent || 0 };
+        offer: offerOf(d, now), mt: d.mtLast || null, acct: !!(d.acct && d.acct.code), push_on: !!d.pushOn, labels: d.labels || [], place: d.place || '', sent: d.teamSent || 0 };
     }) });
   }
   // 📋 follow-up: the steps with their counts (all / due today), one step's families, the steps' settings
@@ -388,7 +390,7 @@ async function crm(env, req, url) {
       if (!lead) return json({ success: false, message: 'Lead नाही' }, 404);
       const { results } = await env.DB.prepare('SELECT dir, kind, cost, body, status, at FROM msgs WHERE gid = ? ORDER BY at DESC, id DESC LIMIT 300').bind(gid).all();
       const steps = await fuSteps(env);
-      return json({ success: true, data: { lead, open: WA.isOpen(lead, new Date()), msgs: (results || []).reverse(), fu: fuOf({ mobile: lead.mobile }, lead, new Date(), steps), fu_steps: steps } });
+      return json({ success: true, data: { lead, offer: offerOf(lead, new Date()), open: WA.isOpen(lead, new Date()), msgs: (results || []).reverse(), fu: fuOf({ mobile: lead.mobile }, lead, new Date(), steps), fu_steps: steps } });
     }
     if (req.method !== 'POST') return json({ success: false }, 405);
     const body = await req.json().catch(() => ({}));

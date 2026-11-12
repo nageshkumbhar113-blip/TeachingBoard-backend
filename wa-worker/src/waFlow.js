@@ -670,5 +670,5 @@
     return best;
   }
 
-  return { CONFIG, L, createLead, inbound, welcome, event, tick, nextDue, isOpen, whenText, dayKey, atIST, priceText };
+  return { CONFIG, L, createLead, inbound, welcome, event, tick, nextDue, isOpen, whenText, dayKey, atIST, priceText, offerNow };
 });
