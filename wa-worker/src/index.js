@@ -438,6 +438,8 @@ async function crm(env, req, url) {
       await withLead(env, gid, null, (lead, now) => {
         const f = fuOf({ mobile: lead.mobile }, lead, now, steps) || { step: 1 };
         if (body.action === 'snooze') lead.fu = { step: f.step, due: endOfToday() + 1, setAt: t };                 // tomorrow
+        // ⏭ the team called / did this step by hand: on to the next one, due after this step's days
+        else if (body.action === 'next') lead.fu = f.step >= steps.length ? { step: f.step, done: true, setAt: t } : { step: f.step + 1, due: t + ((steps[f.step - 1] || {}).wait || 0) * 864e5, setAt: t };
         else if (body.action === 'set') lead.fu = { step: Math.max(1, Math.min(steps.length, Number(body.step) || 1)), due: t, setAt: t };
         else if (body.action === 'done') lead.fu = { step: f.step, done: true, setAt: t };
         else if (body.action === 'restart') lead.fu = { step: 1, due: t, setAt: t };
