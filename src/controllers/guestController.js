@@ -440,6 +440,35 @@ exports.adminLeadPin = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { ...acc, name: lead.name || '' } });
 });
 
+// POST /api/guest/admin/lead-paid { gid, period: 'monthly'|'yearly', amount? } — Admin › CRM "✅ Paid (हाताने)":
+// the parent paid outside our pay page (Razorpay payment link / UPI / cash). The free account (made now if missing)
+// gets the full course for the period, the payment is recorded (Admin's "Pay केलं" counts it, the offer stops) and
+// the bot hears "paid" (CRM ✅ Paid, the 🎉 message with the code + PIN).
+exports.adminLeadPaid = asyncHandler(async (req, res) => {
+  const gid = String(req.body?.gid || '').trim().toUpperCase();
+  const period = req.body?.period === 'yearly' ? 'yearly' : 'monthly';
+  const amount = Math.max(0, Math.round(Number(req.body?.amount) || 0));
+  const lead = /^[0-9A-F]{10}$/.test(gid) ? await GuestLead.findOne({ gid }) : null;
+  if (!lead) throw new AppError('Lead सापडला नाही', 404);
+  if (!lead.batch) throw new AppError('या family चा class नाही — आधी class ठरवा', 400);
+  if (!lead.parent_mobile) throw new AppError('या family चा नंबर नाही', 400);
+  const acct = await autoAccount(lead);
+  if (!acct) throw new AppError('Account बनवता आलं नाही', 400);
+  const student = await User.findOne({ role: 'student', student_code: acct.code });
+  if (!student) throw new AppError('Account सापडलं नाही', 404);
+  const base = student.expiry_date && student.expiry_date > new Date() && student.free_tier !== true ? student.expiry_date : new Date();
+  const expiry = StudentSubscription.computeExpiry(period, base);
+  const id = 'manual_' + Date.now();
+  await StudentSubscription.create({
+    student_user_id: student.user_id, student_code: student.student_code, batch: lead.batch, period, amount, currency: 'INR',
+    razorpay_order_id: id, razorpay_payment_id: id, status: 'active', payment_verified: true, is_trial: false,
+    start_date: new Date(), end_date: expiry, discount_source: 'manual',
+  });
+  await require('./paymentController').activateStudentForBatch(student, lead.batch, expiry);   // + the bot's "paid"
+  BOT.notify(lead.gid, 'sync', {}, { sync: { paid: true } });
+  res.json({ success: true, data: { code: acct.code, pin: lead.auto_pin || acct.pin || '', expiry, name: lead.name || student.name } });
+});
+
 // GET /api/guest/admin/mt-list — Admin › CRM "🏆 महा-Test": the families registered for the coming महा-Tests (the
 // next 8 days), with the parent's number — the bot may not write to them first (no free window), so the team sends
 // the reminder from its own WhatsApp / SMS. Students with full access are left out (the app reminds them).

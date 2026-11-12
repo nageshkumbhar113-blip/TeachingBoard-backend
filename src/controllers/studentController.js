@@ -173,6 +173,15 @@ exports.updateStudent = asyncHandler(async (req, res) => {
   await student.save();
   invalidateUserCache('student', student.user_id);
 
+  // Admin gave full access (e.g. the parent paid by a Razorpay payment link / UPI by hand): the family's lead is
+  // paid at once — Admin › CRM "✅ Paid", no more offer / free-test messages, the bot's 🎉 with the code
+  if ((req.body.expiry_date !== undefined || req.body.free_tier !== undefined) && require('../utils/contentAccess').hasFullAccess(student)) {
+    const GuestLead = require('../models/GuestLead');
+    GuestLead.findOne({ converted_code: student.student_code }, 'gid').sort({ created_at: -1 }).lean()
+      .then(l => { if (l) require('../utils/waBot').notify(l.gid, 'paid', { code: student.student_code }, { sync: { paid: true } }); })
+      .catch(err => console.warn('[admin paid] bot', err.message));
+  }
+
   // Propagate expiry to teacher and parent when expiry_date is updated
   if (req.body.expiry_date !== undefined) {
     const code = student.student_code;

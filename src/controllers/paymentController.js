@@ -130,6 +130,8 @@ async function activateStudentForBatch(student, batchName, newExpiry) {
   }
 }
 
+exports.activateStudentForBatch = activateStudentForBatch;
+
 // ── Public config (frontend needs the key id to open Checkout) ────────────────
 
 exports.getConfig = asyncHandler(async (_req, res) => {
