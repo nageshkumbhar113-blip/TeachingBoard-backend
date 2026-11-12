@@ -992,9 +992,36 @@ exports.adminMetaCreateAd = asyncHandler(async (req, res) => {
 });
 
 // Called by attemptController after a guest's test is saved.
+// the first-payment offer starts with the family's first test (the same clock the bot uses), once a month
+async function _ensureOffer(gid) {
+  const lead = await GuestLead.findOne({ gid });
+  if (!lead) return;
+  const month = _istMonth();
+  if (lead.offer?.month === month) return;
+  if (lead.parent_mobile) {
+    const other = await GuestLead.findOne({ parent_mobile: lead.parent_mobile, 'offer.month': month, gid: { $ne: gid } }).lean();
+    if (other) { lead.offer = other.offer; await lead.save(); return; }
+  }
+  const now = new Date();
+  lead.offer = { percent: OFFER_PERCENT, issued_at: now, expires_at: new Date(now.getTime() + OFFER_HOURS * 3600 * 1000), month };
+  await lead.save();
+}
+// a test by a free account (code + PIN, free tier) made from a visitor: count it for that family
+async function noteAccountAttempt(studentCode, quizTitle, pct, score, total) {
+  const code = String(studentCode || '').trim();
+  if (!code || /^GUEST-/.test(code)) return;
+  const lead = await GuestLead.findOne({ converted_code: code }, 'gid').sort({ created_at: -1 }).lean();
+  if (!lead) return;
+  const u = await User.findOne({ role: 'student', student_code: code }, 'role free_tier expiry_date').lean();
+  if (u && require('../utils/contentAccess').hasFullAccess(u)) return;   // paid: not the free part any more
+  return noteGuestAttempt('GUEST-' + lead.gid, quizTitle, pct, score, total);
+}
+exports.noteAccountAttempt = noteAccountAttempt;
+
 async function noteGuestAttempt(studentCode, quizTitle, pct, score, total) {
   const gid = String(studentCode || '').replace(/^GUEST-/, '');
   if (!gid) return;
+  await _ensureOffer(gid).catch(err => console.warn('[guest] offer', err.message));
   await GuestLead.updateOne({ gid }, {
     $inc: { tests: 1 },
     $max: { best_pct: Math.round(pct) },

@@ -166,6 +166,9 @@ exports.createAttempt = asyncHandler(async (req, res) => {
     const pct = max_marks > 0 ? (marks_obtained / max_marks) * 100 : (totalQuestions ? (correctAnswers / totalQuestions) * 100 : 0);
     noteGuestAttempt(studentCode, quiz.title, pct, max_marks > 0 ? marks_obtained : correctAnswers, max_marks > 0 ? max_marks : totalQuestions).catch(err => console.warn('guest attempt note failed:', err.message));
   } else if (studentCode) {
+    // a free account made from a website / WhatsApp visitor: the family's lead (tests, the offer, the bot)
+    const pctA = max_marks > 0 ? (marks_obtained / max_marks) * 100 : (totalQuestions ? (correctAnswers / totalQuestions) * 100 : 0);
+    require('./guestController').noteAccountAttempt(studentCode, quiz.title, pctA, max_marks > 0 ? marks_obtained : correctAnswers, max_marks > 0 ? max_marks : totalQuestions).catch(err => console.warn('account attempt note failed:', err.message));
     // Notify assigned teachers via FCM (non-blocking)
     _notifyTeachers(studentCode, studentName, quiz.title, marks_obtained, max_marks) // same marks the student sees
       .catch(err => console.warn('FCM teacher notify failed:', err.message));

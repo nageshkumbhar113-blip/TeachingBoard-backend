@@ -497,7 +497,7 @@
     }
     if (type === 'paid') {
       lead.paid = true; lead.crm = 'paid';
-      out.push(wa(lead, now, `🎉 ${lead.name} चं account तयार!\n👤 Student Code: ${data.code || '—'}\n🔑 PIN: तुम्ही ठेवलेला\n📱 App 👇 ${CONFIG.play}\nकिंवा "📲 WhatsApp ने login" — code टाइप करावा लागत नाही.`, [], { template: 'utility' }));
+      out.push(wa(lead, now, `🎉 ${lead.name} चं account तयार!\n👤 Student Code: ${data.code || '—'}\n🔑 PIN: ${lead.acct && lead.acct.code === data.code && lead.acct.pin ? '*' + lead.acct.pin + '*' : 'तुम्ही ठेवलेला'}\n📱 App 👇 ${CONFIG.play}\nकिंवा "📲 WhatsApp ने login" — code टाइप करावा लागत नाही.`, [], { template: 'utility' }));
       out.push(log('PAY', 'Payment → account active. सूट आणि pay चे मेसेज बंद; पुढे push फक्त app मध्ये.'));
       return out;
     }

@@ -47,7 +47,25 @@ async function resolvePaidBatch(batchName, period) {
 // toggle is on, the batch has no conflicting legacy Batch.discount already
 // set (no stacking), and — if configured first-payment-only — this is the
 // student's first-ever paid (non-trial) subscription.
+// owner (2026-11-12): the YouTube-subscriber student discount is switched off (teachers' commission stays);
+// the only discount is our own first-test offer
 async function resolveStudentDiscount(student, batch, basePrice) {
+  const offer = await _firstTestOffer(student, basePrice);
+  return offer || { percent: 0, amount: basePrice, source: '' };
+}
+// 🎁 the free part's first-payment offer (50 % for 24 h after the first test, then 30 % until Sunday night) — the
+// same one the website / the parent's pay page / WhatsApp show, for the free account made from that visitor
+async function _firstTestOffer(student, basePrice) {
+  if (!student?.student_code) return null;
+  const GuestLead = require('../models/GuestLead');
+  const lead = await GuestLead.findOne({ converted_code: student.student_code }).sort({ created_at: -1 }).lean();
+  const o = lead ? require('./guestController').offerNow(lead) : null;
+  if (!o) return null;
+  const priorPaid = await StudentSubscription.exists({ student_code: student.student_code, payment_verified: true, is_trial: false });
+  if (priorPaid) return null;
+  return { percent: o.percent, amount: Math.round(basePrice * (100 - o.percent) / 100), source: 'first_test_offer', first_payment_only: true, ends: o.ends };
+}
+async function _youtubeDiscount(student, batch, basePrice) {
   const none = { percent: 0, amount: basePrice, source: '' };
   if (!student?.youtube_sub_verified_for_partner) return none;
   if (batch?.discount) return none; // no stacking with an admin batch-wide discount
@@ -145,6 +163,7 @@ exports.previewPrice = asyncHandler(async (req, res) => {
     // eligibility disclosure for the plan screen
     discount_reason: discount.source,
     discount_first_payment_only: discount.first_payment_only === true,
+    discount_ends: discount.ends || null,
   });
 });
 
