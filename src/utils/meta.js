@@ -257,6 +257,12 @@ async function createAd(o) {
   if (!ready) return { pending: true, campaign_id: campaign.id, adset_id: adset.id, note };
   const creative = await _creative(o);
   const ad = await post(`${e.account}/ads`, { name: o.name, adset_id: adset.id, creative: { creative_id: creative.id }, status: 'PAUSED' });
+  // 💬 owner (2026-11-12): a WhatsApp ad must open ONLY the bot's number — read back what Meta saved and say so
+  if (toWa && _botNumber()) {
+    const po = (await graph(String(adset.id), { fields: 'promoted_object' }).catch(() => null))?.promoted_object || {};
+    const got = String(po.whatsapp_phone_number || '').replace(/\D/g, '');
+    if (got && got !== _botNumber().replace(/\D/g, '')) note = (note ? note + ' · ' : '') + `⚠️ Meta ने या ad set ला WhatsApp नंबर +${got} लावला — bot चा ${_botNumber()} नाही. Ad चालू करू नका; Ads Manager मध्ये ad set → WhatsApp नंबर बदला.`;
+  }
   return { created: true, mode: toWa ? 'whatsapp' : conv ? 'lead' : 'clicks', note, ad_id: ad.id, adset_id: adset.id, campaign_id: campaign.id, creative_id: creative.id,
     manager: `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${e.account.replace(/^act_/, '')}&selected_ad_ids=${ad.id}` };
 }
@@ -373,6 +379,18 @@ async function setAdStatus(adId, status) {
   _cache = null;
   return { ad_id: ad.id, name: ad.name, status, note };
 }
+// 🗑️ delete an ad, or an ad set with all its ads (Meta keeps them as "DELETED": they stop for good and our panel
+// hides them; a new ad / ad set with the same name can be made again)
+async function deleteObject(id, kind) {
+  if (!/^\d+$/.test(String(id))) throw Object.assign(new Error('Bad id'), { status: 400 });
+  if (!['ad', 'adset'].includes(kind)) throw Object.assign(new Error('Bad kind'), { status: 400 });
+  const o = await graph(String(id), { fields: 'id,name,account_id' });
+  if (`act_${o.account_id}` !== env().account) throw Object.assign(new Error('Not this ad account'), { status: 400 });
+  await post(String(id), { status: 'DELETED' });
+  _cache = null;
+  return { name: o.name, deleted: kind };
+}
+
 async function raiseBudget(adsetId, pct = 20) {
   if (!/^\d+$/.test(String(adsetId))) throw Object.assign(new Error('Bad ad set id'), { status: 400 });
   const s = await graph(String(adsetId), { fields: 'id,name,daily_budget,account_id,updated_time' });
@@ -418,4 +436,4 @@ async function retarget(adsetId, geo) {
   return { name: s.name, towns: place.geo.cities.length, missed: place.missed };
 }
 
-module.exports = { configured, account, insights, retarget, graph, uploadVideo, uploadImage, createAd, adsState, setAdStatus, raiseBudget, setBudget, replaceVideo, sendEvent, fbcOf, isStudentAd, datasetReady, _resetCache: () => { _cache = null; _region = null; } };
+module.exports = { configured, account, insights, retarget, deleteObject, graph, uploadVideo, uploadImage, createAd, adsState, setAdStatus, raiseBudget, setBudget, replaceVideo, sendEvent, fbcOf, isStudentAd, datasetReady, _resetCache: () => { _cache = null; _region = null; } };

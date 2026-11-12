@@ -854,6 +854,8 @@ exports.adminMetaAction = asyncHandler(async (req, res) => {
     else if (b.action === 'budget') out = await META.raiseBudget(String(b.adset_id || ''), 20);
     else if (b.action === 'set_budget') out = await META.setBudget(String(b.adset_id || ''), b.amount, { big: b.big === true });
     else if (b.action === 'retarget') out = await META.retarget(String(b.adset_id || ''), String(b.geo || ''));
+    else if (b.action === 'delete_ad') out = await META.deleteObject(String(b.ad_id || ''), 'ad');
+    else if (b.action === 'delete_adset') out = await META.deleteObject(String(b.adset_id || ''), 'adset');
     else if (b.action === 'replace_video') out = await META.replaceVideo({ ad_id: String(b.ad_id || ''), video_id: String(b.video_id || ''), image_hash: String(b.image_hash || ''), message: String(b.message || '').slice(0, 2000), headline: String(b.headline || '').slice(0, 120), cta: b.cta, link: String(b.link || '').slice(0, 500) });
     else throw new AppError('Unknown action', 400);
     res.json({ success: true, ...out });
