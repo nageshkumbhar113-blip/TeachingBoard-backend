@@ -212,5 +212,12 @@ W.event(lead, 'sync', { cls: '8th NMMS', courses: ['8th NMMS'], prices: { monthl
 t = texts(W.welcome(lead, '💳 फी किती आहे?', thuAd));
 ok(t.some(x => /g=ICED111111/.test(x)) && t.some(x => /₹149/.test(x)), 'first message an icebreaker (fee): the test link and the price', t.join(' | '));
 
+// a new number that skipped the class list and sent TEST: the class again, never "0 free tests done"
+lead = W.createLead({ gid: 'NOCL111111' }, thuAd); lead.mobile = '9822200047';
+W.event(lead, 'sync', { cls: '', courses: ['8th NMMS', '10th'] }, thuAd);
+W.welcome(lead, '📝 Free test द्यायची आहे', thuAd);
+t = texts(W.inbound(lead, 'TEST', thuAd));
+ok(t.some(x => /कोणत्या class/.test(x)) && !t.some(x => /0 free tests/.test(x)) && lead.awaiting === 'cls', 'no class + TEST → the class list again (no "0 tests done")', t.join(' | '));
+
 console.log(bad ? `${bad} FAILED` : 'FLOW ALL PASS');
 process.exit(bad ? 1 : 0);

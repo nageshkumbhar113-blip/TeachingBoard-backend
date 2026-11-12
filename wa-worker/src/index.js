@@ -475,9 +475,27 @@ export default {
         const gid = String(b.gid || '').toUpperCase();
         if (!GID.test(gid) || !b.type) return json({ success: false, message: 'gid / type?' }, 400);
         if (b.type === 'form_number' && b.data && b.data.label) b.data.labelId = await labelIdFor(env, b.data.label);
-        if (b.type === 'form_number' && b.mobile && !(await S.phoneGid(env, String(b.mobile).slice(-10)))) await S.setPhone(env, String(b.mobile).slice(-10), gid);
+        let carry = null;
+        if (b.type === 'form_number' && b.mobile) {
+          const mob = String(b.mobile).slice(-10), old = await S.phoneGid(env, mob);
+          if (!old) await S.setPhone(env, mob, gid);
+          else if (old !== gid) {
+            // this number talked to the bot as a new family whose class was never known: that chat goes on here
+            const o = await S.getLead(env, old);
+            if (o && !o.cls && !o.testsDone && !o.paid) {
+              carry = { lastInboundAt: o.lastInboundAt, unanswered: o.unanswered || 0, daily: o.daily, ctwaUntil: o.ctwaUntil, welcomed: o.welcomed };
+              await withLead(env, old, null, l => { l.closed = 'जोडला: ' + gid; l.stopped = true; l.crm = 'closed'; return [{ to: 'log', tag: 'MERGE', text: `याच नंबरने website वर class / नाव दिलं → बोलणं lead ${gid} मध्ये पुढे.` }]; });
+              await S.setPhone(env, mob, gid);
+            }
+          }
+        }
         const r = await withLead(env, gid, b.mobile ? String(b.mobile).slice(-10) : null, (lead, now) => {
           const out = [];
+          if (carry) {
+            for (const [k, v] of Object.entries(carry)) if (v != null && lead[k] == null) lead[k] = v;
+            if (carry.lastInboundAt) { lead.via = 'wa'; if (lead.crm === 'form') lead.crm = null; }
+            out.push({ to: 'log', tag: 'MERGE', text: 'हा पालक आधी bot शी बोलला होता (class नव्हता) → ते बोलणं इथे जोडलं.' });
+          }
           if (b.sync) {
             // with a test result, the counters come from the event itself (else the first test would look like a later one)
             const sync = { ...b.sync };

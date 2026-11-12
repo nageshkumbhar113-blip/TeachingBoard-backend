@@ -199,6 +199,8 @@ async function _videoReady(id, waitMs = 120000) {
     await new Promise(r => setTimeout(r, Number(process.env.META_POLL_MS) || 4000));
   }
 }
+// the WhatsApp bot's number (+91…) — a WhatsApp ad must open the bot, not another number linked to the Page
+const _botNumber = () => { const n = String(process.env.WA_BOT_NUMBER || '').replace(/\D/g, ''); return /^91\d{10}$/.test(n) ? '+' + n : ''; };
 // { name, audience, adset, daily_budget (₹), video_id, image_hash, message, headline, cta, link }
 async function createAd(o) {
   const e = env();
@@ -240,7 +242,7 @@ async function createAd(o) {
       name: adsetName, campaign_id: campaign.id, status: 'PAUSED',
       daily_budget: Math.max(100, Math.round(Number(o.daily_budget) || 0)) * 100,   // paise
       billing_event: 'IMPRESSIONS', bid_strategy: 'LOWEST_COST_WITHOUT_CAP', destination_type: toWa ? 'WHATSAPP' : 'WEBSITE',
-      ...(toWa ? { optimization_goal: 'CONVERSATIONS', promoted_object: { page_id: e.page } } : conv
+      ...(toWa ? { optimization_goal: 'CONVERSATIONS', promoted_object: { page_id: e.page, ...(_botNumber() ? { whatsapp_phone_number: _botNumber() } : {}) } } : conv
         ? { optimization_goal: 'OFFSITE_CONVERSIONS', promoted_object: { pixel_id: ds, custom_event_type: o.audience === 'parent' ? 'LEAD' : 'COMPLETE_REGISTRATION' } }
         : { optimization_goal: 'LINK_CLICKS' }),
       targeting: {

@@ -36,7 +36,7 @@
     waMaxTests: 2,                // free tests sent on WhatsApp; after these: "the app (all free tests) or the course" (owner, 2026-11-08)
     hotAfterDays: 7,              // still taking tests but not paid after N days → hot call list
     dailyTimes: [{ id: '18', label: 'संध्याकाळी 6', h: 18 }, { id: '19', label: '7', h: 19 }, { id: '20', label: '8', h: 20 }],
-    mahaTest: { dow: 0, h: 9, m: 30, remindH: 8, resultH: 12 },
+    mahaTest: { dow: 0, h: 10, m: 0, remindH: 8, resultH: 12 },
     prices: { service: 0, utility: 0.115, marketing: 0.86 },   // ₹, India (estimates — Meta changes them)
     site: 'https://nkseduorbit.in',
     play: 'https://play.google.com/store/apps/details?id=com.nkseduorbit.student',
@@ -202,6 +202,12 @@
   }
   // one free test link (at most one a day on WhatsApp; Sunday is the महा-Test's day)
   function testLink(lead, now, out, own) {
+    if (!lead.cls && !lead.paid) {
+      // the class is not known yet (a new number that skipped the class list): ask it, never "0 free tests done"
+      if ((lead.courses || []).length) { lead.awaiting = 'cls'; out.push(wa(lead, now, '📝 कोणत्या class ची free test? 👇', clsButtons(lead), { own })); }
+      else out.push(wa(lead, now, `📝 Free test (10 मिनिटं, login नाही) — class निवडा 👇\n${CONFIG.site}/student-app/?free=1`, [], { own }));
+      return;
+    }
     if (lead.paid) { out.push(wa(lead, now, `✅ ${lead.name} चे सगळे tests app मध्ये उघडे आहेत 👇\n${CONFIG.play}`, [], { own })); return; }
     if (lead.kind === 'regular' ? lead.freeLessons && lead.lessonsSent >= lead.freeLessons : lead.testsDone >= lead.freeTotal) {
       out.push(wa(lead, now, lead.kind === 'regular' ? `🎉 ${lead.name} चे सगळे ${lead.freeLessons} free धडे झाले! पुढचे धडे 👇\n${L.pay(lead.gid)}` : `🎉 ${lead.name} चे सगळे ${lead.freeTotal} free tests पूर्ण! पुढचे chapters 👇\n${L.pay(lead.gid)}`, [], { own })); return;
