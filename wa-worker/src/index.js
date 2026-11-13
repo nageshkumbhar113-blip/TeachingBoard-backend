@@ -238,7 +238,7 @@ async function appFree(env, withUsage = true) {
 async function newOnes(env) {
   const since = Date.now() - 48 * 3600e3, now = new Date();
   const { results } = await env.DB.prepare("SELECT gid, name, cls, mobile, crm, last_in, created_at, updated_at, data FROM leads WHERE mobile IS NOT NULL AND created_at >= ? AND (crm IS NULL OR crm NOT IN ('paid', 'closed')) ORDER BY created_at DESC LIMIT 200").bind(since).all();
-  return (results || []).map(r => ({ r, d: JSON.parse(r.data) })).filter(({ d }) => !d.paid && !d.closed && !d.backfilled && !d.imported)
+  return (results || []).map(r => ({ r, d: JSON.parse(r.data) })).filter(({ d }) => !d.paid && !d.closed && !((d.backfilled || d.imported) && !d.lastInboundAt))
     .map(({ r, d }) => ({ gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, created_at: r.created_at, updated_at: r.updated_at,
       tests: d.testsDone, free_total: d.freeTotal, app: d.app, open: WA.isOpen(d, now), offer: offerOf(d, now), labels: d.labels || [], place: d.place || '', sent: d.teamSent || 0,
       acct: !!(d.acct && d.acct.code), from: d.ctwaUntil ? 'ad' : d.source || d.via || '', question: d.question && !d.question.answered ? d.question : null, team: d.lastTeam || null }));
@@ -280,10 +280,14 @@ async function callFirst(env) {
     const mt = d.mtLast && t - new Date(d.mtLast.at).getTime() < 3 * 864e5 ? d.mtLast : null;
     // gave the number but no test yet (the last 7 days): call them too, after the running offers
     const noTest = !offer && !mt && !d.testsDone && !d.app && r.crm !== 'import' && d.createdAt && t - new Date(d.createdAt).getTime() < 7 * 864e5;
-    if (!offer && !mt && !noTest) continue;
+    // 💳 opened the pay page / pressed Pay / asked for the course in the bot (the last 7 days): on top, newest first
+    const payAt = Math.max(Date.parse(d.checkoutAt || 0) || 0, Date.parse(d.paySeenAt || 0) || 0, Date.parse(d.payWantAt || 0) || 0);
+    const pay = payAt && t - payAt < 7 * 864e5 ? { at: new Date(payAt).toISOString(), n: d.paySeenN || 0, checkout: !!d.checkoutAt && t - Date.parse(d.checkoutAt) < 7 * 864e5, bot: !!d.payWantAt } : null;
+    if (!offer && !mt && !noTest && !pay) continue;
     rows.push({ gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, updated_at: r.updated_at,
       tests: d.testsDone, free_total: d.freeTotal, via: d.via, app: d.app, paid: d.paid, closed: d.closed, open: WA.isOpen(d, now),
-      offer_end: offer ? d.offerEnd : null, offer: offerOf(d, now), mt, no_test: noTest, acct: !!(d.acct && d.acct.code), push_on: !!d.pushOn, _k: offer || (mt ? 9e15 : 9.5e15) });
+      offer_end: offer ? d.offerEnd : null, offer: offerOf(d, now), mt, no_test: noTest, acct: !!(d.acct && d.acct.code), push_on: !!d.pushOn, pay,
+      _k: pay ? (pay.checkout ? -2e13 : -1e13) - payAt : offer || (mt ? 9e15 : 9.5e15) });
   }
   return rows.sort((a, b) => a._k - b._k).slice(0, 100).map(({ _k, ...r }) => r);
 }

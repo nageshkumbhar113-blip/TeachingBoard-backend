@@ -257,6 +257,7 @@
     out.push(log('SHARE', 'Courses + share link: दुसऱ्या test नंतर, पालकांच्या reply ला उत्तर म्हणून (मोफत). यादी Admin मधल्या classes मधून.'));
   }
   function offerMsg(lead, now, out) {
+    if (!lead.paid) lead.payWantAt = now.toISOString();   // 💳 asked for the course here: a warm family for the team
     if (lead.paid) { out.push(wa(lead, now, `✅ ${lead.name} चं account आधीच चालू आहे.`)); return; }
     const o = offerNow(lead, now);
     out.push(wa(lead, now, `${o ? `🎁 पहिल्या payment वर ${o.pct}% सूट — ${whenText(o.end, now)} पर्यंत.${priceText(lead, true, now) ? '\n' + priceText(lead, true, now) : ''}` : '📚 सगळे chapters, tests, notes आणि महा-Test'}\n👇 ${L.pay(lead.gid)}`,
@@ -478,6 +479,16 @@
       return out;
     }
     if (type === 'mt_result') { mtResult(lead, now, out, data); return out; }
+    // 💳 the parent opened the pay page (Render: parent-pay.html) or pressed Pay there without finishing: the team
+    // calls them first (Admin › CRM / NKs Team "☀️ आधी call", on top). Nothing is sent to the parent.
+    if (type === 'pay_seen') {
+      if (lead.paid) return out;
+      const last = lead.paySeenAt ? Date.parse(lead.paySeenAt) : 0;
+      lead.paySeenAt = now.toISOString(); lead.paySeenN = (lead.paySeenN || 0) + 1;
+      if (data.checkout) { lead.checkoutAt = now.toISOString(); out.push(log('PAY', '💳 Pay पानावर "Pay" दाबलं पण पूर्ण झालं नाही → "☀️ आधी call" मध्ये सगळ्यात वर. लगेच call करा.')); }
+      else if (now.getTime() - last > 30 * 60e3) out.push(log('PAY', '💳 पालकांनी pay पान उघडलं → "☀️ आधी call" मध्ये सगळ्यात वर.'));
+      return out;
+    }
     if (type === 'form_number') {
       // typed the number on the website (no WhatsApp message from them): the bot sends nothing (it would cost);
       // the lead waits in the call list, where Admin can call or send one WhatsApp by hand.

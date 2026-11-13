@@ -286,8 +286,15 @@ async function _leadByTokenOrGid(req) {
 // GET /api/guest/public/:gid — the parent's pay page (opened from the child's
 // WhatsApp message, on the parent's phone, so no token): child's first name,
 // latest result, the offer and the prices. Nothing else about the child.
+const _paySeen = new Map();   // gid → last time told (one note per 20 min)
 exports.publicSummary = asyncHandler(async (req, res) => {
   const lead = await _leadByTokenOrGid(req);
+  // the parent opened the pay page (parent-pay.html asks with ?v=pay): the team calls them first
+  if (req.query?.v === 'pay' && lead.gid && Date.now() - (_paySeen.get(lead.gid) || 0) > 20 * 60e3) {
+    _paySeen.set(lead.gid, Date.now());
+    if (!lead.steps.includes('offer_seen')) GuestLead.updateOne({ gid: lead.gid }, { $addToSet: { steps: 'offer_seen' } }).catch(() => {});
+    BOT.notify(lead.gid, 'pay_seen', {});
+  }
   const batch = lead.batch ? await Batch.findOne({ name: lead.batch }, 'name monthly_price yearly_price').lean() : null;
   const paid = lead.converted_code ? (await _paidCodes([lead.converted_code])).has(lead.converted_code) : false;
   const students = await _studentCount();
@@ -667,6 +674,7 @@ exports.checkout = asyncHandler(async (req, res) => {
   const amount = Math.round(price * (1 - percent / 100));
 
   if (!lead.steps.includes('checkout')) lead.steps.push('checkout');
+  BOT.notify(lead.gid, 'pay_seen', { checkout: true });   // pressed Pay: if it does not finish, the team calls first
   lead.last_seen_at = new Date();
   await lead.save();
 
