@@ -1,3 +1,4 @@
+const T = require('../controllers/teamController');   // admin or a team member (CRM)
 const express = require('express');
 const c = require('../controllers/guestController');
 const B = require('../controllers/botController');
@@ -25,18 +26,18 @@ router.get('/admin/exams', requireAdmin, c.adminListExams);
 router.post('/admin/exams', requireAdmin, c.adminAddExam);
 router.delete('/admin/exams/:id', requireAdmin, c.adminDeleteExam);
 router.get('/admin/leads',  requireAdmin, c.adminLeads);
-router.post('/admin/lead-pin', requireAdmin, c.adminLeadPin);
+router.post('/admin/lead-pin', T.requireAdminOrStaff, c.adminLeadPin);
 router.post('/admin/bot-backfill', requireAdmin, c.adminBotBackfill);
-router.post('/admin/leads-add', requireAdmin, c.adminLeadsAdd);
-router.get('/admin/mt-list', requireAdmin, c.adminMtList);
+router.post('/admin/leads-add', T.requireAdminOrStaff, c.adminLeadsAdd);
+router.get('/admin/mt-list', T.requireAdminOrStaff, c.adminMtList);
 router.post('/admin/lead-paid', requireAdmin, c.adminLeadPaid);
-router.post('/admin/mt-reminded', requireAdmin, c.adminMtReminded);
+router.post('/admin/mt-reminded', T.requireAdminOrStaff, c.adminMtReminded);
 // WhatsApp bot (Cloudflare Worker, wa-worker/): the child's facts, its requests, and Admin › CRM's token
 router.get('/bot-config', B.config);
 router.post('/bot/wa-login', B.requireBotKey, B.waLogin);
 router.get('/bot/lead/:gid', B.requireBotKey, B.lead);
 router.post('/bot/action', B.requireBotKey, B.action);
-router.get('/admin/bot-token', requireAdmin, B.adminToken);
+router.get('/admin/bot-token', T.requireAdminOrStaff, B.adminToken);
 router.get('/admin/funnel', requireAdmin, c.adminFunnel);
 router.get('/admin/ad-content', requireAdmin, c.adminAdContent);
 router.get('/admin/meta', requireAdmin, c.adminMeta);

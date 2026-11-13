@@ -72,6 +72,15 @@ function createGuestToken({ gid, name, batch }) {
   return `${encodedPayload}.${sign(encodedPayload)}`;
 }
 
+// 👥 a team member of the "NKs Team" app (CRM only): 30 days, checked against the member on every request
+const STAFF_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
+function signStaffToken({ id, name }) {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = { id, name: name || '', role: 'staff', iat: now, exp: now + STAFF_TOKEN_TTL_SECONDS };
+  const encodedPayload = toBase64Url(JSON.stringify(payload));
+  return `${encodedPayload}.${sign(encodedPayload)}`;
+}
+
 function verifyToken(token) {
   const [encodedPayload, signature] = String(token || "").split(".");
 
@@ -108,7 +117,7 @@ function decodeTokenFromHeader(headerValue) {
   }
 }
 
-module.exports = {
+module.exports = { signStaffToken,
   createToken,
   createGuestToken,
   verifyToken,

@@ -66,3 +66,16 @@ CREATE TABLE IF NOT EXISTS kv (
   k TEXT PRIMARY KEY,
   v TEXT
 );
+
+-- 👥 what each team member (or the admin) did in the CRM — Admin sees who worked on whom
+CREATE TABLE IF NOT EXISTS acts (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  at      INTEGER NOT NULL,
+  by_id   TEXT,
+  by_name TEXT,
+  gid     TEXT,
+  action  TEXT NOT NULL,
+  detail  TEXT
+);
+CREATE INDEX IF NOT EXISTS acts_at ON acts(at);
+CREATE INDEX IF NOT EXISTS acts_by ON acts(by_id, at);

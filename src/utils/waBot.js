@@ -33,8 +33,9 @@ function keyOk(req) {
 }
 
 // a short-lived token for Admin › CRM to call the Worker: "<base64url {role, exp}>.<hex HMAC>"
-function adminToken(hours = 12) {
-  const p = Buffer.from(JSON.stringify({ role: 'admin', exp: Date.now() + hours * 3600e3 })).toString('base64')
+// who = { id, name } for a team member (role 'staff': the Worker allows only the CRM's team work and names them)
+function adminToken(hours = 12, who = null) {
+  const p = Buffer.from(JSON.stringify(who ? { role: 'staff', by: who.id, name: who.name, exp: Date.now() + hours * 3600e3 } : { role: 'admin', exp: Date.now() + hours * 3600e3 })).toString('base64')
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   return p + '.' + crypto.createHmac('sha256', process.env.BOT_SHARED_SECRET).update(p).digest('hex');
 }

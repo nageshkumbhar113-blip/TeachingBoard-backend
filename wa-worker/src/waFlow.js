@@ -146,6 +146,16 @@
   }
   const push = (text, buttons) => ({ to: 'push', text, buttons: buttons || [] });
   // a message the team sends by hand from its own WhatsApp (not the bot number): free; Admin opens wa.me with this text
+  // the team's number shown to parents ("📞 प्रश्न: 83904 84545"); '' while CONFIG.teamNumber is the placeholder
+  const teamNo = () => (/^91[6-9]\d{9}$/.test(CONFIG.teamNumber) ? CONFIG.teamNumber.slice(2) : '');
+  const teamLine = () => (teamNo() ? `\n📞 प्रश्न / call: ${teamNo()}` : '');
+  // a parent's own question → the team (Admin › CRM / NKs Team "❓ प्रश्न"); the bot answers that it went
+  function askTeam(lead, now, out, text, direct) {
+    lead.question = { text: String(text).slice(0, 300), at: now.toISOString() };
+    out.push(log('Q', `❓ पालकांचा प्रश्न: "${lead.question.text}" → team च्या "❓ प्रश्न" यादीत.`));
+    out.push(wa(lead, now, `${direct ? '✅ प्रश्न आमच्या team कडे पाठवला' : '🙏 तुमचा प्रश्न आमच्या team कडे पाठवला आहे'} — उत्तर इथेच येईल.${teamNo() ? `\nलगेच बोलायचं असेल तर 📞 call / WhatsApp: ${teamNo()}` : ''}`,
+      [{ id: 'TEST', label: '📝 Free test' }, { id: 'fee', label: '💳 फी' }, { id: 'call_me', label: '📞 Call हवा' }]));
+  }
   const team = (lead, text) => ({ to: 'team', cost: 0, text, waMe: `https://wa.me/91${lead.mobile || ''}?text=${encodeURIComponent(text)}` });
   const appMsg = (text, buttons) => ({ to: 'app', text, buttons: buttons || [] });
   const canPush = lead => lead.app && lead.pushOn;
@@ -278,7 +288,7 @@
   // or open here); the child types the name on the website, and the free account (Code + PIN) follows from there
   function linkFirst(lead, now, out, hello) {
     lead.awaiting = null;
-    out.push(wa(lead, now, `${hello ? 'नमस्कार 🙏 NKs EduOrbit मध्ये स्वागत!\n' : ''}👇 खालचा मेसेज पाल्याला *forward* करा, किंवा याच phone वर उघडा.\nTest दिली की result आणि क्रमांक इथेच येईल.`));
+    out.push(wa(lead, now, `${hello ? 'नमस्कार 🙏 NKs EduOrbit मध्ये स्वागत!\n' : ''}👇 खालचा मेसेज पाल्याला *forward* करा, किंवा याच phone वर उघडा.\nTest दिली की result आणि क्रमांक इथेच येईल.${hello ? teamLine() : ''}`));
     out.push(wa(lead, now, `${lead.cls} ची free test 📝 (10 मिनिटं, login नाही)\n👇\n${L.child(lead.gid)}`));
     if (lead.ctwaUntil && !lead.mtReg && lead.mtNext && new Date(lead.mtNext) > now)
       out.push(wa(lead, now, `🏆 ${whenText(new Date(lead.mtNext), now)} ला ${lead.cls} चा महा-Test — सगळ्यांमध्ये क्रमांक कळेल. नोंदणी करू? (मोफत)`, [{ id: 'mt_reg', label: '🏆 हो, नोंदणी करा' }]));
@@ -323,10 +333,15 @@
     if (up === 'STOP') { lead.closed = 'STOP'; lead.stopped = true; out.push({ to: 'wa', kind: 'service', cost: 0, text: '🙏 ठीक आहे, आता मेसेज बंद. पुन्हा हवं असेल तर START पाठवा.', buttons: [] }); return out; }
     if (up === 'START' && lead.closed === 'STOP') { lead.closed = null; lead.stopped = false; out.push(wa(lead, now, '🙏 परत स्वागत!', mainButtons(lead, now))); return out; }
     const kw = up.split(/\s+/)[0];
+    if (lead.awaiting === 'question' && !/^[a-z_]+:/i.test(t) && !['TEST', 'STOP'].includes(kw) && !BUTTON_IDS.includes(t)) {
+      lead.awaiting = null; askTeam(lead, now, out, t, true); return out;
+    }
     if (lead.awaiting === 'cls') {
       const m = t.match(/^cls:(\d+)$/);
       const c = m ? (lead.courses || [])[Number(m[1])] : (lead.courses || []).find(x => x.toLowerCase() === t.toLowerCase());
       if (c) { lead.cls = c; out.push({ to: 'do', action: 'batch', data: { batch: c } }); out.push(log('CRM', `Class WhatsApp वर निवडला: ${c}.`)); linkFirst(lead, now, out, false); return out; }
+      // a sentence (not a class): the parent's own question → the team; the class list stays for later
+      if (t.length >= 8 && /\s/.test(t) && !BUTTON_IDS.includes(t)) { askTeam(lead, now, out, t, false); return out; }
       if (!/^[a-z_]+:/i.test(t) && !['TEST', 'STOP'].includes(kw)) { out.push(wa(lead, now, 'खालच्या यादीतून class निवडा 👇', clsButtons(lead))); return out; }
     }
     if (lead.awaiting === 'name' && !/^[A-Z_]+:/.test(up) && !['TEST', 'STOP'].includes(kw) && !BUTTON_IDS.includes(t)) {
@@ -402,7 +417,8 @@
     if (t === 'keep') { out.push(wa(lead, now, `👍 ठीक आहे! ${lead.name} चे result, पुढची free test आणि महा-Test ची आठवण इथेच येईल. कधीही *TEST* पाठवा.`)); out.push(log('CTWA', 'पालकांनी "आठवण हवी" दाबलं → खिडकी पुन्हा 24 तास.')); return out; }
     if (t === 'got') { out.push(wa(lead, now, '👍 Test झाली की result इथे येईल.')); return out; }
     if (t === 'next') { out.push(wa(lead, now, '👍 उद्या पुढची पाठवतो.')); if (!lead.shared && lead.testsDone >= 2) shareMsg(lead, now, out); return out; }
-    if (t === 'ask') { out.push(wa(lead, now, 'कोणता प्रश्न?', [{ id: 'ask:fee', label: 'फी किती?' }, { id: 'ask:app', label: 'App कसा वापरायचा?' }])); return out; }
+    if (t === 'ask') { out.push(wa(lead, now, 'कोणता प्रश्न?', [{ id: 'ask:fee', label: 'फी किती?' }, { id: 'ask:app', label: 'App कसा वापरायचा?' }, { id: 'ask:other', label: '💬 दुसरा प्रश्न' }])); return out; }
+    if (t === 'ask:other') { lead.awaiting = 'question'; out.push(wa(lead, now, '✍️ तुमचा प्रश्न लिहा 👇')); return out; }
     if (t === 'fee') { out.push(wa(lead, now, `💳 ${priceText(lead, true, now) || 'फी pay page वर'}${offerLine(lead, now)}${offerNow(lead, now) || lead.testsDone ? '' : '\n🎁 Free test दिली की 50% सूट (24 तास).'}\nसगळे tests, notes आणि महा-Test 👇\n${L.pay(lead.gid)}`, [{ id: 'pay', label: '💳 Course घ्या' }, { id: 'call_me', label: '📞 Call हवा' }])); return out; }
     if (t === 'ask:fee') { answer(lead, now, out, `${priceText(lead, false, now) || 'फी: pay page वर'}.${offerLine(lead, now)}\nPay नंतर सगळे tests, notes, स्वाध्याय उत्तरं आणि महा-Test.`); return out; }
     if (t === 'ask:app') { answer(lead, now, out, lead.acct && lead.acct.code ? `Play Store वरून install करा → Login → ${acctLine(lead)} → Home वर "पुढचा test". PIN विसरलात तर Login वर "📲 WhatsApp ने login".` : 'Play Store वरून install करा → login लागत नाही → Home वर "पुढचा test". Pay नंतर Student Code + PIN किंवा WhatsApp login.'); return out; }
@@ -413,6 +429,8 @@
     if (t === 'share_done') { out.push(wa(lead, now, '🙏 धन्यवाद! मित्रांनी pay केलं की तुमच्या Refer & Earn मध्ये दिसेल 👉 ' + L.rules(lead.gid))); out.push(log('SHARE', `मित्र आला की "कोणाकडून" नोंद (ref=${lead.gid}). Free असताना मित्र राखून ठेवले जातात; pay केल्यावर मोजले जातात.`)); return out; }
     if (t === 'rules') { out.push(wa(lead, now, `📄 ${L.rules(lead.gid)}\nमित्राने pay केलं तरच मोजला जातो · pay नंतर 7 दिवसांनी पक्का · तुम्ही free असताना आलेले मित्र तुम्ही pay केल्यावर मोजले जातात · तुमच्याच नंबरवरून नाही · बक्षिसासाठी पालकांची संमती + पत्ता.`)); return out; }
     if (/^q:[A-D]$/.test(t)) { const okA = t === 'q:B'; out.push(wa(lead, now, (okA ? '✅ बरोबर! फरक 4, 6, 8, 10 → 30.' : 'थोडं चुकलं 🙂 फरक 4, 6, 8 → पुढचा 10 → 30 (B).') + offerLine(lead, now), mainButtons(lead, now))); return out; }
+    // a parent's own words the bot cannot answer: a question for the team (not a stray button id / one letter)
+    if (t.length >= 3 && !/^[a-z_]+(:[\w-]+)?$/i.test(t)) { askTeam(lead, now, out, t, false); return out; }
     out.push(wa(lead, now, 'माफ करा, समजलं नाही 🙏 खालचं बटण दाबा किंवा TEST पाठवा.', mainButtons(lead, now)));
     return out;
   }
@@ -473,7 +491,7 @@
       lead.via = 'form';
       if (added) {
         if (!lead.crm) lead.crm = 'import';
-        out.push(log('IMPORT', `${data.import ? '📤 Import' : '➕ Admin ने हाताने'}${data.label ? ' (' + data.label + ')' : ''} → 📥 यादी. Bot काही पाठवत नाही: call करा किंवा टीमच्या WhatsApp वरून message.`));
+        out.push(log('IMPORT', `${data.import ? '📤 Import' : data.by ? '➕ ' + data.by + ' ने हाताने' : '➕ Admin ने हाताने'}${data.label ? ' (' + data.label + ')' : ''} → 📥 यादी. Bot काही पाठवत नाही: call करा किंवा टीमच्या WhatsApp वरून message.`));
         return out;
       }
       if (!lead.crm || lead.crm === 'form') lead.crm = 'form';
@@ -497,7 +515,7 @@
     }
     if (type === 'paid') {
       lead.paid = true; lead.crm = 'paid';
-      out.push(wa(lead, now, `🎉 ${lead.name} चं account तयार!\n👤 Student Code: ${data.code || '—'}\n🔑 PIN: ${lead.acct && lead.acct.code === data.code && lead.acct.pin ? '*' + lead.acct.pin + '*' : 'तुम्ही ठेवलेला'}\n📱 App 👇 ${CONFIG.play}\nकिंवा "📲 WhatsApp ने login" — code टाइप करावा लागत नाही.`, [], { template: 'utility' }));
+      out.push(wa(lead, now, `🎉 ${lead.name} चं account तयार!\n👤 Student Code: ${data.code || '—'}\n🔑 PIN: ${lead.acct && lead.acct.code === data.code && lead.acct.pin ? '*' + lead.acct.pin + '*' : 'तुम्ही ठेवलेला'}\n📱 App 👇 ${CONFIG.play}\nकिंवा "📲 WhatsApp ने login" — code टाइप करावा लागत नाही.${teamLine()}`, [], { template: 'utility' }));
       out.push(log('PAY', 'Payment → account active. सूट आणि pay चे मेसेज बंद; पुढे push फक्त app मध्ये.'));
       return out;
     }
@@ -624,7 +642,7 @@
       if (lead.courseAsked && lead.lastInboundAt && Date.parse(lead.lastInboundAt) + CONFIG.windowHours * H > end.getTime()) return;
       lead.courseAsked = true;
       const who = lead.name === 'तुमचा पाल्य' ? 'तुमच्या पाल्यासाठी' : lead.name + ' साठी';
-      out.push(wa(lead, now, `🙏 ${who} course घ्यायचा आहे का?${lead.testsDone ? '' : '\n' + testOfferLine}\n👉 ${L.pay(lead.gid)}\n\nपुढच्या आठवणी हव्या असतील तर ✅ दाबा.`, [{ id: 'keep', label: '✅ हो, आठवण हवी' }, ...courseButtons], { own: true }));
+      out.push(wa(lead, now, `🙏 ${who} course घ्यायचा आहे का?${lead.testsDone ? '' : '\n' + testOfferLine}\n👉 ${L.pay(lead.gid)}\n\nपुढच्या आठवणी हव्या असतील तर ✅ दाबा.${teamLine()}`, [{ id: 'keep', label: '✅ हो, आठवण हवी' }, ...courseButtons], { own: true }));
     } });
     if (lead.mtNext) mtItems(lead, items, [new Date(lead.mtNext)], true);
   }

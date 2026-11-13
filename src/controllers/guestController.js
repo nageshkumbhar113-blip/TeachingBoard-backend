@@ -430,6 +430,7 @@ exports.adminLeadPin = asyncHandler(async (req, res) => {
     const u = await User.findOne({ role: 'student', student_code: acc.code });
     if (!u) throw new AppError('Account सापडलं नाही', 404);
     const paid = (await _paidCodes([acc.code])).has(acc.code);
+    if (req.staff && (paid || require('../utils/contentAccess').hasFullAccess(u))) throw new AppError('Paid विद्यार्थ्याचा PIN फक्त Admin बदलू शकतो (किंवा पालक "📲 WhatsApp ने login")', 403);
     if (paid && !req.body?.fresh) return res.json({ success: true, data: { code: acc.code, pin: '', paid: true, name: u.name } });
     const pin = _randomPin();
     u.pin_hash = User.hashPin(pin); await u.save();
@@ -514,6 +515,7 @@ exports.adminLeadsAdd = asyncHandler(async (req, res) => {
   const rows = Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 500) : [];
   if (!rows.length) throw new AppError('एकही नंबर नाही', 400);
   const source = req.body?.source === 'import' ? 'import' : 'manual';
+  if (req.staff && (source === 'import' || rows.length > 5)) throw new AppError('Import फक्त Admin करू शकतो', 403);
   const label = _clean(req.body?.label, 60);
   const batches = await Batch.find({ is_active: { $ne: false } }, 'name').lean();
   const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9\u0900-\u097f]/g, '');
@@ -543,7 +545,7 @@ exports.adminLeadsAdd = asyncHandler(async (req, res) => {
       out.added++;
     }
     out.gids.push(lead.gid);
-    BOT.notify(lead.gid, 'form_number', { [source]: true, label, note, place }, { mobile, sync: { name: lead.name || undefined, cls: lead.batch || undefined } });
+    BOT.notify(lead.gid, 'form_number', { [source]: true, label, note, place, by: req.staff?.name || '' }, { mobile, sync: { name: lead.name || undefined, cls: lead.batch || undefined } });
     if (out.gids.length % 10 === 0) await new Promise(r2 => setTimeout(r2, 300));   // the Worker makes one lead at a time
   }
   res.json({ success: true, data: out });

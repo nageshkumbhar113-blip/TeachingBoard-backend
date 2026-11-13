@@ -18,6 +18,7 @@ BOT_OFF = "0"              # "1" = the bot sends nothing (messages are still sav
 DAILY_CAP_RS = "50"        # paid (template) messages stop for the day above this many rupees
 REENGAGE_TEMPLATE = ""     # name of an approved Meta template for "Bot à¤¨à¤‚à¤¬à¤°à¤µà¤°à¥‚à¤¨ template"; empty = that button refuses
 TEMPLATE_LANG = "mr"
+TEAM_NUMBER = "918390484545"   # the team's own WhatsApp / phone: shown to parents for questions and calls
 BOT_NUMBER = "919226719313"   # the bot's WhatsApp number (Meta phone number id 1305896689283987, WABA 1931910161115440)
 
 [[d1_databases]]

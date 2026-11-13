@@ -210,9 +210,9 @@ const config = (_req, res) => {
 };
 
 // GET /api/guest/admin/bot-token — Admin › CRM: where the Worker is + a 12-hour token
-const adminToken = asyncHandler(async (_req, res) => {
+const adminToken = asyncHandler(async (req, res) => {
   if (!BOT.on()) return res.json({ success: true, data: { ready: false } });
-  res.json({ success: true, data: { ready: true, url: process.env.WA_WORKER_URL.replace(/\/$/, ''), token: BOT.adminToken() } });
+  res.json({ success: true, data: { ready: true, url: process.env.WA_WORKER_URL.replace(/\/$/, ''), token: BOT.adminToken(12, req.staff || null), staff: req.staff || null } });
 });
 
 module.exports = { requireBotKey, lead, action, adminToken, syncOf, config, waLogin };

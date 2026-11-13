@@ -219,5 +219,21 @@ W.welcome(lead, '📝 Free test द्यायची आहे', thuAd);
 t = texts(W.inbound(lead, 'TEST', thuAd));
 ok(t.some(x => /कोणत्या class/.test(x)) && !t.some(x => /0 free tests/.test(x)) && lead.awaiting === 'cls', 'no class + TEST → the class list again (no "0 tests done")', t.join(' | '));
 
+// ❓ a parent's own question → the team; "💬 दुसरा प्रश्न" → the next words; the team's number when set
+W.CONFIG.teamNumber = '918390484545';
+lead = W.createLead({ gid: 'QQQQ111111', name: 'Om', cls: '8th', freeTotal: 18 }, thuAd); lead.mobile = '9822200048';
+t = texts(W.inbound(lead, 'Pan majh Google login hot nahi', thuAd));
+ok(lead.question && /Google login/.test(lead.question.text) && t.some(x => /team कडे पाठवला/.test(x) && /8390484545/.test(x)), 'free words → a question for the team + the team number', t.join(' | '));
+t = texts(W.inbound(lead, 'ask', thuAd));
+let askOut = W.inbound(lead, 'ask', thuAd).find(x => x.to === 'wa');
+ok(askOut.buttons.some(b => b.id === 'ask:other'), '"❓ प्रश्न" has "💬 दुसरा प्रश्न"');
+W.inbound(lead, 'ask:other', thuAd);
+ok(lead.awaiting === 'question', '"💬 दुसरा प्रश्न" → the bot waits for the question');
+t = texts(W.inbound(lead, 'फी हप्त्याने भरता येईल का?', thuAd));
+ok(/हप्त्याने/.test(lead.question.text) && !lead.awaiting && t.some(x => /✅ प्रश्न आमच्या team कडे पाठवला/.test(x)), 'the question written → the team', t.join(' | '));
+ok(!W.inbound(lead, 'got', thuAd).some(x => x.to === 'log' && x.tag === 'Q'), 'a button id is never a question');
+ok(texts(W.welcome(Object.assign(W.createLead({ gid: 'QQQQ222222' }, thuAd), { mobile: '9822200049', cls: '10th', courses: ['10th'] }), 'hi', thuAd)).some(x => /8390484545/.test(x)), 'the first message carries the team number');
+W.CONFIG.teamNumber = '91YYYYYYYYYY';
+
 console.log(bad ? `${bad} FAILED` : 'FLOW ALL PASS');
 process.exit(bad ? 1 : 0);
