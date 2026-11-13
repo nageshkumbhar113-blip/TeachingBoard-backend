@@ -491,7 +491,12 @@ async function crm(env, req, url, who) {
       const text = String(body.text || '').trim().slice(0, 1000);
       if (!text) return json({ success: false, message: 'मजकूर लिहा' }, 400);
       let closed = false;
-      await wl(gid, (lead, now) => { if (!WA.isOpen(lead, now)) { closed = true; return []; } if (lead.question) lead.question.answered = now.toISOString(); return [{ to: 'wa', kind: 'service', cost: 0, text, buttons: [] }]; });
+      await wl(gid, (lead, now) => {
+        if (!WA.isOpen(lead, now)) { closed = true; return []; }
+        if (lead.question) lead.question.answered = now.toISOString();
+        lead.teamSent = (lead.teamSent || 0) + 1; lead.teamSentAt = now.toISOString();   // 🆕 "संपर्क झाला"
+        return [{ to: 'wa', kind: 'service', cost: 0, text, buttons: [] }];
+      });
       if (!closed) await act(env, who, gid, 'reply', text);
       return closed ? json({ success: false, message: 'खिडकी बंद आहे — टीमच्या WhatsApp वरून पाठवा.' }, 409) : json({ success: true });
     }
