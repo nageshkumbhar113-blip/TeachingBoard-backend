@@ -95,12 +95,12 @@ try {
   const first = msg('919811100001', `RESULT ${A}`); r = await signed(first);
   ok(r.status === 200, 'signed webhook accepted');
   await waitSent(2);
-  ok(sent.length === 2, 'two answers: result + daily question', sent.length);
-  ok(/Rahul चा पूर्ण result/.test(textOf(sent[0])) && /16\/20/.test(textOf(sent[0])), 'result names the child (from Render) with the score', textOf(sent[0]));
+  ok(sent.length === 2, 'two answers: result + the app', sent.length);
+  ok(/Rahul चा result/.test(textOf(sent[0])) && /16\/20/.test(textOf(sent[0])), 'result names the child (from Render) with the score', textOf(sent[0]));
   ok(sent[0].to === '919811100001', 'sent to the parent\'s number');
   ok(sent[0].interactive?.type === 'button' && sent[0].interactive.action.buttons.length === 3, 'result: 3 reply buttons (Unlock / प्रश्न / Call)', JSON.stringify(sent[0].interactive?.type));
   ok(JSON.stringify(sent).includes('Monthly ₹200 → ₹100') && JSON.stringify(sent).includes('parent-pay.html?g=AAAA111111'), 'first answer: the unlock line with the offer price and the pay link (prices from Render)');
-  ok(sent[1].interactive?.type === 'list' && sent[1].interactive.action.sections[0].rows.length === 4, 'daily-time question as a list of 4');
+  ok(/app मध्ये/.test(textOf(sent[1])) && /play\.google\.com/.test(textOf(sent[1])), 'then the app on its own (not "daily test on WhatsApp?")', textOf(sent[1]));
 
   // 3) the same message again (Meta retry) → nothing new
   await signed(first);

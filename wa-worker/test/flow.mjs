@@ -29,7 +29,7 @@ out = W.inbound(lead, 'TEST BBBB111111', now);
 t = texts(out);
 ok(out.some(x => x.to === 'do' && x.action === 'lead'), 'TEST first contact: the number becomes a lead');
 ok(/पूर्ण result/.test(t[0]) && /7\/10/.test(t[0]), 'TEST first contact: the result first', t[0]);
-ok(t.some(x => /रोज 1 free test WhatsApp वर पाठवू/.test(x)), 'TEST first contact: asks the daily time');
+ok(t.some(x => /free tests \*app मध्ये\*/.test(x)) && !t.some(x => /रोज 1 free test WhatsApp वर पाठवू/.test(x)), 'TEST first contact: the app next (not "daily test on WhatsApp?")');
 ok(!t.some(x => /आजची free test \(/.test(x)), 'TEST first contact: no second test the same day');
 
 // 4) one test a day wherever it was taken: a website test today → TEST says "today's is done"
@@ -48,7 +48,7 @@ W.event(lead, 'sync', { prices: { monthly: 200, yearly: 1500 } }, now);
 W.event(lead, 'test_done', { n: 1, score: 8, total: 10 }, now);
 out = W.inbound(lead, 'RESULT DDDD111111', now);
 let r = out.find(x => x.to === 'wa');
-ok(r.text.includes('🔓 *8th NMMS course* — Om साठी') && r.text.includes('सगळे 284 tests (आत्ता 18 free)') && r.text.includes('parent-pay.html?g=DDDD111111'), 'result: the unlock line with the course, 284 tests and the pay link', r.text);
+ok(r.text.includes('पूर्ण 8th NMMS course') && r.text.includes('सगळे 284 tests') && r.text.includes('parent-pay.html?g=DDDD111111') && r.text.length < 400, 'result: short — the course, 284 tests and the pay link', r.text);
 ok(/Monthly ₹200 → ₹100/.test(r.text) && /50% सूट/.test(r.text), 'unlock line: offer price while the offer runs', r.text);
 ok(JSON.stringify(r.buttons.map(b => b.id)) === '["pay","ask","call_me"]', 'result buttons: Unlock / प्रश्न / Call', JSON.stringify(r.buttons));
 const later = new Date(now.getTime() + 30 * 3600e3);
@@ -121,7 +121,7 @@ W.event(lead, 'sync', { acct: { code: 'STU123', pin: '5307' }, prices: { monthly
 ok(lead.crm === 'form' && lead.acct.code === 'STU123', 'number from the website: form list, the account kept');
 W.event(lead, 'test_done', { n: 1, score: 6, total: 10 }, now);
 t = texts(W.inbound(lead, 'RESULT JJJJ111111', now));
-ok(t[0].includes('STU123') && t[0].includes('5307') && t[0].includes('play.google.com'), 'RESULT answer: code, PIN and the app link', t[0]);
+ok(t[1] && t[1].includes('STU123') && t[1].includes('5307') && t[1].includes('play.google.com'), 'RESULT answer: then the app with the code, PIN and link', t[1]);
 const d1 = new Date(now.getTime() + 24 * 3600e3), d2 = new Date(now.getTime() + 48 * 3600e3), d3 = new Date(now.getTime() + 72 * 3600e3);
 t = texts(W.inbound(lead, 'TEST', d1));
 ok(/आजची free test \(2\/18\)/.test(t[0]), 'WhatsApp test 1', t[0]);
