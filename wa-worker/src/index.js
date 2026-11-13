@@ -233,6 +233,16 @@ async function appFree(env, withUsage = true) {
   for (const r of rows) r.usage = u[r.gid] || null;
   return rows.sort((a, b) => ((b.usage && b.usage.last) || 0) - ((a.usage && a.usage.last) || 0) || ((b.usage && b.usage.tests) || 0) - ((a.usage && a.usage.tests) || 0));
 }
+// 🆕 new families (the last 48 h) with a number, newest first — an ad's parent is easiest to win right away, even while
+// the bot is still talking to them (a call from the team is fine then)
+async function newOnes(env) {
+  const since = Date.now() - 48 * 3600e3, now = new Date();
+  const { results } = await env.DB.prepare("SELECT gid, name, cls, mobile, crm, last_in, created_at, updated_at, data FROM leads WHERE mobile IS NOT NULL AND created_at >= ? AND (crm IS NULL OR crm NOT IN ('paid', 'closed')) ORDER BY created_at DESC LIMIT 200").bind(since).all();
+  return (results || []).map(r => ({ r, d: JSON.parse(r.data) })).filter(({ d }) => !d.paid && !d.closed && !d.backfilled && !d.imported)
+    .map(({ r, d }) => ({ gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, created_at: r.created_at, updated_at: r.updated_at,
+      tests: d.testsDone, free_total: d.freeTotal, app: d.app, open: WA.isOpen(d, now), offer: offerOf(d, now), labels: d.labels || [], place: d.place || '', sent: d.teamSent || 0,
+      acct: !!(d.acct && d.acct.code), from: d.ctwaUntil ? 'ad' : d.source || d.via || '', question: d.question && !d.question.answered ? d.question : null, team: d.lastTeam || null }));
+}
 // ❓ parents' own questions not answered yet (the bot sent them to the team)
 async function questions(env) {
   const { results } = await env.DB.prepare("SELECT gid, name, cls, mobile, crm, last_in, updated_at, data FROM leads WHERE data LIKE '%\"question\":{%' ORDER BY updated_at DESC LIMIT 300").all();
@@ -337,7 +347,8 @@ async function crm(env, req, url, who) {
   const parts = url.pathname.split('/').filter(Boolean);   // crm, …
   if (parts[1] === 'summary' && req.method === 'GET') {
     const month = S.istDay().slice(0, 7);
-    const [grp, first, noapp, q, appfree, teamToday, nextyear, mc, jobsRow, costToday, lastTick, lastHook] = await Promise.all([
+    const [fresh, grp, first, noapp, q, appfree, teamToday, nextyear, mc, jobsRow, costToday, lastTick, lastHook] = await Promise.all([
+      newOnes(env),
       env.DB.prepare('SELECT crm, COUNT(*) AS n FROM leads GROUP BY crm').all(),
       callFirst(env), noApp(env), questions(env), appFree(env, false),
       S.kvGet(env, 'teamwa:' + S.istDay()),
@@ -347,7 +358,7 @@ async function crm(env, req, url, who) {
       S.todayCost(env), S.kvGet(env, 'last_tick'), S.kvGet(env, 'last_webhook'),
     ]);
     const counts = {}; for (const r of grp.results || []) counts[r.crm || 'active'] = r.n;
-    Object.assign(counts, { first: first.length, noapp: noapp.length, q: q.length, appfree: appfree.length, team_today: Number(teamToday) || 0, nextyear: nextyear.n });
+    Object.assign(counts, { new: fresh.length, new_untouched: fresh.filter(r => !r.sent && !r.team).length, first: first.length, noapp: noapp.length, q: q.length, appfree: appfree.length, team_today: Number(teamToday) || 0, nextyear: nextyear.n });
     const jobs = jobsRow.n;
     return json({ success: true, data: {
       counts, cost_today: costToday, cost_month: mc?.s || 0, cap: Number(env.DAILY_CAP_RS) || 0,
@@ -356,6 +367,7 @@ async function crm(env, req, url, who) {
     } });
   }
   if (parts[1] === 'list' && req.method === 'GET' && url.searchParams.get('list') === 'q') return json({ success: true, data: await questions(env) });
+  if (parts[1] === 'list' && req.method === 'GET' && url.searchParams.get('list') === 'new') return json({ success: true, data: await newOnes(env) });
   if (parts[1] === 'list' && req.method === 'GET' && url.searchParams.get('list') === 'appfree') return json({ success: true, data: await appFree(env) });
   // 🔄 Sync ↔ CRM check (Admin): every family the CRM has, by its id and number
   if (parts[1] === 'gids' && req.method === 'GET') {
