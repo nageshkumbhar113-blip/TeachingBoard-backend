@@ -256,6 +256,7 @@ async function createAd(o) {
   const ready = await _videoReady(o.video_id);
   if (!ready) return { pending: true, campaign_id: campaign.id, adset_id: adset.id, note };
   const creative = await _creative(o);
+  if (creative.prefillNote) note = (note ? note + ' · ' : '') + creative.prefillNote;
   const ad = await post(`${e.account}/ads`, { name: o.name, adset_id: adset.id, creative: { creative_id: creative.id }, status: 'PAUSED' });
   // 💬 owner (2026-11-12): a WhatsApp ad must open ONLY the bot's number — read back what Meta saved and say so
   if (toWa && _botNumber()) {
@@ -267,8 +268,31 @@ async function createAd(o) {
     manager: `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${e.account.replace(/^act_/, '')}&selected_ad_ids=${ad.id}` };
 }
 
-// the video post (page + optional Instagram identity, text, headline, button + link)
-function _creative(o) {
+// 💬 the parent's first message on WhatsApp, ready in the box (instead of Meta's "Hello! Can I get more info on
+// this?"): names the class, so the bot knows it at once. Meta's message template (customer_action_type autofill_message).
+function prefillText(o) {
+  let cls = '';
+  try { cls = new URL(o.link).searchParams.get('batch') || ''; } catch {}
+  cls = String(cls || o.headline || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+  return `नमस्कार 🙏 मला ${cls ? cls + ' ची ' : ''}free test आणि माहिती हवी आहे.`;
+}
+function _welcome(o) {
+  return JSON.stringify({
+    type: 'VISUAL_EDITOR', version: 2, landing_screen_type: 'welcome_message', media_type: 'text',
+    text_format: { customer_action_type: 'autofill_message', message: { autofill_message: { content: prefillText(o) }, text: 'नमस्कार 🙏 NKs EduOrbit — पाल्याची free test 👇' } },
+    user_edit: false, surface: 'visual_editor_new',
+  });
+}
+// the video post (page + optional Instagram identity, text, headline, button + link); a WhatsApp ad with our own
+// first message — if Meta refuses that part, the ad is still made (with Meta's own text) and a note says so
+async function _creative(o) {
+  if (o.dest === 'wa' && !o.noPrefill) {
+    try { return await _creative1({ ...o, welcome: _welcome(o) }); }
+    catch (err) { const c = await _creative1(o); c.prefillNote = '⚠️ Meta ने आपला तयार message घेतला नाही (' + String(err.message).slice(0, 120) + ') — Ads Manager › ad › Message template मध्ये "Prefilled message" हाताने लावा.'; return c; }
+  }
+  return _creative1(o);
+}
+function _creative1(o) {
   const e = env();
   return post(`${e.account}/adcreatives`, {
     name: o.name,
@@ -280,6 +304,7 @@ function _creative(o) {
         call_to_action: o.dest === 'wa'
           ? { type: 'WHATSAPP_MESSAGE', value: { app_destination: 'WHATSAPP' } }
           : { type: o.cta === 'SIGN_UP' ? 'SIGN_UP' : 'LEARN_MORE', value: { link: o.link } },
+        ...(o.welcome ? { page_welcome_message: o.welcome } : {}),
       },
     },
   });
