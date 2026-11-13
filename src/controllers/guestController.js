@@ -397,17 +397,47 @@ function _randomPin() {
 // The free account as soon as the parent's number comes (owner's choice 2026-11-08): a code and a random PIN,
 // free tests only — the full course only through the pay page. The same child already registered on this number
 // (same name) keeps that account (its PIN stays the parent's own). Returns { code, pin } (pin '' = their own PIN).
+// One account per child: the same number already has a free account for this class (another visit — WhatsApp, the
+// website, the app — or one made before the name came, "Student") → that one is used again, with its PIN. A different
+// name in the same class (a sibling) or another class gets its own account. Calls for the same number wait for each
+// other, so two at once never make two accounts.
+const _acctLocks = new Map();
+const _nm = v => String(v || '').toLowerCase().replace(/[^a-zऀ-ॿ]/g, '');
 async function autoAccount(lead) {
   if (!lead.parent_mobile || !lead.batch) return null;
   if (lead.converted_code) return { code: lead.converted_code, pin: lead.auto_pin || '' };
+  const key = lead.parent_mobile;
+  const prev = _acctLocks.get(key) || Promise.resolve();
+  const run = prev.catch(() => {}).then(() => _autoAccount(lead));
+  const tail = run.catch(() => {});
+  _acctLocks.set(key, tail);
+  tail.then(() => { if (_acctLocks.get(key) === tail) _acctLocks.delete(key); });
+  return run;
+}
+async function _autoAccount(lead) {
+  // another call for this family may have finished while this one waited
+  const fresh = await GuestLead.findOne({ gid: lead.gid }, 'converted_code auto_pin').lean();
+  if (fresh?.converted_code) { lead.converted_code = fresh.converted_code; lead.auto_pin = fresh.auto_pin || lead.auto_pin; return { code: fresh.converted_code, pin: fresh.auto_pin || '' }; }
   const name = _clean(lead.name, 40) || 'Student';
-  const same = await User.find({ role: 'student', mobile: lead.parent_mobile }).select('name student_code').lean();
-  const dupe = lead.name ? same.find(s => String(s.name || '').trim().toLowerCase() === name.toLowerCase()) : null;
+  const same = await User.find({ role: 'student', mobile: lead.parent_mobile }).select('name student_code assigned_batches approved_by').sort({ created_at: -1 }).lean();
+  const want = _nm(lead.name);
+  const unnamed = s => !_nm(s.name) || _nm(s.name) === 'student';
+  const inClass = s => (s.assigned_batches || []).includes(lead.batch);
+  const dupe = (want && same.find(s => _nm(s.name) === want))                       // the same child by name
+    || (!want && same.find(inClass))                                                 // no name yet: this class's account
+    || same.find(s => inClass(s) && unnamed(s));                                     // made before the name came
   if (dupe) {
+    // its PIN: the one sent to this family before (from the visit that made it)
+    const other = await GuestLead.findOne({ converted_code: dupe.student_code, auto_pin: { $nin: [null, ''] } }, 'auto_pin').lean();
     lead.converted_code = dupe.student_code; lead.converted_at = new Date();
-    await Attempt.updateMany({ student_code: `GUEST-${lead.gid}` }, { $set: { student_code: dupe.student_code, student_name: dupe.name } });
+    if (other?.auto_pin) lead.auto_pin = other.auto_pin;
+    if (want && unnamed(dupe)) {
+      await User.updateOne({ role: 'student', student_code: dupe.student_code }, { $set: { name } });
+      await Attempt.updateMany({ student_code: dupe.student_code }, { $set: { student_name: name } });
+    }
+    await Attempt.updateMany({ student_code: `GUEST-${lead.gid}` }, { $set: { student_code: dupe.student_code, student_name: want && unnamed(dupe) ? name : dupe.name } });
     await lead.save();
-    return { code: dupe.student_code, pin: '' };
+    return { code: dupe.student_code, pin: lead.auto_pin || '' };
   }
   const pin = _randomPin();
   await _makeAccount(lead, name, lead.parent_mobile, pin);
