@@ -403,24 +403,25 @@ function _randomPin() {
 // other, so two at once never make two accounts.
 const _acctLocks = new Map();
 const _nm = v => String(v || '').toLowerCase().replace(/[^a-zऀ-ॿ]/g, '');
-async function autoAccount(lead) {
+// opts.pin: the parent's own PIN (the pay page) instead of a random one; opts.name: the name typed there
+async function autoAccount(lead, opts = {}) {
   if (!lead.parent_mobile || !lead.batch) return null;
   if (lead.converted_code) return { code: lead.converted_code, pin: lead.auto_pin || '' };
   const key = lead.parent_mobile;
   const prev = _acctLocks.get(key) || Promise.resolve();
-  const run = prev.catch(() => {}).then(() => _autoAccount(lead));
+  const run = prev.catch(() => {}).then(() => _autoAccount(lead, opts));
   const tail = run.catch(() => {});
   _acctLocks.set(key, tail);
   tail.then(() => { if (_acctLocks.get(key) === tail) _acctLocks.delete(key); });
   return run;
 }
-async function _autoAccount(lead) {
+async function _autoAccount(lead, opts = {}) {
   // another call for this family may have finished while this one waited
   const fresh = await GuestLead.findOne({ gid: lead.gid }, 'converted_code auto_pin').lean();
   if (fresh?.converted_code) { lead.converted_code = fresh.converted_code; lead.auto_pin = fresh.auto_pin || lead.auto_pin; return { code: fresh.converted_code, pin: fresh.auto_pin || '' }; }
-  const name = _clean(lead.name, 40) || 'Student';
+  const name = _clean(opts.name || lead.name, 40) || 'Student';
   const same = await User.find({ role: 'student', mobile: lead.parent_mobile }).select('name student_code assigned_batches approved_by').sort({ created_at: -1 }).lean();
-  const want = _nm(lead.name);
+  const want = _nm(opts.name || lead.name);
   const unnamed = s => !_nm(s.name) || _nm(s.name) === 'student';
   const inClass = s => (s.assigned_batches || []).includes(lead.batch);
   const dupe = (want && same.find(s => _nm(s.name) === want))                       // the same child by name
@@ -437,11 +438,12 @@ async function _autoAccount(lead) {
     }
     await Attempt.updateMany({ student_code: `GUEST-${lead.gid}` }, { $set: { student_code: dupe.student_code, student_name: want && unnamed(dupe) ? name : dupe.name } });
     await lead.save();
-    return { code: dupe.student_code, pin: lead.auto_pin || '' };
+    return { code: dupe.student_code, pin: lead.auto_pin || '', reused: true };
   }
-  const pin = _randomPin();
+  const own = /^\d{4}$/.test(opts.pin || '') ? opts.pin : '';
+  const pin = own || _randomPin();
   await _makeAccount(lead, name, lead.parent_mobile, pin);
-  lead.auto_pin = pin;
+  if (!own) lead.auto_pin = pin;
   await lead.save();
   return { code: lead.converted_code, pin };
 }
@@ -460,8 +462,10 @@ exports.adminLeadPin = asyncHandler(async (req, res) => {
     const u = await User.findOne({ role: 'student', student_code: acc.code });
     if (!u) throw new AppError('Account सापडलं नाही', 404);
     const paid = (await _paidCodes([acc.code])).has(acc.code);
+    // the account already has the parent's own PIN: the same code goes out with "तुमचा आधीचाच PIN" — a new PIN
+    // only on "🔄 नवीन PIN" (one account, one PIN; the parent's login keeps working)
+    if (!req.body?.fresh) return res.json({ success: true, data: { code: acc.code, pin: '', own: true, paid, name: u.name } });
     if (req.staff && (paid || require('../utils/contentAccess').hasFullAccess(u))) throw new AppError('Paid विद्यार्थ्याचा PIN फक्त Admin बदलू शकतो (किंवा पालक "📲 WhatsApp ने login")', 403);
-    if (paid && !req.body?.fresh) return res.json({ success: true, data: { code: acc.code, pin: '', paid: true, name: u.name } });
     const pin = _randomPin();
     u.pin_hash = User.hashPin(pin); await u.save();
     lead.auto_pin = pin; await lead.save();
@@ -629,7 +633,7 @@ exports.checkout = asyncHandler(async (req, res) => {
   const pin = String(req.body?.pin || '').trim();
   if (!lead.converted_code && !/^\d{4}$/.test(pin)) throw new AppError('PIN 4 अंकी असावा', 400);
 
-  let student;
+  let student, reused = false;
   if (lead.converted_code) {
     // The account already exists (made with the parent's number, or a second try): it is paid for without its PIN.
     // Paying only ever opens the course for this child, and the page never shows the PIN (owner, 2026-11-08).
@@ -641,13 +645,17 @@ exports.checkout = asyncHandler(async (req, res) => {
     if (isWeakPin(pin)) throw new AppError('PIN सोपा आहे — 1234, 1111 असा नको', 400);
     const mobile = normalizeMobile(req.body?.parent_mobile || lead.parent_mobile);
     if (!mobile) throw new AppError('पालकांचा योग्य 10 अंकी mobile नंबर द्या', 400);
-    const sameMobile = await User.find({ role: 'student', mobile }).select('name student_code').lean();
-    const dupe = sameMobile.find(s => String(s.name || '').trim().toLowerCase() === name.toLowerCase());
-    if (dupe) throw new AppError(`${name} आधीच registered आहे (Code ${dupe.student_code}). App मध्ये त्या code ने login करून pay करा.`, 409);
-    student = await _makeAccount(lead, name, mobile, pin);
+    if (!lead.parent_mobile) lead.parent_mobile = mobile;
+    if (!lead.name) lead.name = name;
+    // the same child already has an account on this number → pay for that one (one child, one code)
+    const acc = await autoAccount(lead, { name, pin });
+    student = acc && await User.findOne({ role: 'student', student_code: acc.code });
+    if (!student) throw new AppError('Account बनवता आलं नाही — पुन्हा प्रयत्न करा', 500);
+    reused = !!acc.reused;
   }
 
-  const batchDoc = await Batch.findOne({ name: student.assigned_batches[0] || lead.batch });
+  // the same child's older account (maybe another class): the class paid for is this family's
+  const batchDoc = await Batch.findOne({ name: (reused && lead.batch) || student.assigned_batches[0] || lead.batch });
   if (!batchDoc) throw new AppError('Batch not found', 404);
   const price = period === 'yearly' ? batchDoc.yearly_price : batchDoc.monthly_price;
   if (!price || price <= 0) throw new AppError(`या class ची ${period === 'yearly' ? 'yearly' : 'monthly'} किंमत अजून ठरलेली नाही`, 400);
@@ -694,6 +702,7 @@ exports.checkout = asyncHandler(async (req, res) => {
     period,
     original_price: price,
     discount_percent: percent,
+    reused,   // this child's account already existed: its own PIN stays
   });
 });
 
