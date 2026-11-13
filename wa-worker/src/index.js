@@ -9,7 +9,7 @@
 import WA from './waFlow.js';
 import { validSignature, bodiesFor, templateBody, post, inboundText, hmacHex, sameHex } from './meta.js';
 import * as S from './store.js';
-import { leadInfo, queue, runJobs, waLogin, newLead, ping } from './render.js';
+import { leadInfo, queue, runJobs, waLogin, newLead, ping, appUsage } from './render.js';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Bot-Key', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'Content-Type': 'application/json', ...CORS } });
@@ -220,6 +220,19 @@ async function adminOk(env, req) {
 const act = (env, who, gid, action, detail) => env.DB.prepare('INSERT INTO acts (at, by_id, by_name, gid, action, detail) VALUES (?, ?, ?, ?, ?, ?)')
   .bind(Date.now(), who?.id || 'admin', who?.name || 'Admin', gid || null, action, detail == null ? null : String(detail).slice(0, 300)).run().catch(() => {});
 const ACT_NAMES = { wa: '💬 WhatsApp', sms: '✉️ SMS', next: '✅ बोललो → पुढची Step', paying: '💳 Pay करणार', later: '⏰ नंतर', noanswer: '📵 उचलला नाही', close: '❌ नको', reply: '✍️ उत्तर', note: '📝 Note', add: '➕ नवीन', acct: '🔑 Code + PIN', answered: '✅ प्रश्न सुटला', step: '📋 Step', labels: '🏷️ Label', mt: '🏆 महा-Test आठवण' };
+// 📲 App · free: the child uses the app (logged in / notifications) and has not paid, not closed — with how much
+// they use it (Render: the last day seen, tests, minutes in 7 days), the most active on top
+async function appFree(env, withUsage = true) {
+  const { results } = await env.DB.prepare("SELECT gid, name, cls, mobile, crm, last_in, updated_at, data FROM leads WHERE mobile IS NOT NULL AND (crm IS NULL OR crm NOT IN ('paid', 'closed')) AND data LIKE '%\"app\":true%' ORDER BY updated_at DESC LIMIT 300").all();
+  const now = new Date();
+  const rows = (results || []).map(r => ({ r, d: JSON.parse(r.data) })).filter(({ d }) => d.app && !d.paid && !d.closed)
+    .map(({ r, d }) => ({ gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, updated_at: r.updated_at, tests: d.testsDone, free_total: d.freeTotal,
+      app: true, push_on: !!d.pushOn, open: WA.isOpen(d, now), offer: offerOf(d, now), labels: d.labels || [], place: d.place || '', sent: d.teamSent || 0, acct: !!(d.acct && d.acct.code) }));
+  if (!withUsage) return rows;
+  const u = await appUsage(env, rows.map(r => r.gid));
+  for (const r of rows) r.usage = u[r.gid] || null;
+  return rows.sort((a, b) => ((b.usage && b.usage.last) || 0) - ((a.usage && a.usage.last) || 0) || ((b.usage && b.usage.tests) || 0) - ((a.usage && a.usage.tests) || 0));
+}
 // ❓ parents' own questions not answered yet (the bot sent them to the team)
 async function questions(env) {
   const { results } = await env.DB.prepare("SELECT gid, name, cls, mobile, crm, last_in, updated_at, data FROM leads WHERE data LIKE '%\"question\":{%' ORDER BY updated_at DESC LIMIT 300").all();
@@ -327,6 +340,7 @@ async function crm(env, req, url, who) {
     counts.first = (await callFirst(env)).length;
     counts.noapp = (await noApp(env)).length;
     counts.q = (await questions(env)).length;
+    counts.appfree = (await appFree(env, false)).length;
     counts.team_today = Number(await S.kvGet(env, 'teamwa:' + S.istDay())) || 0;
     counts.nextyear = (await env.DB.prepare("SELECT COUNT(*) AS n FROM leads WHERE crm = 'closed' AND revisit_at IS NOT NULL AND revisit_at <= ?").bind(Date.now()).first()).n;
     const month = S.istDay().slice(0, 7);
@@ -339,6 +353,13 @@ async function crm(env, req, url, who) {
     } });
   }
   if (parts[1] === 'list' && req.method === 'GET' && url.searchParams.get('list') === 'q') return json({ success: true, data: await questions(env) });
+  if (parts[1] === 'list' && req.method === 'GET' && url.searchParams.get('list') === 'appfree') return json({ success: true, data: await appFree(env) });
+  // 🔄 Sync ↔ CRM check (Admin): every family the CRM has, by its id and number
+  if (parts[1] === 'gids' && req.method === 'GET') {
+    if (who.role !== 'admin') return adminOnly();
+    const { results } = await env.DB.prepare('SELECT gid, mobile FROM leads').all();
+    return json({ success: true, data: results || [] });
+  }
   // 📊 the caller's own day (the NKs Team app's "माझं काम")
   if (parts[1] === 'my' && req.method === 'GET') {
     const day = /^\d{4}-\d{2}-\d{2}$/.test(url.searchParams.get('day') || '') ? url.searchParams.get('day') : S.istDay();
@@ -434,7 +455,8 @@ async function crm(env, req, url, who) {
       if (!lead) return json({ success: false, message: 'Lead नाही' }, 404);
       const { results } = await env.DB.prepare('SELECT dir, kind, cost, body, status, at FROM msgs WHERE gid = ? ORDER BY at DESC, id DESC LIMIT 300').bind(gid).all();
       const steps = await fuSteps(env);
-      return json({ success: true, data: { lead, offer: offerOf(lead, new Date()), open: WA.isOpen(lead, new Date()), msgs: (results || []).reverse(), fu: fuOf({ mobile: lead.mobile }, lead, new Date(), steps), fu_steps: steps } });
+      const usage = (await appUsage(env, [gid]))[gid] || null;   // "शेवटचं app मध्ये: काल · 12 tests"
+      return json({ success: true, data: { lead, usage, offer: offerOf(lead, new Date()), open: WA.isOpen(lead, new Date()), msgs: (results || []).reverse(), fu: fuOf({ mobile: lead.mobile }, lead, new Date(), steps), fu_steps: steps } });
     }
     if (req.method !== 'POST') return json({ success: false }, 405);
     const body = await req.json().catch(() => ({}));

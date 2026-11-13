@@ -122,6 +122,31 @@ async function _newLead(gid, b) {
   return { gid: lead.gid, ...(await syncOf(lead.gid)), mobile };
 }
 
+// POST /api/guest/bot/usage { gids: [...] } — how much each family's child uses the app: the last day seen
+// (a test, a login, or the app's own usage day), the tests in the account, minutes in the last 7 days
+const usage = asyncHandler(async (req, res) => {
+  const gids = (Array.isArray(req.body?.gids) ? req.body.gids : []).map(g => String(g).toUpperCase()).filter(g => GID.test(g)).slice(0, 300);
+  if (!gids.length) return res.json({ success: true, data: {} });
+  const leads = await GuestLead.find({ gid: { $in: gids } }, 'gid converted_code').lean();
+  const codeOf = new Map(leads.map(l => [l.gid, l.converted_code || `GUEST-${l.gid}`]));
+  const codes = [...new Set([...codeOf.values()])];
+  const UsageDay = require('../models/UsageDay');
+  const since7 = new Date(Date.now() + 5.5 * 3600e3 - 7 * 864e5).toISOString().slice(0, 10);
+  const [tests, users, days] = await Promise.all([
+    Attempt.aggregate([{ $match: { student_code: { $in: codes } } }, { $group: { _id: '$student_code', n: { $sum: 1 }, last: { $max: '$submitted_at' } } }]),
+    User.find({ role: 'student', student_code: { $in: codes } }, 'student_code last_login_at').lean(),
+    UsageDay.aggregate([{ $match: { role: 'student', code: { $in: codes } } }, { $group: { _id: '$code', last: { $max: '$date' }, min7: { $sum: { $cond: [{ $gte: ['$date', since7] }, '$minutes', 0] } } } }]),
+  ]);
+  const T = new Map(tests.map(t => [t._id, t])), U = new Map(users.map(u => [u.student_code, u])), D = new Map(days.map(d => [d._id, d]));
+  const out = {};
+  for (const [gid, code] of codeOf) {
+    const t = T.get(code), u = U.get(code), d = D.get(code);
+    const last = Math.max(t?.last ? new Date(t.last).getTime() : 0, u?.last_login_at ? new Date(u.last_login_at).getTime() : 0, d?.last ? Date.parse(d.last + 'T12:00:00+05:30') : 0);
+    out[gid] = { last: last || null, tests: t?.n || 0, min7: d?.min7 || 0 };
+  }
+  res.json({ success: true, data: out });
+});
+
 // GET /api/guest/bot/lead/:gid
 const lead = asyncHandler(async (req, res) => {
   const gid = String(req.params.gid || '').toUpperCase();
@@ -215,4 +240,4 @@ const adminToken = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { ready: true, url: process.env.WA_WORKER_URL.replace(/\/$/, ''), token: BOT.adminToken(12, req.staff || null), staff: req.staff || null } });
 });
 
-module.exports = { requireBotKey, lead, action, adminToken, syncOf, config, waLogin };
+module.exports = { requireBotKey, lead, action, adminToken, syncOf, config, waLogin, usage };

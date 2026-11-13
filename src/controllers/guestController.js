@@ -470,6 +470,28 @@ exports.adminLeadPaid = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { code: acct.code, pin: lead.auto_pin || acct.pin || '', expiry, name: lead.name || student.name } });
 });
 
+// POST /api/guest/admin/app-students-backfill — once: free students who registered in the app themselves (Play
+// Store, not through the website / WhatsApp) and gave a parent's number → families in the CRM ("📲 App · free"),
+// linked to their account. Nobody gets a message. Paid students and those already in the CRM are left alone.
+exports.adminAppStudentsBackfill = asyncHandler(async (_req, res) => {
+  const users = await User.find({ role: 'student', free_tier: true, mobile: { $ne: '' } }, 'student_code name mobile assigned_batches created_at expiry_date role free_tier').lean();
+  const linked = new Set((await GuestLead.find({ converted_code: { $in: users.map(u => u.student_code) } }, 'converted_code').lean()).map(l => l.converted_code));
+  let added = 0;
+  for (const u of users) {
+    if (linked.has(u.student_code)) continue;
+    const mobile = normalizeMobile(u.mobile);
+    if (!mobile) continue;
+    const lead = await GuestLead.create({
+      gid: _newGid(), name: u.name || '', batch: (u.assigned_batches || [])[0] || '', source: 'app', ref: '',
+      parent_mobile: mobile, consent_at: u.created_at || new Date(), steps: ['opened', 'lead'],
+      converted_code: u.student_code, converted_at: u.created_at || new Date(),
+    });
+    BOT.notify(lead.gid, 'form_number', { backfill: true }, { mobile, sync: await require('./botController').syncOf(lead.gid).catch(() => ({ name: lead.name })) });
+    added++;
+  }
+  res.json({ success: true, data: { added, seen: users.length } });
+});
+
 // GET /api/guest/admin/mt-list — Admin › CRM "🏆 महा-Test": the families registered for the coming महा-Tests (the
 // next 8 days), with the parent's number — the bot may not write to them first (no free window), so the team sends
 // the reminder from its own WhatsApp / SMS. Students with full access are left out (the app reminds them).

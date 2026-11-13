@@ -35,6 +35,13 @@ export async function ping(env) {
 }
 
 // the facts the rules need about a child (name, class, free tests, prices, next महा-Test…), or null
+// how much the children use the app: { gid: { last (ms), tests, min7 } } (best effort; {} when Render is asleep)
+export async function appUsage(env, gids) {
+  if (!gids.length) return {};
+  try { return (await call(env, '/api/guest/bot/usage', { method: 'POST', body: JSON.stringify({ gids }) }, 8000)).data || {}; }
+  catch { return {}; }
+}
+
 export async function leadInfo(env, gid) {
   try { return (await call(env, `/api/guest/bot/lead/${encodeURIComponent(gid)}`, {}, 6000)).data || null; }
   catch { return null; }
