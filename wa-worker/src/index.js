@@ -243,6 +243,51 @@ async function newOnes(env) {
       tests: d.testsDone, free_total: d.freeTotal, app: d.app, open: WA.isOpen(d, now), offer: offerOf(d, now), labels: d.labels || [], place: d.place || '', sent: d.teamSent || 0,
       acct: !!(d.acct && d.acct.code), from: d.ctwaUntil ? 'ad' : d.source || d.via || '', question: d.question && !d.question.answered ? d.question : null, team: d.lastTeam || null }));
 }
+// 🎯 "आजचं काम": the team's one list — who, why, when, which message. Data (2026-11-13): families who opened the app
+// paid (3 of 8), the rest did not (0 of 23); tests come minutes after the link or not at all; children are home 5–8 pm.
+//   1 💳 pay page opened / Pay pressed / course asked in the bot — now
+//   2 📞 asked for a call / ❓ a question not answered — now
+//   3 tested, the offer running, no app (→ app with the Code + PIN) or app but not paid (→ the offer) — 5–8 pm
+//   4 new (≤ 3 days), no test after 4 h — 7–8 pm (after the bot's 6:30 reminder)
+// A family the team handled today, or set for later ("⏰ नंतर" / "📵 उचलला नाही" → tomorrow / "✅ बोललो" → its next
+// step's day), waits — unless a newer pay-page visit or call request came after that.
+async function todayList(env) {
+  const now = new Date(), t = now.getTime(), since = t - 14 * 864e5, dayStart = endOfToday(t) - 864e5 + 1;
+  const { results } = await env.DB.prepare("SELECT gid, name, cls, mobile, crm, last_in, created_at, updated_at, data FROM leads WHERE mobile IS NOT NULL AND (crm IS NULL OR crm NOT IN ('paid', 'closed')) AND (updated_at >= ?1 OR created_at >= ?1) ORDER BY updated_at DESC LIMIT 2000").bind(since).all();
+  const rows = [];
+  const ms = x => Date.parse(x || '') || 0;
+  for (const r of results || []) {
+    const d = JSON.parse(r.data);
+    if (d.paid || d.closed) continue;
+    const touched = Math.max(ms(d.lastTeam && d.lastTeam.at), ms(d.teamSentAt));
+    const waiting = d.fu && (d.fu.done || (d.fu.due && d.fu.due > t && d.fu.setAt));   // the team set it for later / done
+    const payAt = Math.max(ms(d.checkoutAt), ms(d.paySeenAt), ms(d.payWantAt));
+    const callAt = r.crm === 'call' ? (ms(d.callAt) || r.last_in || 0) : 0;
+    const q = d.question && !d.question.answered ? d.question : null;
+    const offer = offerOf(d, now);
+    let cat = 0, why = '', when = '', tpl = '', key = 0;
+    if (payAt && t - payAt < 7 * 864e5 && payAt > touched) {
+      cat = 1; when = 'लगेच'; tpl = 'offer'; key = -payAt;
+      why = d.checkoutAt && ms(d.checkoutAt) === payAt ? '💳 Pay दाबलं, पूर्ण झालं नाही' : ms(d.paySeenAt) === payAt ? `💳 Pay पान उघडलं${d.paySeenN > 1 ? ' (' + d.paySeenN + ' वेळा)' : ''}` : '💳 Bot मध्ये course मागितला';
+    } else if ((callAt && callAt > touched) || (q && ms(q.at) > touched)) {
+      cat = 2; when = 'लगेच'; key = -(callAt || ms(q && q.at));
+      why = q ? `❓ प्रश्न: "${String(q.text).slice(0, 60)}"` : '📞 Call मागितला';
+    } else if (waiting || touched >= dayStart) continue;
+    else if (d.testsDone && offer && (!d.app || !d.paid)) {
+      cat = 3; when = 'संध्याकाळी 5–8'; key = Date.parse(offer.end);
+      tpl = d.app ? 'offer' : (d.acct && d.acct.code ? 'acct' : 'result');
+      why = (d.app ? '📲 App वापरतो, pay नाही' : '📝 Test दिली, app नाही — Code + PIN ने app उघडायला मदत') + ` · 🎁 ${offer.pct}% सूट`;
+    } else if (!d.testsDone && !d.app && r.created_at && t - r.created_at < 3 * 864e5 && t - r.created_at > 4 * 3600e3 && !((d.backfilled || d.imported) && !d.lastInboundAt) && r.crm !== 'import') {
+      cat = 4; when = 'संध्याकाळी 7–8'; tpl = 'remind'; key = -r.created_at;
+      why = '🆕 नवीन — test अजून नाही';
+    }
+    if (!cat) continue;
+    rows.push({ gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, created_at: r.created_at, updated_at: r.updated_at,
+      tests: d.testsDone, free_total: d.freeTotal, app: d.app, open: WA.isOpen(d, now), offer, acct: !!(d.acct && d.acct.code), sent: d.teamSent || 0,
+      cat, why, when, tpl, no_answer: d.noAnswer || 0, _k: cat * 1e14 + key });
+  }
+  return rows.sort((a, b) => a._k - b._k).slice(0, 200).map(({ _k, ...x }) => x);
+}
 // ❓ parents' own questions not answered yet (the bot sent them to the team)
 async function questions(env) {
   const { results } = await env.DB.prepare("SELECT gid, name, cls, mobile, crm, last_in, updated_at, data FROM leads WHERE data LIKE '%\"question\":{%' ORDER BY updated_at DESC LIMIT 300").all();
@@ -351,7 +396,8 @@ async function crm(env, req, url, who) {
   const parts = url.pathname.split('/').filter(Boolean);   // crm, …
   if (parts[1] === 'summary' && req.method === 'GET') {
     const month = S.istDay().slice(0, 7);
-    const [fresh, grp, first, noapp, q, appfree, teamToday, nextyear, mc, jobsRow, costToday, lastTick, lastHook] = await Promise.all([
+    const [today, fresh, grp, first, noapp, q, appfree, teamToday, nextyear, mc, jobsRow, costToday, lastTick, lastHook] = await Promise.all([
+      todayList(env),
       newOnes(env),
       env.DB.prepare('SELECT crm, COUNT(*) AS n FROM leads GROUP BY crm').all(),
       callFirst(env), noApp(env), questions(env), appFree(env, false),
@@ -362,7 +408,7 @@ async function crm(env, req, url, who) {
       S.todayCost(env), S.kvGet(env, 'last_tick'), S.kvGet(env, 'last_webhook'),
     ]);
     const counts = {}; for (const r of grp.results || []) counts[r.crm || 'active'] = r.n;
-    Object.assign(counts, { new: fresh.length, new_untouched: fresh.filter(r => !r.sent && !r.team).length, first: first.length, noapp: noapp.length, q: q.length, appfree: appfree.length, team_today: Number(teamToday) || 0, nextyear: nextyear.n });
+    Object.assign(counts, { today: today.length, today_now: today.filter(r => r.cat <= 2).length, new: fresh.length, new_untouched: fresh.filter(r => !r.sent && !r.team).length, first: first.length, noapp: noapp.length, q: q.length, appfree: appfree.length, team_today: Number(teamToday) || 0, nextyear: nextyear.n });
     const jobs = jobsRow.n;
     return json({ success: true, data: {
       counts, cost_today: costToday, cost_month: mc?.s || 0, cap: Number(env.DAILY_CAP_RS) || 0,
@@ -372,6 +418,7 @@ async function crm(env, req, url, who) {
   }
   if (parts[1] === 'list' && req.method === 'GET' && url.searchParams.get('list') === 'q') return json({ success: true, data: await questions(env) });
   if (parts[1] === 'list' && req.method === 'GET' && url.searchParams.get('list') === 'new') return json({ success: true, data: await newOnes(env) });
+  if (parts[1] === 'list' && req.method === 'GET' && url.searchParams.get('list') === 'today') return json({ success: true, data: await todayList(env) });
   if (parts[1] === 'list' && req.method === 'GET' && url.searchParams.get('list') === 'appfree') return json({ success: true, data: await appFree(env) });
   // 🔄 Sync ↔ CRM check (Admin): every family the CRM has, by its id and number
   if (parts[1] === 'gids' && req.method === 'GET') {
@@ -577,7 +624,13 @@ async function crm(env, req, url, who) {
           lead.fu = { step: f.step, due: at, setAt: t };
           out.push(...WA.event(lead, 'call', { result: 'later', at: String(body.at || 'उद्या') }, now));
         }
-        if (res === 'noanswer') { lead.noAnswer = (lead.noAnswer || 0) + 1; lead.fu = { step: f.step, due: endOfToday() + 1, setAt: t }; }
+        if (res === 'noanswer') {
+          lead.noAnswer = (lead.noAnswer || 0) + 1;
+          // tomorrow again; the third time in a row: the next step (its message may get an answer the call did not)
+          if (lead.noAnswer % 3 === 0 && f.step < steps.length) lead.fu = { step: f.step + 1, due: endOfToday() + 1, setAt: t };
+          else lead.fu = { step: f.step, due: endOfToday() + 1, setAt: t };
+        }
+        if (res !== 'noanswer') lead.noAnswer = 0;
         if (res === 'close') { out.push(...WA.event(lead, 'call', { result: 'not_interested', reason }, now)); lead.fu = { step: f.step, done: true, setAt: t }; }
         if (lead.question && res !== 'noanswer') lead.question.answered = now.toISOString();
         lead.lastTeam = { by: who.name, at: now.toISOString(), result: res, reason };

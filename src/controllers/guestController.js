@@ -514,6 +514,18 @@ exports.adminLeadPaid = asyncHandler(async (req, res) => {
 // POST /api/guest/admin/app-students-backfill — once: free students who registered in the app themselves (Play
 // Store, not through the website / WhatsApp) and gave a parent's number → families in the CRM ("📲 App · free"),
 // linked to their account. Nobody gets a message. Paid students and those already in the CRM are left alone.
+// the family (GuestLead) for a free student who registered in the app themselves — once; also told to the bot's CRM
+async function _leadForAppStudent(u) {
+  const mobile = normalizeMobile(u.mobile);
+  if (!mobile) return null;
+  const lead = await GuestLead.create({
+    gid: _newGid(), name: u.name || '', batch: (u.assigned_batches || [])[0] || '', source: 'app', ref: '',
+    parent_mobile: mobile, consent_at: u.created_at || new Date(), steps: ['opened', 'lead'],
+    converted_code: u.student_code, converted_at: u.created_at || new Date(),
+  });
+  BOT.notify(lead.gid, 'form_number', {}, { mobile, sync: await require('./botController').syncOf(lead.gid).catch(() => ({ name: lead.name })) });
+  return lead;
+}
 exports.adminAppStudentsBackfill = asyncHandler(async (_req, res) => {
   const users = await User.find({ role: 'student', free_tier: true, mobile: { $ne: '' } }, 'student_code name mobile assigned_batches created_at expiry_date role free_tier').lean();
   const linked = new Set((await GuestLead.find({ converted_code: { $in: users.map(u => u.student_code) } }, 'converted_code').lean()).map(l => l.converted_code));
@@ -1110,10 +1122,13 @@ async function _ensureOffer(gid) {
 async function noteAccountAttempt(studentCode, quizTitle, pct, score, total) {
   const code = String(studentCode || '').trim();
   if (!code || /^GUEST-/.test(code)) return;
-  const lead = await GuestLead.findOne({ converted_code: code }, 'gid').sort({ created_at: -1 }).lean();
+  let lead = await GuestLead.findOne({ converted_code: code }, 'gid').sort({ created_at: -1 }).lean();
+  const u = await User.findOne({ role: 'student', student_code: code }, 'role free_tier expiry_date name mobile assigned_batches created_at student_code').lean();
+  if (!u || require('../utils/contentAccess').hasFullAccess(u)) return;   // paid: not the free part any more
+  // a child who registered in the app by themselves (no website / WhatsApp visit): the family now, so the first
+  // test starts the same first-payment offer (shown in the app's pay screen) and the team / bot see them
+  if (!lead) lead = await _leadForAppStudent(u);
   if (!lead) return;
-  const u = await User.findOne({ role: 'student', student_code: code }, 'role free_tier expiry_date').lean();
-  if (u && require('../utils/contentAccess').hasFullAccess(u)) return;   // paid: not the free part any more
   return noteGuestAttempt('GUEST-' + lead.gid, quizTitle, pct, score, total);
 }
 exports.noteAccountAttempt = noteAccountAttempt;

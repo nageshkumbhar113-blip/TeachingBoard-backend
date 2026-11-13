@@ -464,7 +464,7 @@
     if (t === 'ask:pin') { answer(lead, now, out, 'App → Login → "📲 WhatsApp ने login" → नवीन PIN. 1 मिनिट.'); return out; }
     if (t === 'ask:open') { answer(lead, now, out, 'App update करा (Play Store) आणि internet चालू ठेवून एकदा उघडा.'); return out; }
     if (t === 'ok') { out.push(wa(lead, now, 'धन्यवाद 🙏', mainButtons(lead, now))); return out; }
-    if (t === 'more' || t === 'call_me') { lead.crm = 'call'; out.push(wa(lead, now, '🙏 धन्यवाद! आमची team तुम्हाला लवकरच call करेल.')); out.push(log('CALL', '📞 Call request → Admin › CRM "Call करायचे" (वरती) + लाल संख्या.')); return out; }
+    if (t === 'more' || t === 'call_me') { lead.crm = 'call'; lead.callAt = now.toISOString(); out.push(wa(lead, now, '🙏 धन्यवाद! आमची team तुम्हाला लवकरच call करेल.')); out.push(log('CALL', '📞 Call request → Admin › CRM "Call करायचे" (वरती) + लाल संख्या.')); return out; }
     if (t === 'share_done') { out.push(wa(lead, now, '🙏 धन्यवाद! मित्रांनी pay केलं की तुमच्या Refer & Earn मध्ये दिसेल 👉 ' + L.rules(lead.gid))); out.push(log('SHARE', `मित्र आला की "कोणाकडून" नोंद (ref=${lead.gid}). Free असताना मित्र राखून ठेवले जातात; pay केल्यावर मोजले जातात.`)); return out; }
     if (t === 'rules') { out.push(wa(lead, now, `📄 ${L.rules(lead.gid)}\nमित्राने pay केलं तरच मोजला जातो · pay नंतर 7 दिवसांनी पक्का · तुम्ही free असताना आलेले मित्र तुम्ही pay केल्यावर मोजले जातात · तुमच्याच नंबरवरून नाही · बक्षिसासाठी पालकांची संमती + पत्ता.`)); return out; }
     if (/^q:[A-D]$/.test(t)) { const okA = t === 'q:B'; out.push(wa(lead, now, (okA ? '✅ बरोबर! फरक 4, 6, 8, 10 → 30.' : 'थोडं चुकलं 🙂 फरक 4, 6, 8 → पुढचा 10 → 30 (B).') + offerLine(lead, now), mainButtons(lead, now))); return out; }
