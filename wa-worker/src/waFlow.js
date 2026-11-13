@@ -487,8 +487,10 @@
       if (data.note) out.push(log('NOTE', data.note));
       const added = !!(data.import || data.manual);
       // an old number brought in (backfill / a list import) is not a "🆕 new" family for the team
-      if (data.backfill) lead.backfilled = true;
-      if (data.import) lead.imported = true;
+      // (only a family the bot did not know yet — one already talking here / on the website stays as it is)
+      const known = !!(lead.via || lead.lastInboundAt);
+      if (data.backfill && !known) lead.backfilled = true;
+      if (data.import && !known) lead.imported = true;
       if ((lead.via && lead.via !== 'form') || lead.lastInboundAt) return out;   // already talking on WhatsApp / in the app
       if ((data.backfill || added) && lead.via === 'form') return out;     // already in the CRM: nothing new
       lead.via = 'form';
