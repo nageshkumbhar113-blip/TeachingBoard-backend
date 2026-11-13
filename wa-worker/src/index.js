@@ -23,7 +23,7 @@ function configure(env) {
 const keyOk = (env, req) => !!env.SHARED_SECRET && sameHex(req.headers.get('X-Bot-Key') || '', env.SHARED_SECRET);
 
 // ── one lead, changed by one thing at a time ──
-async function withLead(env, gid, mobile, fn) {
+async function withLead(env, gid, mobile, fn, opts = {}) {
   const now = new Date();
   let lead = await S.getLead(env, gid);
   if (!lead) {
@@ -37,7 +37,7 @@ async function withLead(env, gid, mobile, fn) {
     lead = (await S.getLead(env, gid)) || lead;
     if (mobile) lead.mobile = mobile;
     // refresh the facts from Render now and then (best effort; Render may be asleep)
-    if (!lead.syncedAt || now - new Date(lead.syncedAt) > 6 * 3600e3) {
+    if (opts.sync !== false && (!lead.syncedAt || now - new Date(lead.syncedAt) > 6 * 3600e3)) {
       const info = await leadInfo(env, gid);
       if (info) WA.event(lead, 'sync', info, now);
       lead.syncedAt = now.toISOString();
@@ -332,23 +332,26 @@ async function noApp(env) {
   return rows.slice(0, 100);
 }
 async function crm(env, req, url, who) {
+  const wl = (gid, fn) => withLead(env, gid, null, fn, { sync: false });   // a team action: no Render round trip
   const adminOnly = () => json({ success: false, message: 'हे फक्त Admin करू शकतो' }, 403);
   const parts = url.pathname.split('/').filter(Boolean);   // crm, …
   if (parts[1] === 'summary' && req.method === 'GET') {
-    const { results } = await env.DB.prepare('SELECT crm, COUNT(*) AS n FROM leads GROUP BY crm').all();
-    const counts = {}; for (const r of results || []) counts[r.crm || 'active'] = r.n;
-    counts.first = (await callFirst(env)).length;
-    counts.noapp = (await noApp(env)).length;
-    counts.q = (await questions(env)).length;
-    counts.appfree = (await appFree(env, false)).length;
-    counts.team_today = Number(await S.kvGet(env, 'teamwa:' + S.istDay())) || 0;
-    counts.nextyear = (await env.DB.prepare("SELECT COUNT(*) AS n FROM leads WHERE crm = 'closed' AND revisit_at IS NOT NULL AND revisit_at <= ?").bind(Date.now()).first()).n;
     const month = S.istDay().slice(0, 7);
-    const mc = await env.DB.prepare("SELECT SUM(CAST(v AS REAL)) AS s FROM kv WHERE k LIKE ?").bind('cost:' + month + '%').first();
-    const jobs = (await env.DB.prepare('SELECT COUNT(*) AS n FROM jobs').first()).n;
+    const [grp, first, noapp, q, appfree, teamToday, nextyear, mc, jobsRow, costToday, lastTick, lastHook] = await Promise.all([
+      env.DB.prepare('SELECT crm, COUNT(*) AS n FROM leads GROUP BY crm').all(),
+      callFirst(env), noApp(env), questions(env), appFree(env, false),
+      S.kvGet(env, 'teamwa:' + S.istDay()),
+      env.DB.prepare("SELECT COUNT(*) AS n FROM leads WHERE crm = 'closed' AND revisit_at IS NOT NULL AND revisit_at <= ?").bind(Date.now()).first(),
+      env.DB.prepare("SELECT SUM(CAST(v AS REAL)) AS s FROM kv WHERE k LIKE ?").bind('cost:' + month + '%').first(),
+      env.DB.prepare('SELECT COUNT(*) AS n FROM jobs').first(),
+      S.todayCost(env), S.kvGet(env, 'last_tick'), S.kvGet(env, 'last_webhook'),
+    ]);
+    const counts = {}; for (const r of grp.results || []) counts[r.crm || 'active'] = r.n;
+    Object.assign(counts, { first: first.length, noapp: noapp.length, q: q.length, appfree: appfree.length, team_today: Number(teamToday) || 0, nextyear: nextyear.n });
+    const jobs = jobsRow.n;
     return json({ success: true, data: {
-      counts, cost_today: await S.todayCost(env), cost_month: mc?.s || 0, cap: Number(env.DAILY_CAP_RS) || 0,
-      last_tick: Number(await S.kvGet(env, 'last_tick')) || null, last_webhook: Number(await S.kvGet(env, 'last_webhook')) || null,
+      counts, cost_today: costToday, cost_month: mc?.s || 0, cap: Number(env.DAILY_CAP_RS) || 0,
+      last_tick: Number(lastTick) || null, last_webhook: Number(lastHook) || null,
       bot_off: env.BOT_OFF === '1', jobs, bot_number: WA.CONFIG.botNumber, team_number: WA.CONFIG.teamNumber, me: who,
     } });
   }
@@ -408,8 +411,8 @@ async function crm(env, req, url, who) {
   }
   if (parts[1] === 'fu' && parts[2] === 'list' && req.method === 'GET') {
     const now = new Date(), { rows } = await fuRows(env, now), end = endOfToday();
-    const step = Number(url.searchParams.get('step')) || 1, dueOnly = url.searchParams.get('due') === '1';
-    return json({ success: true, data: rows.filter(r => r.fu_step === step && (!dueOnly || r.fu_due <= end)).sort((a, b) => a.fu_due - b.fu_due).slice(0, 300) });
+    const all = url.searchParams.get('step') === 'all', step = Number(url.searchParams.get('step')) || 1, dueOnly = url.searchParams.get('due') === '1';
+    return json({ success: true, data: rows.filter(r => (all || r.fu_step === step) && (!dueOnly || r.fu_due <= end)).sort((a, b) => a.fu_step - b.fu_step || a.fu_due - b.fu_due).slice(0, 300) });
   }
   if (parts[1] === 'fu' && parts[2] === 'steps' && req.method === 'POST') {
     if (who.role !== 'admin') return adminOnly();
@@ -455,7 +458,7 @@ async function crm(env, req, url, who) {
       if (!lead) return json({ success: false, message: 'Lead नाही' }, 404);
       const { results } = await env.DB.prepare('SELECT dir, kind, cost, body, status, at FROM msgs WHERE gid = ? ORDER BY at DESC, id DESC LIMIT 300').bind(gid).all();
       const steps = await fuSteps(env);
-      const usage = (await appUsage(env, [gid]))[gid] || null;   // "शेवटचं app मध्ये: काल · 12 tests"
+      const usage = (await Promise.race([appUsage(env, [gid]), new Promise(r => setTimeout(() => r({}), 1200))]))[gid] || null;   // "शेवटचं app मध्ये: …" (never waits long)
       return json({ success: true, data: { lead, usage, offer: offerOf(lead, new Date()), open: WA.isOpen(lead, new Date()), msgs: (results || []).reverse(), fu: fuOf({ mobile: lead.mobile }, lead, new Date(), steps), fu_steps: steps } });
     }
     if (req.method !== 'POST') return json({ success: false }, 405);
@@ -463,26 +466,26 @@ async function crm(env, req, url, who) {
     if (!(await S.getLead(env, gid))) return json({ success: false, message: 'Lead नाही' }, 404);
     if (parts[3] === 'call') {
       if (!['will_pay', 'later', 'not_interested'].includes(body.result)) return json({ success: false, message: 'result?' }, 400);
-      const r = await withLead(env, gid, null, (lead, now) => WA.event(lead, 'call', { result: body.result, reason: String(body.reason || '').slice(0, 60), at: String(body.at || '').slice(0, 30) }, now));
+      const r = await wl(gid, (lead, now) => WA.event(lead, 'call', { result: body.result, reason: String(body.reason || '').slice(0, 60), at: String(body.at || '').slice(0, 30) }, now));
       await act(env, who, gid, { will_pay: 'paying', later: 'later', not_interested: 'close' }[body.result], body.reason || body.at || '');
       return json({ success: true, data: r });
     }
     if (parts[3] === 'team') await act(env, who, gid, 'wa', 'bot link');
-    if (parts[3] === 'team') return json({ success: true, data: await withLead(env, gid, null, (lead, now) => WA.event(lead, 'manual_wa', { text: body.text ? String(body.text).slice(0, 1000) : '' }, now)) });
+    if (parts[3] === 'team') return json({ success: true, data: await wl(gid, (lead, now) => WA.event(lead, 'manual_wa', { text: body.text ? String(body.text).slice(0, 1000) : '' }, now)) });
     if (parts[3] === 'bot-template' && who.role !== 'admin') return adminOnly();
-    if (parts[3] === 'bot-template') return json({ success: true, data: await withLead(env, gid, null, (lead, now) => WA.event(lead, 'manual_wa', { via: 'bot' }, now)) });
+    if (parts[3] === 'bot-template') return json({ success: true, data: await wl(gid, (lead, now) => WA.event(lead, 'manual_wa', { via: 'bot' }, now)) });
     if (parts[3] === 'reply') {
       // the team answers inside the bot chat — only while the window is open (free)
       const text = String(body.text || '').trim().slice(0, 1000);
       if (!text) return json({ success: false, message: 'मजकूर लिहा' }, 400);
       let closed = false;
-      await withLead(env, gid, null, (lead, now) => { if (!WA.isOpen(lead, now)) { closed = true; return []; } if (lead.question) lead.question.answered = now.toISOString(); return [{ to: 'wa', kind: 'service', cost: 0, text, buttons: [] }]; });
+      await wl(gid, (lead, now) => { if (!WA.isOpen(lead, now)) { closed = true; return []; } if (lead.question) lead.question.answered = now.toISOString(); return [{ to: 'wa', kind: 'service', cost: 0, text, buttons: [] }]; });
       if (!closed) await act(env, who, gid, 'reply', text);
       return closed ? json({ success: false, message: 'खिडकी बंद आहे — टीमच्या WhatsApp वरून पाठवा.' }, 409) : json({ success: true });
     }
     if (parts[3] === 'labels') {
       const ids = (Array.isArray(body.labels) ? body.labels : []).filter(x => /^l[a-z0-9]{3,20}$/.test(x)).slice(0, 20);
-      await withLead(env, gid, null, lead => { lead.labels = ids; return []; });
+      await wl(gid, lead => { lead.labels = ids; return []; });
       await act(env, who, gid, 'labels', ids.join(','));
       return json({ success: true });
     }
@@ -491,7 +494,7 @@ async function crm(env, req, url, who) {
       const via = body.via === 'sms' ? 'SMS' : 'WhatsApp', tpl = String(body.tpl || '').slice(0, 60);
       const steps = await fuSteps(env);
       let moved = '';
-      await withLead(env, gid, null, (lead, now) => {
+      await wl(gid, (lead, now) => {
         lead.teamSent = (lead.teamSent || 0) + 1; lead.teamSentAt = now.toISOString();
         const f = fuOf({ mobile: lead.mobile }, lead, now, steps);
         // this step's message (or "advance" from 📤 आजचे पाठवा): on to the next step, due after this step's days
@@ -509,7 +512,7 @@ async function crm(env, req, url, who) {
     }
     if (parts[3] === 'fu') {
       const steps = await fuSteps(env), t = Date.now();
-      await withLead(env, gid, null, (lead, now) => {
+      await wl(gid, (lead, now) => {
         const f = fuOf({ mobile: lead.mobile }, lead, now, steps) || { step: 1 };
         if (body.action === 'snooze') lead.fu = { step: f.step, due: endOfToday() + 1, setAt: t };                 // tomorrow
         // ⏭ the team called / did this step by hand: on to the next one, due after this step's days
@@ -525,7 +528,7 @@ async function crm(env, req, url, who) {
     if (parts[3] === 'note') { await S.addMsg(env, { gid, dir: 'log', kind: 'NOTE', body: `${who.role === 'staff' ? who.name + ': ' : ''}${String(body.text || '').slice(0, 500)}` }); await act(env, who, gid, 'note', body.text); return json({ success: true }); }
     // ❓ the parent's question was answered (on a call / from the team's phone)
     if (parts[3] === 'answered') {
-      await withLead(env, gid, null, (lead, now) => { if (lead.question) lead.question.answered = now.toISOString(); return [{ to: 'log', tag: 'Q', text: `✅ ${who.name}: प्रश्नाचं उत्तर दिलं.${body.text ? ' ' + String(body.text).slice(0, 200) : ''}` }]; });
+      await wl(gid, (lead, now) => { if (lead.question) lead.question.answered = now.toISOString(); return [{ to: 'log', tag: 'Q', text: `✅ ${who.name}: प्रश्नाचं उत्तर दिलं.${body.text ? ' ' + String(body.text).slice(0, 200) : ''}` }]; });
       await act(env, who, gid, 'answered', body.text || '');
       return json({ success: true });
     }
@@ -543,7 +546,7 @@ async function crm(env, req, url, who) {
       if (!['next', 'paying', 'later', 'noanswer', 'close'].includes(res)) return json({ success: false, message: 'result?' }, 400);
       if (['next', 'close'].includes(res) && reason.length < 2) return json({ success: false, message: 'कारण / काय बोललो ते लिहा' }, 400);
       let team = [];
-      await withLead(env, gid, null, (lead, now) => {
+      await wl(gid, (lead, now) => {
         const out = [], f = fuOf({ mobile: lead.mobile }, lead, now, steps) || { step: 1 };
         const tag = `📞 ${who.name}: ${ACT_NAMES[res]}${reason ? ' — ' + reason : ''}`;
         if (res === 'next' || res === 'paying') lead.fu = f.step >= steps.length ? { step: f.step, done: true, setAt: t } : { step: f.step + 1, due: t + ((steps[f.step - 1] || {}).wait || 0) * 864e5, setAt: t };
