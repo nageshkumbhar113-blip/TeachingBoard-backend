@@ -16,15 +16,17 @@ export async function geminiModels(env) {
 
 // the whole catalogue from Render (subjects, chapters, tests, prices, Admin's description), kept 6 h; Render asleep →
 // the last copy, else the public class list
+export let classErr = '';
 export async function classList(env, S) {
   const kept = JSON.parse((await S.kvGet(env, 'ai:classes').catch(() => null)) || 'null');
-  if (kept && Date.now() - kept.at < 6 * 3600e3) return kept.list;
+  // the full catalogue is kept 6 h; the short public list (Render's key failed / asleep) only 10 min
+  if (kept && Date.now() - kept.at < (kept.full ? 6 * 3600e3 : 600e3)) return kept.list;
   const base = env.RENDER_URL.replace(/\/$/, '');
-  let list = null;
+  let list = null, full = false;
   try {
     const r = await fetch(`${base}/api/guest/bot/course-info`, { headers: { 'X-Bot-Key': env.SHARED_SECRET || '' }, signal: AbortSignal.timeout(6000) });
-    if (r.ok) list = (await r.json()).data || null;
-  } catch {}
+    if (r.ok) { list = (await r.json()).data || null; full = !!list; } else classErr = 'course-info HTTP ' + r.status;
+  } catch (e) { classErr = 'course-info ' + e.message; }
   if (!list) {
     try {
       const r = await fetch(`${base}/api/guest/batches`, { signal: AbortSignal.timeout(5000) });
@@ -32,7 +34,7 @@ export async function classList(env, S) {
     } catch {}
   }
   if (!list) return kept ? kept.list : [];
-  await env.DB.prepare('INSERT INTO kv (k, v) VALUES (?1, ?2) ON CONFLICT(k) DO UPDATE SET v = ?2').bind('ai:classes', JSON.stringify({ at: Date.now(), list })).run().catch(() => {});
+  await env.DB.prepare('INSERT INTO kv (k, v) VALUES (?1, ?2) ON CONFLICT(k) DO UPDATE SET v = ?2').bind('ai:classes', JSON.stringify({ at: Date.now(), list, full })).run().catch(() => {});
   return list;
 }
 const rs = n => '₹' + Number(n).toLocaleString('en-IN');
@@ -58,7 +60,7 @@ export function facts(lead, now, WA, classes) {
     `Free tests: ${lead.freeTotal || 'काही'} tests पूर्ण free (login नाही, 10 मिनिटं एक test). पाल्याने आतापर्यंत दिलेल्या tests: ${lead.testsDone || 0}.`,
     lead.totalTests ? `पूर्ण course मध्ये एकूण ${lead.totalTests} tests.` : '',
     `पूर्ण course मध्ये: सगळ्या chapters चे tests, प्रत्येक प्रश्नाचं स्पष्टीकरण, notes, Exercise आणि सराव, दर रविवारी महा-Test, पालकांना progress report. Internet नसतानाही app चालतं.`,
-    price ? `फी: ${price}.` : 'फी: pay page वर.',
+    price ? `फी: ${price}. Monthly = 1 महिना, Yearly = 1 वर्ष (12 महिने) पूर्ण course उघडा. Payment UPI / Card / Net banking ने pay link वरून; pay केलं की लगेच app मध्ये course उघडतो.` : 'फी: pay page वर.',
     o ? `आत्ता पहिल्या payment वर ${o.pct}% सूट — ${WA.whenText(o.end, now)} पर्यंत.` : (lead.testsDone ? 'सध्या सूट चालू नाही.' : `पहिली free test दिली की 24 तास 50% सूट, नंतर रविवार रात्रीपर्यंत 30%.`),
     `WhatsApp वर दिवसाला 1 free test मिळते (TEST पाठवा). 2 tests नंतर उरलेल्या सगळ्या free tests app मध्ये, कधीही.`,
     `App: ${C.play} — Login → Student Code + PIN (हे आधी WhatsApp वर पाठवलेले असतात). PIN विसरला तर App › Login › "📲 WhatsApp ने login".`,
@@ -106,7 +108,8 @@ export async function aiAnswer(env, lead, question, now, WA, classes, model) {
     let out; try { out = JSON.parse(txt); } catch { return { handoff: true, answer: '', model: m, ms: Date.now() - t0, err: 'not JSON' }; }
     let answer = String(out.answer || '').trim().slice(0, 700), handoff = !!out.handoff || !answer;
     // a number or a link that is not in the facts: never send it
-    const bad = !handoff && ((answer.match(/\d[\d,]{1,}/g) || []).some(n => !fx.includes(n.replace(/,$/, ''))) || (answer.match(/https?:\/\/\S+/g) || []).some(u => !fx.includes(u.replace(/[).,]+$/, ''))));
+    const dig = answer.replace(/[०-९]/g, d => String('०१२३४५६७८९'.indexOf(d)));   // Marathi digits count too
+    const bad = !handoff && ((dig.match(/\d[\d,]{1,}/g) || []).some(n => !fx.includes(n.replace(/,$/, ''))) || (answer.match(/https?:\/\/\S+/g) || []).some(u => !fx.includes(u.replace(/[).,]+$/, ''))));
     if (bad) return { handoff: true, answer, model: m, ms: Date.now() - t0, err: 'unknown number / link' };
     return { handoff, answer: handoff ? '' : answer, model: m, ms: Date.now() - t0 };
   } catch (e) { return { handoff: true, answer: '', model: m, ms: Date.now() - t0, err: e.message }; }

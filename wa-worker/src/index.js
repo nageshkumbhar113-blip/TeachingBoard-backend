@@ -685,7 +685,7 @@ export default {
         let lead = GID.test(String(b.gid || '')) ? await S.getLead(env, b.gid) : null;
         if (!lead) { lead = WA.createLead({ gid: 'AB12CD34EF', source: 'ctwa' }, now); lead.cls = b.cls || '8th NMMS EXAM 26-27 BATCH'; lead.freeTotal = 21; lead.totalTests = 331; lead.prices = { monthly: 149, yearly: 499 }; }
         const classes = await classList(env, S), out = [];
-        if (b.facts) return json({ success: true, data: (await import('./ai.js')).facts(lead, now, WA, classes) });
+        if (b.facts) { const A = await import('./ai.js'); return json({ success: true, err: A.classErr, data: A.facts(lead, now, WA, classes) }); }
         for (const q of (b.questions || []).slice(0, 15)) out.push({ q, ...(await aiAnswer(env, lead, q, now, WA, classes, b.model)) });
         return json({ success: true, data: out });
       }
