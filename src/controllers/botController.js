@@ -27,7 +27,7 @@ async function syncOf(gid) {
   if (!lead) return null;
   const code = `GUEST-${gid}`;
   const [batch, free, first, last, batches, totalTests] = await Promise.all([
-    lead.batch ? Batch.findOne({ name: lead.batch }, 'name monthly_price yearly_price').lean() : null,
+    lead.batch ? Batch.findOne({ name: lead.batch }, 'name monthly_price yearly_price subjects.name subjects.chapters.name').lean() : null,
     g.freeTestCounts().catch(() => ({})),
     Attempt.findOne({ student_code: lead.converted_code ? { $in: [code, lead.converted_code] } : code }, 'submitted_at').sort({ submitted_at: 1 }).lean(),
     Attempt.findOne({ student_code: lead.converted_code ? { $in: [code, lead.converted_code] } : code }, 'marks_obtained max_marks score total_questions').sort({ submitted_at: -1 }).lean(),
@@ -53,6 +53,9 @@ async function syncOf(gid) {
     freeLessons: lead.batch ? (await require('../utils/contentAccess').listFreeChapters().catch(() => [])).filter(f => String(f.batch).trim().toLowerCase() === String(lead.batch).trim().toLowerCase()).length : 0,
     courses: batches.map(b => b.name),
     prices: { monthly: batch?.monthly_price || 0, yearly: batch?.yearly_price || 0 },
+    // for the bot's first message: the subjects, and whether the course has previous years' papers
+    subjects: (batch?.subjects || []).map(s => s.name),
+    prevPapers: (batch?.subjects || []).some(s => /previous|paper|प्रश्नपत्रिका|मागील/i.test(s.name) || (s.chapters || []).some(c => /previous|paper|प्रश्नपत्रिका/i.test(c.name))),
     mtNext: next ? next.starts_at : null,
     mtReg,
     paid,

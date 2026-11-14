@@ -57,12 +57,12 @@ export function facts(lead, now, WA, classes) {
   return [
     `संस्था: NKs EduOrbit — विद्यार्थ्यांसाठी online tests / सराव app (Maharashtra State Board).`,
     `या पालकाच्या पाल्याचा class: ${lead.cls || 'अजून माहीत नाही'}. नाव: ${lead.name && lead.name !== 'तुमचा पाल्य' ? lead.name : 'माहीत नाही'}.`,
-    `Free tests: ${lead.freeTotal || 'काही'} tests पूर्ण free (login नाही, 10 मिनिटं एक test). पाल्याने आतापर्यंत दिलेल्या tests: ${lead.testsDone || 0}.`,
+    `WhatsApp वर 1 demo test (login नाही, 10 मिनिटं) — ती सोडवली की course वर 50% सूट. पुढचा सराव app मध्ये (काही सराव tests app मध्ये मिळतात). पाल्याने आतापर्यंत दिलेल्या tests: ${lead.testsDone || 0}.`,
     lead.totalTests ? `पूर्ण course मध्ये एकूण ${lead.totalTests} tests.` : '',
     `पूर्ण course मध्ये: सगळ्या chapters चे tests, प्रत्येक प्रश्नाचं स्पष्टीकरण, notes, Exercise आणि सराव, दर रविवारी महा-Test, पालकांना progress report. Internet नसतानाही app चालतं.`,
-    price ? `फी: ${price}. Monthly = 1 महिना, Yearly = 1 वर्ष (12 महिने) पूर्ण course उघडा. Payment UPI / Card / Net banking ने pay link वरून; pay केलं की लगेच app मध्ये course उघडतो.` : 'फी: pay page वर.',
-    o ? `आत्ता पहिल्या payment वर ${o.pct}% सूट — ${WA.whenText(o.end, now)} पर्यंत.` : (lead.testsDone ? 'सध्या सूट चालू नाही.' : `पहिली free test दिली की 24 तास 50% सूट, नंतर रविवार रात्रीपर्यंत 30%.`),
-    `WhatsApp वर दिवसाला 1 free test मिळते (TEST पाठवा). 2 tests नंतर उरलेल्या सगळ्या free tests app मध्ये, कधीही.`,
+    price ? `फी: ${price}. Monthly = 30 दिवस, Yearly = या शैक्षणिक वर्षाच्या 30 एप्रिलपर्यंत (दोन्ही 30 एप्रिलला संपतात). Payment UPI / Card / Net banking ने pay link वरून; pay केलं की लगेच app मध्ये course उघडतो.` : 'फी: pay page वर.',
+    o ? `आत्ता पहिल्या payment वर ${o.pct}% सूट — ${WA.whenText(o.end, now)} पर्यंत.` : (lead.testsDone ? 'सध्या सूट चालू नाही.' : `Demo test सोडवली की 24 तास 50% सूट, नंतर रविवार रात्रीपर्यंत 30%.`),
+    `WhatsApp वर फक्त 1 demo test; रोज WhatsApp वर tests पाठवत नाही. पुढचे सगळे tests आणि रोजची आठवण app मध्ये.`,
     `App: ${C.play} — Login → Student Code + PIN (हे आधी WhatsApp वर पाठवलेले असतात). PIN विसरला तर App › Login › "📲 WhatsApp ने login".`,
     mt ? `महा-Test: ${mt} — सगळ्या विद्यार्थ्यांमध्ये क्रमांक, मोफत, नोंदणी इथे "महा-Test नोंदणी" बटणाने.` : 'महा-Test: दर रविवारी.',
     `Links: free test ${L.child(lead.gid)} · course / pay ${L.pay(lead.gid)}`,
@@ -84,7 +84,8 @@ const SYSTEM = `तू NKs EduOrbit चा WhatsApp सहाय्यक आह
 - सोपी मराठी (देवनागरी), 1 ते 3 छोटी वाक्यं, 60 शब्दांपेक्षा कमी, आदराने. पालक English / Hinglish मध्ये लिहिले तरी उत्तर मराठीत.
 - Link फक्त FACTS मधली आणि गरज असेल तेव्हाच.
 - handoff = true आणि answer रिकामं ठेव जर: उत्तर FACTS मध्ये नाही; पैसे कापले / payment अडकलं / refund / तक्रार; account, PIN किंवा device ची अडचण; पालक call मागतात किंवा रागावलेले आहेत; प्रश्न शिक्षण / NKs शी संबंधित नाही; तुला खात्री नाही.
-- "धन्यवाद", "ok" सारख्या मेसेजला छोटं धन्यवाद पुरे.`;
+- "धन्यवाद", "ok" सारख्या मेसेजला छोटं धन्यवाद पुरे.
+- "free" / "फ्री" हा शब्द वापरू नको: "demo test" किंवा "सराव tests" म्हण. फक्त महा-Test "मोफत" म्हणता येईल. "सगळं मोफत आहे का" विचारलं तर: 1 demo test आणि महा-Test मोफत, पूर्ण course साठी फी.`;
 
 export async function aiAnswer(env, lead, question, now, WA, classes, model) {
   const t0 = Date.now(), m = model || env.AI_MODEL || AI_MODEL_DEFAULT;

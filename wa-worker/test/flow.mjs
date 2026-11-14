@@ -12,7 +12,7 @@ let out = W.inbound(lead, 'LINK AAAA111111 राहुल', now);
 ok(out.some(x => x.to === 'do' && x.action === 'lead'), 'LINK: the number becomes a lead');
 ok(out.some(x => x.to === 'do' && x.action === 'name' && x.name === 'राहुल'), 'LINK: the name goes to Render');
 let t = texts(out);
-ok(t.length === 2 && /forward/.test(t[0]) && /^राहुल, तुझी free test/.test(t[1]) && /free=1&g=AAAA111111/.test(t[1]), 'LINK: a note, then the child\'s own message to forward', t.join(' | '));
+ok(t.length === 2 && /forward/.test(t[0]) && /^राहुल, तुझी demo test/.test(t[1]) && /free=1&g=AAAA111111/.test(t[1]), 'LINK: a note, then the child\'s own message to forward', t.join(' | '));
 ok(!t.some(x => /नाव काय/.test(x)), 'LINK with a name: the name is not asked again');
 
 // 2) LINK without a name still asks for it, and the answer gives the same two messages
@@ -20,7 +20,7 @@ lead = W.createLead({ gid: 'CCCC111111', name: '', cls: '8th', freeTotal: 18 }, 
 t = texts(W.inbound(lead, 'LINK CCCC111111', now));
 ok(t.length === 1 && /नाव काय/.test(t[0]), 'LINK without a name: asks the name', t.join(' | '));
 t = texts(W.inbound(lead, 'Sai', now));
-ok(t.length === 2 && /^Sai, तुझी free test/.test(t[1]), 'the name answer: the child\'s message to forward', t.join(' | '));
+ok(t.length === 2 && /^Sai, तुझी demo test/.test(t[1]), 'the name answer: the child\'s message to forward', t.join(' | '));
 
 // 3) the website's "next test" button after the first test: TEST <gid> as the first message
 lead = W.createLead({ gid: 'BBBB111111', name: 'Sai', cls: '8th', freeTotal: 18 }, now);
@@ -29,17 +29,17 @@ out = W.inbound(lead, 'TEST BBBB111111', now);
 t = texts(out);
 ok(out.some(x => x.to === 'do' && x.action === 'lead'), 'TEST first contact: the number becomes a lead');
 ok(/पूर्ण result/.test(t[0]) && /7\/10/.test(t[0]), 'TEST first contact: the result first', t[0]);
-ok(t.some(x => /free tests \*app मध्ये\*/.test(x)) && !t.some(x => /रोज 1 free test WhatsApp वर पाठवू/.test(x)), 'TEST first contact: the app next (not "daily test on WhatsApp?")');
-ok(!t.some(x => /आजची free test \(/.test(x)), 'TEST first contact: no second test the same day');
+ok(t.some(x => /सराव tests \*app मध्ये\*/.test(x)) && !t.some(x => /रोज 1 free test WhatsApp वर पाठवू/.test(x)), 'TEST first contact: the app next (not "daily test on WhatsApp?")');
+ok(!t.some(x => /आजची demo test \(/.test(x)), 'TEST first contact: no second test the same day');
 
 // 4) one test a day wherever it was taken: a website test today → TEST says "today's is done"
 t = texts(W.inbound(lead, 'TEST', now));
-ok(/आजची free test झाली आहे/.test(t[0]), 'TEST after today\'s website test → "today\'s is done"', t[0]);
+ok(/Demo test झाली/.test(t[0]) && /play.google.com/.test(t[0]), 'TEST after the website demo → the app or the course', t[0]);
 
 // 5) the next day TEST gives the next link
 const tomorrow = new Date(now.getTime() + 24 * 3600e3);
 t = texts(W.inbound(lead, 'TEST', tomorrow));
-ok(/आजची free test \(2\/18\)/.test(t[0]) && /free=1&g=BBBB111111/.test(t[0]), 'the next day: the next test link', t[0]);
+ok(/Demo test झाली/.test(t[0]) && !/free=1&g=BBBB111111/.test(t[0]), 'the next day: still the app or the course, no second link', t[0]);
 
 
 // 6) the unlock line: the child's course, total tests, price with the offer, the pay link; three buttons
@@ -124,15 +124,15 @@ t = texts(W.inbound(lead, 'RESULT JJJJ111111', now));
 ok(t[1] && t[1].includes('STU123') && t[1].includes('5307') && t[1].includes('play.google.com'), 'RESULT answer: then the app with the code, PIN and link', t[1]);
 const d1 = new Date(now.getTime() + 24 * 3600e3), d2 = new Date(now.getTime() + 48 * 3600e3), d3 = new Date(now.getTime() + 72 * 3600e3);
 t = texts(W.inbound(lead, 'TEST', d1));
-ok(/आजची free test \(2\/18\)/.test(t[0]), 'WhatsApp test 1', t[0]);
+ok(/Demo test झाली/.test(t[0]) && t[0].includes('STU123'), 'after the demo: app (code + PIN) or the course', t[0]);
 W.event(lead, 'test_done', { n: 2, score: 7, total: 10 }, d1);
 t = texts(W.inbound(lead, 'TEST', d2));
-ok(/आजची free test \(3\/18\)/.test(t[0]), 'WhatsApp test 2', t[0]);
+ok(/Demo test झाली/.test(t[0]) && t[0].includes('STU123') && !/free=1&g=/.test(t[0]), 'after the one demo on WhatsApp: app (code + PIN) or the course, no second link', t[0]);
 W.event(lead, 'test_done', { n: 3, score: 7, total: 10 }, d2);
 const d3b = new Date(d3.getTime() + 3600e3);
 out = W.inbound(lead, 'TEST', d3b);
 t = texts(out);
-ok(t.length >= 1 && /2 free tests झाल्या/.test(t[0]) && t[0].includes('STU123') && t[0].includes('parent-pay.html') && !/free=1&g=/.test(t[0]), 'after 2 on WhatsApp: app (code + PIN) or the course, no third link', t[0]);
+ok(t.length >= 1 && /Demo test झाली/.test(t[0]) && t[0].includes('STU123') && t[0].includes('parent-pay.html') && !/free=1&g=/.test(t[0]), 'the next day again: app or the course (once a day)', t[0]);
 ok(out.find(x => x.to === 'wa').buttons.map(b => b.id).join() === 'app,pay,call_me', 'buttons: App · Course · Call');
 t = texts(W.inbound(lead, 'app', d3b));
 ok(/Code: \*STU123\*/.test(t[0]), 'the App button: login with code + PIN', t[0]);
@@ -164,8 +164,8 @@ ok(texts(W.event(lead, 'sync', { acct: { code: 'ATH201', pin: '4826' } }, new Da
 const fri = new Date('2026-11-13T13:31:00Z');   // Friday 7:01 pm IST, 31 h after the message
 ok(W.isOpen(lead, fri), 'window still open after 31 h (ad: 72 h)');
 out = W.tick(lead, fri);
-ok(texts(out).some(x => /free test दिली का/.test(x) && x.includes('g=CTWA111111')), 'next evening: "did the child take the test?"', texts(out).join(' | '));
-let ev7 = out.find(x => /free test दिली का/.test(x.text || ''));
+ok(texts(out).some(x => /demo test दिली का/.test(x) && x.includes('g=CTWA111111')), 'next evening: "did the child take the test?"', texts(out).join(' | '));
+let ev7 = out.find(x => /demo test दिली का/.test(x.text || ''));
 ok(/50% सूट/.test(ev7.text) && ev7.text.includes('parent-pay.html?g=CTWA111111') && ev7.buttons.map(x => x.id).join() === 'got,pay,call_me', 'it also says: test → 50 % off → course, with the pay link and 💳 button', ev7.text);
 ok(ev7.text.length < 600, 'the message stays short', ev7.text.length);
 out = W.tick(lead, new Date('2026-11-14T15:01:00Z'));   // Saturday 8:31 pm
@@ -182,20 +182,20 @@ ok(/आठवण इथेच येईल/.test(t[0]) && W.isOpen(lead, new Dat
 lead = W.createLead({ gid: 'HIHI111111' }, thuAd); lead.mobile = '9822200042';
 W.event(lead, 'sync', { cls: '10th', courses: ['10th'] }, thuAd);
 t = texts(W.welcome(lead, 'hi', thuAd));
-ok(t.some(x => /10th ची free test/.test(x) && /g=HIHI111111/.test(x)) && !lead.awaiting && !W.isOpen(lead, new Date(thuAd.getTime() + 25 * 3600e3)), 'a new number ("hi"), class known: the link at once; 24 h window', t.join(' | '));
+ok(t.some(x => /10th — demo test/.test(x) && /g=HIHI111111/.test(x)) && !lead.awaiting && !W.isOpen(lead, new Date(thuAd.getTime() + 25 * 3600e3)), 'a new number ("hi"), class known: the link at once; 24 h window', t.join(' | '));
 ok(W.tick(lead, new Date(thuAd.getTime() + 31 * 3600e3)).length === 0, 'not from an ad: no reminders of its own');
 lead = W.createLead({ gid: 'ADAD111111' }, thuAd); lead.mobile = '9822200043'; lead.ctwaUntil = new Date(thuAd.getTime() + 72 * 3600e3).toISOString();
 W.event(lead, 'sync', { cls: '8th NMMS', courses: ['8th NMMS', '10th'] }, thuAd);
 t = texts(W.welcome(lead, 'Hello! Can I get more info on this?', thuAd));
-ok(/स्वागत/.test(t[0]) && t.some(x => /8th NMMS ची free test/.test(x) && /g=ADAD111111/.test(x)) && !t.some(x => /class साठी\?|नाव लिहा/.test(x)), 'ad with its class: the class test link straight away, no question', t.join(' | '));
+ok(/स्वागत/.test(t[0]) && t.some(x => /8th NMMS — demo test/.test(x) && /g=ADAD111111/.test(x)) && !t.some(x => /class साठी\?|नाव लिहा/.test(x)), 'ad with its class: the class test link straight away, no question', t.join(' | '));
 t = texts(W.tick(lead, new Date('2026-11-13T13:31:00Z')));
-ok(t.some(x => /पाल्याने free test दिली का/.test(x)), 'no name yet: "पाल्याने free test दिली का?"', t.join(' | '));
+ok(t.some(x => /पाल्याने demo test दिली का/.test(x)), 'no name yet: "पाल्याने free test दिली का?"', t.join(' | '));
 
 // WhatsApp Manager icebreakers / commands → the bot's own keywords
 lead = W.createLead({ gid: 'ICEB111111', name: 'Om', cls: '8th NMMS', freeTotal: 18 }, thuAd); lead.mobile = '9822200044';
 W.event(lead, 'sync', { prices: { monthly: 149, yearly: 499 }, mtNext: '2026-11-15T04:30:00Z' }, thuAd);
 let o2 = W.inbound(lead, '📝 Free test द्यायची आहे', thuAd);
-ok(texts(o2).some(x => /आजची free test/.test(x) && /g=ICEB111111/.test(x)), 'icebreaker "Free test द्यायची आहे" = TEST', texts(o2).join(' | '));
+ok(texts(o2).some(x => /आजची demo test/.test(x) && /g=ICEB111111/.test(x)), 'icebreaker "Free test द्यायची आहे" = TEST', texts(o2).join(' | '));
 o2 = W.inbound(lead, '/fee', thuAd);
 ok(texts(o2).some(x => /₹149/.test(x) && /parent-pay\.html\?g=ICEB111111/.test(x) && /50% सूट/.test(x)), '/fee: price, "test → 50 %", pay link', texts(o2).join(' | '));
 ok(texts(W.inbound(lead, '💳 फी किती आहे?', thuAd)).some(x => /₹149/.test(x)), 'icebreaker "फी किती आहे?" = /fee');

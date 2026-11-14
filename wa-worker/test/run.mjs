@@ -113,17 +113,16 @@ try {
   // the Worker runs on the real clock: on a Sunday (IST) TEST answers with the महा-Test instead of a daily test
   const sunday = new Date(Date.now() + 5.5 * 3600e3).getUTCDay() === 0;
   await signed(msg('919811100001', 'TEST')); await waitSent(4);
-  if (sunday) ok(/आज महा-Test चा दिवस/.test(textOf(sent[3])), 'TEST on Sunday → the महा-Test', textOf(sent[3]));
-  // one free test a day wherever it was taken: the child's first test was today → "today's is done" (+ the app)
-  else ok(/आजची free test झाली आहे/.test(textOf(sent[3])) && /play\.google\.com/.test(textOf(sent[3])), 'TEST after today\'s test → "today\'s is done" + the app', textOf(sent[3]));
+  // one demo on WhatsApp (owner 2026-11-14): after it, TEST → the app (Code + PIN) or the course, any day
+  ok(sunday || /Demo test झाली/.test(textOf(sent[3])) && /play\.google\.com/.test(textOf(sent[3])), 'TEST after the demo → the app or the course', textOf(sent[3]));
   ok(sent[3].interactive?.type === 'button', '≤3 short buttons → reply buttons');
-  await signed(msg('919811100001', 'TEST')); await waitSent(5);
-  if (sunday) ok(/आज महा-Test चा दिवस/.test(textOf(sent[4])), 'second TEST on Sunday → the महा-Test again', textOf(sent[4]));
-  else ok(/आजची free test झाली आहे/.test(textOf(sent[4])), 'second TEST the same day → "today\'s is done"', textOf(sent[4]));
+  const nT = sent.length;
+  await signed(msg('919811100001', 'TEST')); await sleep(2500);
+  ok(sent.length === nT, 'second TEST within 6 h → no new answer (owner: the bot answers less)', sent.length - nT);
 
   // 5) the price question uses Render's real prices
-  await signed(msg('919811100001', 'ask:fee', 'button')); await waitSent(6);
-  ok(/Monthly ₹200 · Yearly ₹1,500/.test(textOf(sent[5])), 'fee answer from the class prices', textOf(sent[5]));
+  await signed(msg('919811100001', 'ask:fee', 'button')); await waitSent(nT + 1);
+  ok(/Monthly ₹200 · Yearly ₹1,500/.test(textOf(sent[nT])), 'fee answer from the class prices', textOf(sent[nT]));
 
   // 6) jobs to Render: save the number (+ Meta Lead) — run by the tick
   r = await tick();
@@ -131,9 +130,10 @@ try {
 
   // 7) the child's next test → the result comes by itself; then "उद्याची पाठवा" → the share message after the 2nd test
   r = await ev(A, 'test_done', { score: 7, total: 10, weak: 'वेन आकृती' });
-  await waitSent(7);
+  const nR = sent.length;
+  await waitSent(nR + 1);
   // (a Saturday-evening महा-Test reminder from the tick may come in between: find by text, not by place)
-  const after = () => sent.slice(6).map(textOf);
+  const after = () => sent.slice(nR - 1).map(textOf);
   ok(after().some(x => /Rahul ने आजची test दिली: 7\/10/.test(x)), 'test result sent to the parent', after().join(' | '));
   const n0 = sent.length;
   await signed(msg('919811100001', 'next', 'button')); await waitSent(n0 + 2);
@@ -144,7 +144,7 @@ try {
   const before = sent.length;
   await signed(msg('919822200002', 'hi')); await waitSent(before + 1); await sleep(1500);
   const welcomeMsgs = sent.slice(before).filter(m => m.to === '919822200002').map(textOf);
-  ok(welcomeMsgs.some(x => /स्वागत/.test(x)) && welcomeMsgs.some(x => /free test/.test(x)), 'unknown number → welcome + the free test (or the class / name asked)', welcomeMsgs.join(' | '));
+  ok(welcomeMsgs.some(x => /स्वागत/.test(x)) && welcomeMsgs.some(x => /demo test/.test(x)), 'unknown number → welcome + the free test (or the class / name asked)', welcomeMsgs.join(' | '));
 
   // 9) a form-number lead (no WhatsApp): nothing is sent, it waits in the call list
   const n9 = sent.length;

@@ -33,7 +33,8 @@
     missLimit: 2,                 // (only with autoTemplates) closed-window days without a reply → stop
     revisit: { month: 6, day: 1 },// a closed lead comes back in Admin on this date of the next year (June 1: new school year)
     reportEvery: 5,               // a short report + pay link after every N free tests
-    waMaxTests: 2,                // free tests sent on WhatsApp; after these: "the app (all free tests) or the course" (owner, 2026-11-08)
+    waMaxTests: 1,
+    dailyReplies: 8,              // answered messages a day from one family; then the team (owner 2026-11-14)                // free tests sent on WhatsApp; after these: "the app (all free tests) or the course" (owner, 2026-11-08)
     hotAfterDays: 7,              // still taking tests but not paid after N days → hot call list
     dailyTimes: [{ id: '18', label: 'संध्याकाळी 6', h: 18 }, { id: '19', label: '7', h: 19 }, { id: '20', label: '8', h: 20 }],
     mahaTest: { dow: 0, h: 10, m: 0, remindH: 8, resultH: 12 },
@@ -142,12 +143,14 @@
     const cost = CONFIG.prices[kind] || 0;
     if (opt.own) lead.unanswered++;
     lead.waCount++; lead.cost = Math.round((lead.cost + cost) * 1000) / 1000;
-    return { to: 'wa', kind, cost, text: grammar(text), buttons: buttons || [] };
+    return { to: 'wa', kind, cost, text: grammar(text), buttons: (buttons || []).map(b => ({ ...b, label: noFree(b.label) })) };
   }
   const push = (text, buttons) => ({ to: 'push', text: grammar(text), buttons: buttons || [] });
   // the placeholder name in a sentence: "तुमचा पाल्य ची" → "तुमच्या पाल्याची"
   const GRAM = { 'ची': 'ची', 'चा': 'चा', 'चे': 'चे', 'चं': 'चं', 'ने': 'ने', 'साठी': 'साठी', 'ला': 'ला', 'च्या': 'च्या' };
-  const grammar = text => String(text).replace(/तुमचा पाल्य (च्या|ची|चा|चे|चं|ने|साठी|ला)(?![\p{L}\p{M}])/gu, (_, x) => 'तुमच्या पाल्या' + GRAM[x]);
+  // owner 2026-11-14: the word "free" made parents expect everything free — on WhatsApp it is a demo test / सराव
+  const noFree = t => String(t).replace(/\bfree tests\b/gi, 'सराव tests').replace(/\bfree test\b/gi, 'demo test').replace(/\bfree धडे/g, 'नमुना धडे').replace(/\bfree धडा/g, 'नमुना धडा').replace(/फ्री टेस्ट/g, 'demo test');
+  const grammar = text => noFree(String(text)).replace(/तुमचा पाल्य (च्या|ची|चा|चे|चं|ने|साठी|ला)(?![\p{L}\p{M}])/gu, (_, x) => 'तुमच्या पाल्या' + GRAM[x]);
   // a message the team sends by hand from its own WhatsApp (not the bot number): free; Admin opens wa.me with this text
   // the team's number shown to parents ("📞 प्रश्न: 83904 84545"); '' while CONFIG.teamNumber is the placeholder
   const teamNo = () => (/^91[6-9]\d{9}$/.test(CONFIG.teamNumber) ? CONFIG.teamNumber.slice(2) : '');
@@ -167,18 +170,18 @@
   const canPush = lead => lead.app && lead.pushOn;
 
   // ── texts ──
-  const HINT = '\n👉 पुढची free test हवी तेव्हा फक्त *TEST* पाठवा.';
+  const HINT = '';   // no "send TEST for the next one": one demo on WhatsApp, the rest in the app
   const freeWhat = lead => lead.kind === 'regular' ? 'free धडे' : 'free tests';
   // the free account: "Code ABC123 · PIN 4821" (PIN '' = the one they chose themselves)
   const acctLine = lead => lead.acct && lead.acct.code ? `👤 Code: *${lead.acct.code}* · 🔑 PIN: *${lead.acct.pin || 'तुमचाच'}*` : '';
   const appText = lead => lead.app ? '' : lead.acct && lead.acct.code
     ? `\n\n📲 ${lead.name} चं app account तयार — सगळ्या ${freeWhat(lead)} app मध्ये:\n${acctLine(lead)}\nApp 👇 Code + PIN टाका\n${CONFIG.play}`
     : `\n\nहवं असल्यास app install करा आणि सर्व उपलब्ध ${freeWhat(lead)} ${lead.kind === 'regular' ? 'पाहा' : 'सोडवा'} 👇\n${CONFIG.play}`;
-  const tail = lead => (lead.kind === 'regular' ? '\n👉 पुढचा free धडा हवा तेव्हा फक्त *TEST* पाठवा.' : HINT) + appText(lead);
+  const tail = lead => appText(lead);
   // after CONFIG.waMaxTests links on WhatsApp: the rest of the free part is in the app, or the whole course
   function appOrCourse(lead, now, out, own) {
     lead.appAsked = dayKey(now);
-    out.push(wa(lead, now, `✅ WhatsApp वरच्या ${CONFIG.waMaxTests} free ${lead.kind === 'regular' ? 'धडे' : 'tests'} झाल्या.\nपुढे दोन पर्याय:\n\n1️⃣ 📲 *App मध्ये* सगळ्या उरलेल्या ${freeWhat(lead)} — रोज आठवण पण app मधून${lead.acct && lead.acct.code ? '\n' + acctLine(lead) : ''}\n${CONFIG.play}\n\n2️⃣ 🔓 *पूर्ण course* उघडा${unlockText(lead, now)}`,
+    out.push(wa(lead, now, `✅ Demo test झाली. पुढचा सराव:\n\n1️⃣ 📲 *App मध्ये* सराव tests — रोज आठवण पण app मधून${lead.acct && lead.acct.code ? '\n' + acctLine(lead) : ''}\n${CONFIG.play}\n\n2️⃣ 🔓 *पूर्ण course* उघडा${unlockText(lead, now)}`,
       lead.paid ? [] : [{ id: 'app', label: '📲 App' }, { id: 'pay', label: '💳 Course उघडा' }, { id: 'call_me', label: '📞 Call हवा' }], { own }));
     out.push(log('APP', `WhatsApp वर ${CONFIG.waMaxTests} tests झाल्या → app (Code + PIN) किंवा course. पुढच्या tests WhatsApp वर नाहीत.`));
   }
@@ -200,8 +203,8 @@
     const o = offerNow(lead, now), on = !!o;
     const price = priceText(lead, on, now);
     const what = lead.kind === 'regular'
-      ? `✅ सगळ्या विषयांचे सगळे धडे${lead.freeLessons ? ` (आत्ता ${lead.freeLessons} free)` : ''}: Notes · स्वाध्याय उत्तरं · सराव\n✅ Internet नसतानाही app मध्ये · पालकांना progress report`
-      : `✅ सगळे ${lead.totalTests ? lead.totalTests + ' ' : ''}tests${lead.freeTotal ? ` (आत्ता ${lead.freeTotal} free)` : ''} · प्रत्येक प्रश्नाचं स्पष्टीकरण\n✅ Notes, Exercise आणि सराव · दर रविवारी महा-Test · पालकांना progress report`;
+      ? `✅ सगळ्या विषयांचे सगळे धडे: Notes · स्वाध्याय उत्तरं · सराव\n✅ Internet नसतानाही app मध्ये · पालकांना progress report`
+      : `✅ सगळे ${lead.totalTests ? lead.totalTests + ' ' : ''}tests · प्रत्येक प्रश्नाचं स्पष्टीकरण\n✅ Notes, Exercise आणि सराव · दर रविवारी महा-Test · पालकांना progress report`;
     return `\n\n🔓 *${lead.cls || 'पूर्ण'} course* — ${lead.name} साठी:\n` + what +
       (price ? `\n💳 ${price}${on ? ` (${o.pct}% सूट ${whenText(o.end, now)} पर्यंत)` : ''}` : '') +
       `\n👉 ${L.pay(lead.gid)}`;
@@ -239,6 +242,11 @@
     if (lead.kind === 'regular' ? lead.freeLessons && lead.lessonsSent >= lead.freeLessons : lead.testsDone >= lead.freeTotal) {
       out.push(wa(lead, now, lead.kind === 'regular' ? `🎉 ${lead.name} चे सगळे ${lead.freeLessons} free धडे झाले! पुढचे धडे 👇\n${L.pay(lead.gid)}` : `🎉 ${lead.name} चे सगळे ${lead.freeTotal} free tests पूर्ण! पुढचे chapters 👇\n${L.pay(lead.gid)}`, [], { own })); return;
     }
+    // the demo is done (on WhatsApp or the website): the rest is in the app or the course — once a day, then quiet
+    if (!lead.paid && ((lead.waTests || 0) >= CONFIG.waMaxTests || (lead.testsDone || 0) >= CONFIG.waMaxTests)) {
+      if (lead.appAsked === dayKey(now)) { out.push(log('LIMIT', 'Demo test झाली; आज app / course सांगितलं आहे → पुन्हा उत्तर नाही.')); return; }
+      appOrCourse(lead, now, out, own); return;
+    }
     if (isMtDay(now, lead)) { out.push(wa(lead, now, `🏆 आज महा-Test चा दिवस. ${lead.mtReg ? `${lead.name} ने ${whenText(nextMahaTest(now, lead) || now, now)} ला याच link वरून द्यायचा 👇\n${L.child(lead.gid)}` : 'नोंदणी करायची?'}\nउद्यापासून पुन्हा रोजची free test.`, lead.mtReg ? [] : [{ id: 'mt_reg', label: '🏆 नोंदणी' }], { own })); return; }
     if (lead.testDay === dayKey(now)) {
       const t = CONFIG.dailyTimes.find(x => x.id === lead.daily);
@@ -246,7 +254,7 @@
       out.push(log('LIMIT', 'WhatsApp वर दिवसाला 1 free test → आजची आधीच दिली.'));
       return;
     }
-    if (!lead.paid && (lead.waTests || 0) >= CONFIG.waMaxTests) { appOrCourse(lead, now, out, own); return; }
+
     lead.testDay = dayKey(now);
     lead.waTests = (lead.waTests || 0) + 1;
     if (lead.kind === 'regular') {
@@ -304,10 +312,22 @@
   }
   // owner (2026-11-12): a parent from a class's ad is not asked again — the class's test link goes at once (to forward
   // or open here); the child types the name on the website, and the free account (Code + PIN) follows from there
+  // 🎯 the course in one message (owner's text 2026-11-14), then "solve the demo, get 50 %"
+  function courseInfo(lead, now, hello) {
+    const subj = (lead.subjects || []).filter(x => !/paper|practice|सराव|आकृती/i.test(x)).slice(0, 8);
+    const price = priceText(lead, false, now);
+    const exam = lead.kind !== 'regular';
+    return `${hello ? 'नमस्कार 🙏 NKs EduOrbit मध्ये स्वागत!\n\n' : ''}🎯 *${lead.cls} — पूर्ण तयारी एका app मध्ये*\n` +
+      `✅ ${exam ? (/nmms/i.test(lead.cls || '') ? 'NMMS' : 'परीक्षेच्या') + ' च्या pattern नुसार प्रश्न' : 'Board pattern नुसार प्रश्न'}${lead.prevPapers ? ' · ✅ मागच्या वर्षांच्या पेपरचं solution' : ''}\n` +
+      `✅ प्रत्येक प्रश्नाची trick / स्पष्टीकरण${subj.length ? ' · ✅ सगळे विषय: ' + subj.join(', ') : ''}\n` +
+      `✅ Notes · दर रविवारी महा-Test · पालकांना progress report` +
+      (price ? `\n💳 ${price.replace(/Monthly /, '').replace(/ · Yearly /, '/महिना · ')} (30 एप्रिलपर्यंत)` : '') +
+      `\n\n🎁 *Demo test सोडवा आणि course वर 50% सूट मिळवा* 👇${hello ? teamLine() : ''}`;
+  }
   function linkFirst(lead, now, out, hello) {
     lead.awaiting = null;
-    out.push(wa(lead, now, `${hello ? 'नमस्कार 🙏 NKs EduOrbit मध्ये स्वागत!\n' : ''}👇 खालचा मेसेज पाल्याला *forward* करा, किंवा याच phone वर उघडा.\nTest दिली की result आणि क्रमांक इथेच येईल.${hello ? teamLine() : ''}`));
-    out.push(wa(lead, now, `${lead.cls} ची free test 📝 (10 मिनिटं, login नाही)\n👇\n${L.child(lead.gid)}`));
+    out.push(wa(lead, now, courseInfo(lead, now, hello)));
+    out.push(wa(lead, now, `📝 ${lead.cls} — demo test (10 मिनिटं, login नाही)\n👇 पाल्याला *forward* करा किंवा याच phone वर उघडा\n${L.child(lead.gid)}\nगुण आणि क्रमांक इथेच येतील.`));
     if (lead.ctwaUntil && !lead.mtReg && lead.mtNext && new Date(lead.mtNext) > now)
       out.push(wa(lead, now, `🏆 ${whenText(new Date(lead.mtNext), now)} ला ${lead.cls} चा महा-Test — सगळ्यांमध्ये क्रमांक कळेल. नोंदणी करू? (मोफत)`, [{ id: 'mt_reg', label: '🏆 हो, नोंदणी करा' }]));
     out.push(log('CRM', `Class माहीत (${lead.cls}) → test ची link लगेच, काही विचारलं नाही. नाव मूल website वर लिहील; मग app account (Code + PIN) इथे.`));
@@ -325,7 +345,7 @@
     else { askName(lead, now, out, true); return out; }   // nothing known about the class and no list (Render asleep): the name first
     // the first message was an icebreaker / command (fee, call, महा-Test): answer that too
     const first = alias(String(raw || ''));
-    if (['fee', 'call_me', 'mt_reg'].includes(first)) out.push(...inbound(lead, first, now).filter(x => !(first === 'mt_reg' && x.to === 'wa' && /नोंदणी करू/.test(x.text || ''))));
+    if (['fee', 'call_me', 'mt_reg'].includes(first)) out.push(...inbound0(lead, first, now).filter(x => !(first === 'mt_reg' && x.to === 'wa' && /नोंदणी करू/.test(x.text || ''))));
     return out;
   }
 
@@ -353,7 +373,28 @@
     if (/^(हो|ho|yes|ha|haa|हा|हां|ho na|ok ho|हो चालेल|chalel|चालेल)$/.test(x)) return lead.courseAsked && lead.testsDone ? 'pay' : 'hello';
     return '';
   }
+  // owner 2026-11-14: the bot answers less — the same words again within 6 h (TEST, hi, the ad's text) get no new
+  // answer, and after CONFIG.dailyReplies answered messages in a day the team takes over (one "team will call")
   function inbound(lead, raw, now) {
+    const t = String(raw || '').trim().toLowerCase(), day = dayKey(now);
+    if (/^(stop|start)$/.test(t)) return inbound0(lead, raw, now);
+    if (lead.rDay !== day) { lead.rDay = day; lead.rN = 0; lead.rCapped = false; }
+    const again = lead.lastRaw && lead.lastRaw.t === t && now - new Date(lead.lastRaw.at) < 6 * H && !BUTTON_IDS.includes(t) && !/^[a-z_]+:/.test(t);
+    lead.lastRaw = { t, at: now.toISOString() };
+    if (again || lead.rCapped) {
+      lead.lastInboundAt = now.toISOString(); lead.unanswered = 0;   // the window stays open; nothing new to say
+      return [log('LIMIT', again ? 'तोच मेसेज 6 तासांत पुन्हा → उत्तर नाही.' : `आज ${CONFIG.dailyReplies} उत्तरं झाली → team कडे (उत्तर नाही).`)];
+    }
+    const out = inbound0(lead, raw, now);
+    if (out.some(o => o.to === 'wa')) lead.rN++;
+    if (lead.rN > CONFIG.dailyReplies) {
+      lead.rCapped = true; lead.crm = 'call'; lead.callAt = now.toISOString();
+      return [...out.filter(o => o.to !== 'wa'), wa(lead, now, `🙏 तुमचे प्रश्न आमच्या team कडे दिले आहेत — team तुम्हाला लवकरच call करेल.${teamLine()}`),
+        log('CALL', `आज ${CONFIG.dailyReplies} पेक्षा जास्त मेसेज → team call करेल (🎯 आजचं काम · 📞).`)];
+    }
+    return out;
+  }
+  function inbound0(lead, raw, now) {
     const out = [];
     const t = alias(String(raw || '').trim());
     const up = t.toUpperCase();
@@ -395,9 +436,9 @@
         else out.push(wa(lead, now, 'नमस्कार 🙏 काय मदत करू?', mainButtons(lead, now)));
         return out;
       }
-      if (m === 'fee' || m === 'pay') { if (m === 'pay') lead.payWantAt = now.toISOString(); return inbound(lead, m === 'fee' ? 'fee' : 'pay', now); }
-      if (m === 'TEST') return inbound(lead, 'TEST', now);
-      if (m === 'ok') return inbound(lead, 'ok', now);
+      if (m === 'fee' || m === 'pay') { if (m === 'pay') lead.payWantAt = now.toISOString(); return inbound0(lead, m === 'fee' ? 'fee' : 'pay', now); }
+      if (m === 'TEST') return inbound0(lead, 'TEST', now);
+      if (m === 'ok') return inbound0(lead, 'ok', now);
     }
     if (kw === 'RESULT' || kw === 'VERIFY') {
       const first = !lead.via; lead.via = lead.via || 'wa';
@@ -513,7 +554,7 @@
     if (type === 'sync') {
       // fresh facts from the server (name, class, free tests, courses, prices, next महा-Test, paid, app…); no message
       const hadAcct = !!(lead.acct && lead.acct.code);
-      for (const k of ['name', 'cls', 'freeTotal', 'totalTests', 'kind', 'freeLessons', 'courses', 'prices', 'mtNext', 'mtReg', 'paid', 'app', 'pushOn', 'mobile', 'testsDone', 'acct']) if (data[k] !== undefined && data[k] !== null && !((k === 'cls' || k === 'name') && !data[k])) lead[k] = data[k];
+      for (const k of ['subjects', 'prevPapers', 'name', 'cls', 'freeTotal', 'totalTests', 'kind', 'freeLessons', 'courses', 'prices', 'mtNext', 'mtReg', 'paid', 'app', 'pushOn', 'mobile', 'testsDone', 'acct']) if (data[k] !== undefined && data[k] !== null && !((k === 'cls' || k === 'name') && !data[k])) lead[k] = data[k];
       // a family that started on WhatsApp: the free account comes after the name — one message with it
       if (!hadAcct && lead.acct && lead.acct.code && lead.acct.pin && lead.welcomed && !lead.awaiting && !lead.app && !lead.paid && isOpen(lead, now))
         out.push(wa(lead, now, `📲 ${lead.name} चं app account पण तयार — सगळ्या ${freeWhat(lead)} app मध्ये, रोजची आठवण app मधून:\n${acctLine(lead)}\nApp 👇 Login → Code आणि PIN टाका\n${CONFIG.play}`));
@@ -640,7 +681,7 @@
     } });
     // 2) the daily free test, from the day after the first test, not on Sunday
     const choice = CONFIG.dailyTimes.find(x => x.id === lead.daily);
-    if ((choice || canPush(lead)) && !lead.paid) {
+    if (canPush(lead) && !lead.paid) {   // owner 2026-11-14: no daily tests on WhatsApp — the app reminds
       for (let d = 1; d <= 21; d++) {
         const base = atIST(first, choice ? choice.h : 19, 0, d);
         if (isMtDay(base, lead)) continue;
