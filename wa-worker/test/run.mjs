@@ -132,9 +132,13 @@ try {
   // 7) the child's next test → the result comes by itself; then "उद्याची पाठवा" → the share message after the 2nd test
   r = await ev(A, 'test_done', { score: 7, total: 10, weak: 'वेन आकृती' });
   await waitSent(7);
-  ok(/Rahul ने आजची test दिली: 7\/10/.test(textOf(sent[6])), 'test result sent to the parent', textOf(sent[6]));
-  await signed(msg('919811100001', 'next', 'button')); await waitSent(9);
-  ok(/उद्या पुढची पाठवतो/.test(textOf(sent[7])) && /ओळखीच्या विद्यार्थ्यांना/.test(textOf(sent[8])), 'tomorrow + the courses/share message', textOf(sent[8]));
+  // (a Saturday-evening महा-Test reminder from the tick may come in between: find by text, not by place)
+  const after = () => sent.slice(6).map(textOf);
+  ok(after().some(x => /Rahul ने आजची test दिली: 7\/10/.test(x)), 'test result sent to the parent', after().join(' | '));
+  const n0 = sent.length;
+  await signed(msg('919811100001', 'next', 'button')); await waitSent(n0 + 2);
+  const nx = sent.slice(n0).map(textOf);
+  ok(nx.some(x => /उद्या पुढची पाठवतो/.test(x)) && nx.some(x => /ओळखीच्या विद्यार्थ्यांना/.test(x)), 'tomorrow + the courses/share message', nx.join(' | '));
 
   // 8) an unknown number without a code → a free welcome
   const before = sent.length;

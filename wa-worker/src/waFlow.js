@@ -215,8 +215,6 @@
       unlockButtons(lead), { template: 'utility' }));
     // the app: where the rest of the free tests, the daily test and the offer's reminders are (data: app → 3 of 8 paid, no app → 0 of 23)
     if (!lead.app && !lead.paid) appPitch(lead, now, out, false);
-    else if (!lead.daily && !lead.paid && !canPush(lead)) out.push(wa(lead, now, `📝 रोज 1 free test WhatsApp वर पाठवू? ${lead.cls ? lead.cls + ' चे ' : ''}${lead.freeTotal} free tests आहेत. कोणत्या वेळी?`,
-      [...CONFIG.dailyTimes.map(t => ({ id: 'daily:' + t.id, label: t.label })), { id: 'daily:no', label: 'नको' }], { template: 'utility' }));
   }
   // 📲 the app, on its own (short): the rest of the free tests there, with the Code + PIN
   function appPitch(lead, now, out, own) {
@@ -342,9 +340,11 @@
   // free text (not a button / keyword) → what the parent means; '' = not sure (the usual handling)
   function meaning(t, lead) {
     const x = t.trim().toLowerCase().replace(/[?!.,🙏]+/g, ' ').replace(/\s+/g, ' ').trim();
-    if (!x || x.length > 60) return '';
+    if (!x || x.length > 60) return /can i get more info/.test(x) ? 'hello' : '';
     if (/(^|\s)(fee|fees|फी|फीस|फिस|किंमत|price|charges?|rate)(\s|$)|kiti\s*(fee|fees|paise|rupaye|charge)|किती\s*(पैसे|रुपये|फी)|पैसे किती/.test(x)) return 'fee';
-    if (/admission|प्रवेश|join|कोर्स|course|buy|घ्यायच|खरेदी|subscribe|enroll/.test(x)) return 'pay';
+    if (/admission|प्रवेश|join|(कोर्स|course)\s*(घ्यायच|हवा|घेणार|buy)|^(कोर्स|course)$|buy|खरेदी|subscribe|enroll/.test(x)) return 'pay';
+    if (/can i get more info|more info on this|माहिती हवी|माहिती द्या|info pathva|details/.test(x)) return 'hello';
+    if (/^(thank you|thanks|thank u|thanku|thx|धन्यवाद|ok|okay|ओके|ठीक आहे|thik ahe|👍|🙏)( (sir|madam|मॅडम|सर|ji|जी))?$/.test(x)) return 'ok';
     if (/^(nmms|test|टेस्ट|link|लिंक|परीक्षा|exam|free test|फ्री टेस्ट)( (link|पाठवा|द्या|pathva|dya|please|pls))?$/.test(x)) return 'TEST';
     if (/^(hi+|hello+|hey|hlo|हाय|हॅलो|नमस्कार|namaskar|namaste|नमस्ते|good morning|सुप्रभात)( (sir|madam|मॅडम|सर|ji|जी))?$/.test(x)) return 'hello';
     if (/^(हो|ho|yes|ha|haa|हा|हां|ho na|ok ho|हो चालेल|chalel|चालेल)$/.test(x)) return lead.courseAsked && lead.testsDone ? 'pay' : 'hello';
@@ -360,6 +360,7 @@
     if ((lead.crm === 'form' || lead.crm === 'import') && up !== 'STOP') { lead.crm = null; out.push(log('RESUME', 'Form ने नंबर दिलेल्या पालकांनी reply दिला → WhatsApp प्रवास सुरू.')); }
     if (up === 'STOP') { lead.closed = 'STOP'; lead.stopped = true; out.push({ to: 'wa', kind: 'service', cost: 0, text: '🙏 ठीक आहे, आता मेसेज बंद. पुन्हा हवं असेल तर START पाठवा.', buttons: [] }); return out; }
     if (up === 'START' && lead.closed === 'STOP') { lead.closed = null; lead.stopped = false; out.push(wa(lead, now, '🙏 परत स्वागत!', mainButtons(lead, now))); return out; }
+    if (/^\[(reaction|sticker|unsupported|unknown)\]$/i.test(t)) return out;
     const kw = up.split(/\s+/)[0];
     if (lead.awaiting === 'question' && !/^[a-z_]+:/i.test(t) && !['TEST', 'STOP'].includes(kw) && !BUTTON_IDS.includes(t)) {
       lead.awaiting = null; askTeam(lead, now, out, t, true); return out;
@@ -393,6 +394,7 @@
       }
       if (m === 'fee' || m === 'pay') { if (m === 'pay') lead.payWantAt = now.toISOString(); return inbound(lead, m === 'fee' ? 'fee' : 'pay', now); }
       if (m === 'TEST') return inbound(lead, 'TEST', now);
+      if (m === 'ok') return inbound(lead, 'ok', now);
     }
     if (kw === 'RESULT' || kw === 'VERIFY') {
       const first = !lead.via; lead.via = lead.via || 'wa';
@@ -425,7 +427,7 @@
     }
     if (kw === 'TEST' || t === 'टेस्ट' || t === 'पुढची' || kw === 'PUSH') {
       lead.stopped = false; testLink(lead, now, out, false);
-      if (!lead.daily && !lead.paid && !lead.app && !(lead.acct && lead.acct.code)) out.push(wa(lead, now, lead.kind === 'regular' ? '📚 असा रोज 1 free धडा पाठवू? कोणत्या वेळी?' : '📝 अशी रोज 1 free test पाठवू? कोणत्या वेळी?', [...CONFIG.dailyTimes.map(x => ({ id: 'daily:' + x.id, label: x.label })), { id: 'daily:no', label: 'नको' }])); out.push(log(kw === 'PUSH' ? 'PUSH' : 'TEST', kw === 'PUSH' ? 'Push चं 💬 WhatsApp बटण → खिडकी 24 तास.' : 'पालकाने स्वतः TEST मागितलं → मोफत, खिडकी 24 तास.')); return out; }
+      if (lead.kind === 'regular' && !lead.daily && !lead.paid && !lead.app && !(lead.acct && lead.acct.code)) out.push(wa(lead, now, lead.kind === 'regular' ? '📚 असा रोज 1 free धडा पाठवू? कोणत्या वेळी?' : '📝 अशी रोज 1 free test पाठवू? कोणत्या वेळी?', [...CONFIG.dailyTimes.map(x => ({ id: 'daily:' + x.id, label: x.label })), { id: 'daily:no', label: 'नको' }])); out.push(log(kw === 'PUSH' ? 'PUSH' : 'TEST', kw === 'PUSH' ? 'Push चं 💬 WhatsApp बटण → खिडकी 24 तास.' : 'पालकाने स्वतः TEST मागितलं → मोफत, खिडकी 24 तास.')); return out; }
     if (kw === 'MAHA' || kw === 'MTWANT' || t === 'mt_want') {
       // the window is open now (they wrote): the result and the rank come here as soon as the महा-Test closes
       if (!lead.via) { out.push({ to: 'do', action: 'lead' }); lead.via = 'wa'; }
