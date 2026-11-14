@@ -685,6 +685,15 @@ export default {
         let lead = GID.test(String(b.gid || '')) ? await S.getLead(env, b.gid) : null;
         if (!lead) { lead = WA.createLead({ gid: 'AB12CD34EF', source: 'ctwa' }, now); lead.cls = b.cls || '8th NMMS EXAM 26-27 BATCH'; lead.freeTotal = 21; lead.totalTests = 331; lead.prices = { monthly: 149, yearly: 499 }; }
         const classes = await classList(env, S), out = [];
+        // the whole path a parent's message takes (rules → AI), on a copy — nothing is saved or sent
+        if (b.inbound) {
+          const res = [];
+          for (const text of [].concat(b.inbound).slice(0, 10)) {
+            const outs = await aiTry(env, lead, WA.inbound(lead, text, now), now);
+            res.push({ q: text, out: outs.filter(o => o.to === 'wa' || o.to === 'log').map(o => (o.to === 'log' ? '[' + o.tag + '] ' : '> ') + String(o.text || '').slice(0, 300)) });
+          }
+          return json({ success: true, data: res });
+        }
         if (b.facts) { const A = await import('./ai.js'); return json({ success: true, err: A.classErr, data: A.facts(lead, now, WA, classes) }); }
         for (const q of (b.questions || []).slice(0, 15)) out.push({ q, ...(await aiAnswer(env, lead, q, now, WA, classes, b.model)) });
         return json({ success: true, data: out });

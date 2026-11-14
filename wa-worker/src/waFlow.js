@@ -442,13 +442,14 @@
       if (m === 'TEST') return inbound0(lead, 'TEST', now);
       if (m === 'ok') return inbound0(lead, 'ok', now);
     }
-    if (kw === 'RESULT' || kw === 'VERIFY') {
+    const gidWord = /^[0-9A-Z]{10}$/.test(up.split(/\s+/)[1] || '');   // LINK / RESULT / VERIFY come from our own links with the code
+    if ((kw === 'RESULT' || kw === 'VERIFY') && (gidWord || up === kw)) {
       const first = !lead.via; lead.via = lead.via || 'wa';
       if (first) { out.push({ to: 'do', action: 'lead' }); out.push(log('CRM', 'नंबर WhatsApp वरून आपोआप → lead. Meta ला "Lead".')); }
       if (kw === 'VERIFY') out.push(log('LOGIN', 'नंबर WhatsApp ने पक्का → OTP template नाही (₹0).'));
       firstAnswer(lead, now, out); return out;
     }
-    if (kw === 'LINK') {
+    if (kw === 'LINK' && gidWord) {
       const given = t.split(/\s+/).slice(2).join(' ').replace(/[^\p{L}\p{M} .'-]/gu, '').trim().slice(0, 30);
       if (!lead.via) out.push({ to: 'do', action: 'lead' }); lead.via = lead.via || 'wa';
       if (given.length >= 2) {
