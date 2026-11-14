@@ -240,4 +240,18 @@ const adminToken = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { ready: true, url: process.env.WA_WORKER_URL.replace(/\/$/, ''), token: BOT.adminToken(12, req.staff || null), staff: req.staff || null } });
 });
 
-module.exports = { requireBotKey, lead, action, adminToken, syncOf, config, waLogin, usage };
+// GET /api/guest/bot/course-info — the whole catalogue for the bot's AI answers: every active class with its
+// subjects, chapters (free ones marked), test counts, prices and Admin's description. Cached by the Worker (6 h).
+const courseInfo = asyncHandler(async (_req, res) => {
+  const batches = await Batch.find({ is_active: { $ne: false } }, 'name board medium standard description monthly_price yearly_price subjects').lean();
+  const free = await require('./guestController').freeTestCounts().catch(() => ({}));
+  const counts = {};
+  for (const r of await Quiz.aggregate([{ $match: { status: 'published' } }, { $group: { _id: '$batch', n: { $sum: 1 } } }]).catch(() => [])) counts[r._id] = r.n;
+  res.json({ success: true, data: batches.map(b => ({
+    name: b.name, board: b.board || '', medium: b.medium || '', standard: b.standard || '', about: String(b.description || '').slice(0, 600),
+    monthly: b.monthly_price || 0, yearly: b.yearly_price || 0, free_tests: free[b.name] || 0, tests: counts[b.name] || 0,
+    subjects: (b.subjects || []).map(sb => ({ name: sb.name, chapters: (sb.chapters || []).slice().sort((x, y) => (x.order || 0) - (y.order || 0)).map(c => (c.is_free ? '🆓 ' : '') + c.name).slice(0, 40) })),
+  })) });
+});
+
+module.exports = { requireBotKey, lead, action, adminToken, syncOf, config, waLogin, usage, courseInfo };

@@ -10,6 +10,31 @@ import WA from './waFlow.js';
 import { validSignature, bodiesFor, templateBody, post, inboundText, hmacHex, sameHex } from './meta.js';
 import * as S from './store.js';
 import { leadInfo, queue, runJobs, waLogin, newLead, ping, appUsage } from './render.js';
+import { aiAnswer, classList, geminiModels } from './ai.js';
+
+// 🤖 the rules sent a parent's own question to the team (askTeam → .qa outputs): with AI_ON = "1" Gemini may answer it
+// from the course facts instead (inside the free window). Limit (owner 2026-11-14): AI_MAX answers a family in all,
+// AI_DAILY a day — then the team calls (📞 on top of 🎯 आजचं काम). Unsure / failed → the team, as before.
+async function aiTry(env, lead, outs, now) {
+  const q = outs.find(o => o.qa && o.to === 'log');
+  if (!q || env.AI_ON !== '1' || !env.GEMINI_API_KEY || !WA.isOpen(lead, now)) return outs;
+  const day = WA.dayKey(now);
+  if (lead.aiDay !== day) { lead.aiDay = day; lead.aiN = 0; }
+  if ((lead.aiTotal || 0) >= (Number(env.AI_MAX) || 5) || lead.aiN >= (Number(env.AI_DAILY) || 3)) {
+    if (lead.crm !== 'call') { lead.crm = 'call'; lead.callAt = now.toISOString(); }
+    const team = String(WA.CONFIG.teamNumber || '').replace(/^91/, '');
+    return [...outs.filter(o => !(o.qa && o.to === 'wa')),
+      { to: 'wa', kind: 'service', cost: 0, text: `🙏 तुमचा प्रश्न आमच्या team कडे दिला आहे — team तुम्हाला लवकरच call करेल.${team ? '\nलगेच बोलायचं असेल तर 📞 ' + team : ''}`, buttons: [] },
+      { to: 'log', tag: 'CALL', text: `🤖 AI ची मर्यादा (${lead.aiTotal || 0} उत्तरं) → team call करेल: 🎯 आजचं काम (📞).` }];
+  }
+  const r = await aiAnswer(env, lead, q.qa.text, now, WA, await classList(env, S));
+  if (r.handoff) return [...outs, { to: 'log', tag: 'AI', text: `🤖 AI ने team कडे दिलं${r.err ? ' (' + r.err + ')' : ''} · ${r.ms} ms` }];
+  lead.aiN++; lead.aiTotal = (lead.aiTotal || 0) + 1;
+  lead.question = q.qa.prev;   // answered: not in the team's ❓ list
+  return [...outs.filter(o => !o.qa),
+    { to: 'wa', kind: 'service', cost: 0, text: r.answer, buttons: [{ id: 'ask', label: '❓ आणखी प्रश्न' }, { id: 'call_me', label: '📞 Call हवा' }] },
+    { to: 'log', tag: 'AI', text: `🤖 AI उत्तर ${lead.aiTotal}/${Number(env.AI_MAX) || 5} (${r.model}, ${r.ms} ms): "${q.qa.text}" → ${r.answer}` }];
+}
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Bot-Key', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'Content-Type': 'application/json', ...CORS } });
@@ -136,7 +161,7 @@ async function onMessage(env, m) {
     await withLead(env, gid, mobile, async (lead, now) => {
       await S.addMsg(env, { gid, mobile, dir: 'in', body: text || `[${m.type}]`, wa_id: m.id });
       // a photo / voice note: the window opens anyway; tell them what works
-      return WA.inbound(lead, text || '?', now);
+      return aiTry(env, lead, WA.inbound(lead, text || '?', now), now);
     });
   }
   // what the message asked Render to do (the child's name → the free account, the class…): now, not at the next cron
@@ -651,6 +676,19 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
     try {
       if (url.pathname === '/health') return json({ ok: true });
+      // 🤖 checking the AI's answers before AI_ON (AI_TEST_KEY: a secret only for this)
+      if (url.pathname === '/ai/test' && req.method === 'POST') {
+        if (!env.AI_TEST_KEY || !sameHex(req.headers.get('X-AI-Test') || '', env.AI_TEST_KEY)) return json({ success: false }, 401);
+        const b = await req.json().catch(() => ({}));
+        if (b.list) return json({ success: true, data: await geminiModels(env) });
+        const now = new Date();
+        let lead = GID.test(String(b.gid || '')) ? await S.getLead(env, b.gid) : null;
+        if (!lead) { lead = WA.createLead({ gid: 'AB12CD34EF', source: 'ctwa' }, now); lead.cls = b.cls || '8th NMMS EXAM 26-27 BATCH'; lead.freeTotal = 21; lead.totalTests = 331; lead.prices = { monthly: 149, yearly: 499 }; }
+        const classes = await classList(env, S), out = [];
+        if (b.facts) return json({ success: true, data: (await import('./ai.js')).facts(lead, now, WA, classes) });
+        for (const q of (b.questions || []).slice(0, 15)) out.push({ q, ...(await aiAnswer(env, lead, q, now, WA, classes, b.model)) });
+        return json({ success: true, data: out });
+      }
       if (url.pathname === '/webhook' && req.method === 'GET') {
         const p = url.searchParams;
         if (p.get('hub.mode') === 'subscribe' && env.VERIFY_TOKEN && p.get('hub.verify_token') === env.VERIFY_TOKEN) return new Response(p.get('hub.challenge') || '', { status: 200 });

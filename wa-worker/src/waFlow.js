@@ -153,11 +153,14 @@
   const teamNo = () => (/^91[6-9]\d{9}$/.test(CONFIG.teamNumber) ? CONFIG.teamNumber.slice(2) : '');
   const teamLine = () => (teamNo() ? `\n📞 प्रश्न / call: ${teamNo()}` : '');
   // a parent's own question → the team (Admin › CRM / NKs Team "❓ प्रश्न"); the bot answers that it went
+  // (both outputs carry .qa: the Worker may let the AI answer instead — index.js aiTry — and then drops them)
   function askTeam(lead, now, out, text, direct) {
+    const prev = lead.question || null;
     lead.question = { text: String(text).slice(0, 300), at: now.toISOString() };
-    out.push(log('Q', `❓ पालकांचा प्रश्न: "${lead.question.text}" → team च्या "❓ प्रश्न" यादीत.`));
-    out.push(wa(lead, now, `${direct ? '✅ प्रश्न आमच्या team कडे पाठवला' : '🙏 तुमचा प्रश्न आमच्या team कडे पाठवला आहे'} — उत्तर इथेच येईल.${teamNo() ? `\nलगेच बोलायचं असेल तर 📞 call / WhatsApp: ${teamNo()}` : ''}`,
-      [{ id: 'TEST', label: '📝 Free test' }, { id: 'fee', label: '💳 फी' }, { id: 'call_me', label: '📞 Call हवा' }]));
+    const q = log('Q', `❓ पालकांचा प्रश्न: "${lead.question.text}" → team च्या "❓ प्रश्न" यादीत.`); q.qa = { text: lead.question.text, prev };
+    const w = wa(lead, now, `${direct ? '✅ प्रश्न आमच्या team कडे पाठवला' : '🙏 तुमचा प्रश्न आमच्या team कडे पाठवला आहे'} — उत्तर इथेच येईल.${teamNo() ? `\nलगेच बोलायचं असेल तर 📞 call / WhatsApp: ${teamNo()}` : ''}`,
+      [{ id: 'TEST', label: '📝 Free test' }, { id: 'fee', label: '💳 फी' }, { id: 'call_me', label: '📞 Call हवा' }]); w.qa = true;
+    out.push(q, w);
   }
   const team = (lead, text) => ({ to: 'team', cost: 0, text, waMe: `https://wa.me/91${lead.mobile || ''}?text=${encodeURIComponent(text)}` });
   const appMsg = (text, buttons) => ({ to: 'app', text, buttons: buttons || [] });

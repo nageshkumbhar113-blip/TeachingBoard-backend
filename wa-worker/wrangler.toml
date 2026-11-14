@@ -15,6 +15,10 @@ GRAPH_URL = "https://graph.facebook.com"
 GRAPH_VERSION = "v26.0"
 RENDER_URL = "https://teachingboard-backend.onrender.com"
 BOT_OFF = "0"              # "1" = the bot sends nothing (messages are still saved)
+AI_ON = "0"                # "1" = Gemini answers parents' own questions from the course facts (GEMINI_API_KEY secret)
+AI_MAX = "5"               # AI answers to one family in all — then the team calls
+AI_DAILY = "3"             # AI answers to one family a day
+AI_MODEL = "gemini-flash-lite-latest"
 DAILY_CAP_RS = "50"        # paid (template) messages stop for the day above this many rupees
 REENGAGE_TEMPLATE = ""     # name of an approved Meta template for "Bot à¤¨à¤‚à¤¬à¤°à¤µà¤°à¥‚à¤¨ template"; empty = that button refuses
 TEMPLATE_LANG = "mr"

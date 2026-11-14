@@ -39,6 +39,7 @@ router.post('/bot/wa-login', B.requireBotKey, B.waLogin);
 router.get('/bot/lead/:gid', B.requireBotKey, B.lead);
 router.post('/bot/action', B.requireBotKey, B.action);
 router.post('/bot/usage', B.requireBotKey, B.usage);
+router.get('/bot/course-info', B.requireBotKey, B.courseInfo);
 router.get('/admin/bot-token', T.requireAdminOrStaff, B.adminToken);
 router.get('/admin/funnel', requireAdmin, c.adminFunnel);
 router.get('/admin/ad-content', requireAdmin, c.adminAdContent);
