@@ -29,7 +29,7 @@ out = W.inbound(lead, 'TEST BBBB111111', now);
 t = texts(out);
 ok(out.some(x => x.to === 'do' && x.action === 'lead'), 'TEST first contact: the number becomes a lead');
 ok(/पूर्ण result/.test(t[0]) && /7\/10/.test(t[0]), 'TEST first contact: the result first', t[0]);
-ok(t.some(x => /सराव tests \*app मध्ये\*/.test(x)) && !t.some(x => /रोज 1 free test WhatsApp वर पाठवू/.test(x)), 'TEST first contact: the app next (not "daily test on WhatsApp?")');
+ok(t.some(x => /app download केल्यावरच/.test(x)) && !t.some(x => /रोज 1 free test WhatsApp वर पाठवू/.test(x)), 'TEST first contact: the app next (not "daily test on WhatsApp?")');
 ok(!t.some(x => /आजची demo test \(/.test(x)), 'TEST first contact: no second test the same day');
 
 // 4) one test a day wherever it was taken: a website test today → TEST says "today's is done"

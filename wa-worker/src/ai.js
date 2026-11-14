@@ -57,7 +57,7 @@ export function facts(lead, now, WA, classes) {
   return [
     `संस्था: NKs EduOrbit — विद्यार्थ्यांसाठी online tests / सराव app (Maharashtra State Board).`,
     `या पालकाच्या पाल्याचा class: ${lead.cls || 'अजून माहीत नाही'}. नाव: ${lead.name && lead.name !== 'तुमचा पाल्य' ? lead.name : 'माहीत नाही'}.`,
-    `WhatsApp वर 1 demo test (login नाही, 10 मिनिटं) — ती सोडवली की course वर 50% सूट. पुढचा सराव app मध्ये (काही सराव tests app मध्ये मिळतात). पाल्याने आतापर्यंत दिलेल्या tests: ${lead.testsDone || 0}.`,
+    `WhatsApp वर 1 demo test (login नाही, 10 मिनिटं) — ती सोडवली की course वर 50% सूट. App मध्ये ${Math.max(0, (lead.freeTotal || 0) - (lead.testsDone || 0)) || 'काही'} tests अजून मोफत — पण फक्त app download केल्यावरच सोडवता येतात. पाल्याने आतापर्यंत दिलेल्या tests: ${lead.testsDone || 0}.`,
     lead.totalTests ? `पूर्ण course मध्ये एकूण ${lead.totalTests} tests.` : '',
     `पूर्ण course मध्ये: सगळ्या chapters चे tests, प्रत्येक प्रश्नाचं स्पष्टीकरण, notes, Exercise आणि सराव, दर रविवारी महा-Test, पालकांना progress report. Internet नसतानाही app चालतं.`,
     price ? `फी: ${price}. Monthly = 30 दिवस, Yearly = या शैक्षणिक वर्षाच्या 30 एप्रिलपर्यंत (दोन्ही 30 एप्रिलला संपतात). Payment UPI / Card / Net banking ने pay link वरून; pay केलं की लगेच app मध्ये course उघडतो.` : 'फी: pay page वर.',
@@ -85,7 +85,7 @@ const SYSTEM = `तू NKs EduOrbit चा WhatsApp सहाय्यक आह
 - Link फक्त FACTS मधली आणि गरज असेल तेव्हाच.
 - handoff = true आणि answer रिकामं ठेव जर: उत्तर FACTS मध्ये नाही; पैसे कापले / payment अडकलं / refund / तक्रार; account, PIN किंवा device ची अडचण; पालक call मागतात किंवा रागावलेले आहेत; प्रश्न शिक्षण / NKs शी संबंधित नाही; तुला खात्री नाही.
 - "धन्यवाद", "ok" सारख्या मेसेजला छोटं धन्यवाद पुरे.
-- "free" / "फ्री" हा शब्द वापरू नको: "demo test" किंवा "सराव tests" म्हण. फक्त महा-Test "मोफत" म्हणता येईल. "सगळं मोफत आहे का" विचारलं तर: 1 demo test आणि महा-Test मोफत, पूर्ण course साठी फी.`;
+- "free" / "फ्री" हा शब्द वापरू नको. "मोफत" फक्त: WhatsApp वरची 1 demo test, app मधल्या मोफत tests (फक्त app download केल्यावर) आणि महा-Test. "सगळं मोफत आहे का" विचारलं तर: demo test आणि app मधल्या काही tests मोफत, पूर्ण course (सगळे tests, notes, स्पष्टीकरण) साठी फी.`;
 
 export async function aiAnswer(env, lead, question, now, WA, classes, model) {
   const t0 = Date.now(), m = model || env.AI_MODEL || AI_MODEL_DEFAULT;

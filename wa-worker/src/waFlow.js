@@ -181,7 +181,7 @@
   // after CONFIG.waMaxTests links on WhatsApp: the rest of the free part is in the app, or the whole course
   function appOrCourse(lead, now, out, own) {
     lead.appAsked = dayKey(now);
-    out.push(wa(lead, now, `✅ Demo test झाली. पुढचा सराव:\n\n1️⃣ 📲 *App मध्ये* सराव tests — रोज आठवण पण app मधून${lead.acct && lead.acct.code ? '\n' + acctLine(lead) : ''}\n${CONFIG.play}\n\n2️⃣ 🔓 *पूर्ण course* उघडा${unlockText(lead, now)}`,
+    out.push(wa(lead, now, `✅ Demo test झाली. पुढचा सराव:\n\n1️⃣ 📲 *App मध्ये ${appLeft(lead)}* — app download केल्यावरच सोडवता येतात${lead.acct && lead.acct.code ? '\n' + acctLine(lead) : ''}\n${CONFIG.play}\n\n2️⃣ 🔓 *पूर्ण course* उघडा${unlockText(lead, now)}`,
       lead.paid ? [] : [{ id: 'app', label: '📲 App' }, { id: 'pay', label: '💳 Course उघडा' }, { id: 'call_me', label: '📞 Call हवा' }], { own }));
     out.push(log('APP', `WhatsApp वर ${CONFIG.waMaxTests} tests झाल्या → app (Code + PIN) किंवा course. पुढच्या tests WhatsApp वर नाहीत.`));
   }
@@ -223,10 +223,12 @@
     if (!lead.app && !lead.paid) appPitch(lead, now, out, false);
   }
   // 📲 the app, on its own (short): the rest of the free tests there, with the Code + PIN
+  // "अजून 20 tests मोफत — फक्त app मध्ये" (owner 2026-11-14: the app's free tests pull parents to install it)
+  const appLeft = lead => { const n = Math.max(0, (lead.freeTotal || 0) - (lead.testsDone || 0)); return n ? `अजून ${n} tests मोफत` : 'सराव tests'; };
   function appPitch(lead, now, out, own) {
     const left = lead.freeTotal ? Math.max(0, lead.freeTotal - (lead.testsDone || 0)) : 0;
     lead.appPitchAt = now.toISOString();
-    out.push(wa(lead, now, `📲 ${lead.name} च्या ${left ? 'उरलेल्या ' + left + ' ' : ''}free tests *app मध्ये* — रोजची test, गुण आणि सूटची आठवण app मधूनच.` +
+    out.push(wa(lead, now, `📲 ${lead.name} साठी *app मध्ये ${appLeft(lead)}* — पण त्या *फक्त app download केल्यावरच* सोडवता येतात.\nरोजची test, गुण आणि सूटची आठवण app मधूनच.` +
       (lead.acct && lead.acct.code ? `\n${acctLine(lead)}\nApp 👇 Login → Code + PIN` : '\nInstall केल्यावर login लागत नाही 👇') + `\n${CONFIG.play}`,
       [{ id: 'pay', label: '💳 Course घ्या' }, { id: 'ask', label: '❓ प्रश्न' }], { own, template: 'utility' }));
   }
@@ -557,7 +559,7 @@
       for (const k of ['subjects', 'prevPapers', 'name', 'cls', 'freeTotal', 'totalTests', 'kind', 'freeLessons', 'courses', 'prices', 'mtNext', 'mtReg', 'paid', 'app', 'pushOn', 'mobile', 'testsDone', 'acct']) if (data[k] !== undefined && data[k] !== null && !((k === 'cls' || k === 'name') && !data[k])) lead[k] = data[k];
       // a family that started on WhatsApp: the free account comes after the name — one message with it
       if (!hadAcct && lead.acct && lead.acct.code && lead.acct.pin && lead.welcomed && !lead.awaiting && !lead.app && !lead.paid && isOpen(lead, now))
-        out.push(wa(lead, now, `📲 ${lead.name} चं app account पण तयार — सगळ्या ${freeWhat(lead)} app मध्ये, रोजची आठवण app मधून:\n${acctLine(lead)}\nApp 👇 Login → Code आणि PIN टाका\n${CONFIG.play}`));
+        out.push(wa(lead, now, `📲 ${lead.name} चं app account पण तयार — app मध्ये ${appLeft(lead)} (फक्त app download केल्यावर), रोजची आठवण app मधून:\n${acctLine(lead)}\nApp 👇 Login → Code आणि PIN टाका\n${CONFIG.play}`));
       if (data.firstTestAt && !lead.firstTestAt) { lead.firstTestAt = data.firstTestAt; lead.offerEnd = data.offerEnd || new Date(new Date(data.firstTestAt).getTime() + CONFIG.offerHours * H).toISOString(); }
       if (data.last) lead.last = data.last;
       if (lead.paid && lead.crm !== 'paid') lead.crm = 'paid';
@@ -659,7 +661,7 @@
     nudge('nudge1', new Date(first.getTime() + H), (out, now) => {
       if (lead.lastInboundAt && now - new Date(lead.lastInboundAt) < 0.8 * H) return;   // just talked
       // no app yet: the next test is waiting there (the app is where families pay: 3 of 8 vs 0 of 23)
-      if (!lead.app && isOpen(lead, now)) { out.push(wa(lead, now, `📲 ${lead.name} ची पुढची free test app मध्ये तयार आहे — 1 मिनिटात install.${lead.acct && lead.acct.code ? '\n' + acctLine(lead) : ''}\n👇 ${CONFIG.play}`, [{ id: 'pay', label: '💳 Course घ्या' }, { id: 'ask', label: '❓ प्रश्न' }], { own: true })); return; }
+      if (!lead.app && isOpen(lead, now)) { out.push(wa(lead, now, `📲 ${lead.name} साठी app मध्ये ${appLeft(lead)} तयार — app download करा, 1 मिनिटात.${lead.acct && lead.acct.code ? '\n' + acctLine(lead) : ''}\n👇 ${CONFIG.play}`, [{ id: 'pay', label: '💳 Course घ्या' }, { id: 'ask', label: '❓ प्रश्न' }], { own: true })); return; }
       if (isOpen(lead, now)) out.push(wa(lead, now, lead.last?.weak ? `${lead.name} चा कमकुवत भाग: ${lead.last.weak} 📐\nPaid मध्ये या भागाचे सराव tests आणि प्रत्येक प्रश्नाची युक्ती.` : `📚 ${lead.name} साठी paid मध्ये: सगळ्या chapters चे सराव tests, प्रत्येक प्रश्नाची युक्ती, notes आणि महा-Test.`, [{ id: 'pay', label: 'हो, दाखवा' }], { own: true }));
       else if (canPush(lead)) out.push(push(lead.last?.weak ? `${lead.name} चा कमकुवत भाग: ${lead.last.weak} — सराव पाहा` : `${lead.name} साठी सगळ्या chapters चा सराव — पाहा`, [{ id: 'push:OFFER', label: '💬 WhatsApp वर सूट' }]));
     });
