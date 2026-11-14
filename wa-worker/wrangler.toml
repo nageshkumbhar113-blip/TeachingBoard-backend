@@ -15,7 +15,7 @@ GRAPH_URL = "https://graph.facebook.com"
 GRAPH_VERSION = "v26.0"
 RENDER_URL = "https://teachingboard-backend.onrender.com"
 BOT_OFF = "0"              # "1" = the bot sends nothing (messages are still saved)
-AI_ON = "0"                # "1" = Gemini answers parents' own questions from the course facts (GEMINI_API_KEY secret)
+AI_ON = "1"                # "1" = Gemini answers parents' own questions from the course facts (GEMINI_API_KEY secret)
 AI_MAX = "5"               # AI answers to one family in all — then the team calls
 AI_DAILY = "3"             # AI answers to one family a day
 AI_MODEL = "gemini-flash-lite-latest"
