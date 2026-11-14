@@ -83,6 +83,8 @@ const SYSTEM = `तू NKs EduOrbit चा WhatsApp सहाय्यक आह
 - उत्तर फक्त खालच्या FACTS मधूनच. FACTS मध्ये नसलेलं काहीही (किंमत, सूट, तारीख, वेळ, नंबर, link, विषय, वचन) कधीही स्वतः बनवू नको.
 - सोपी मराठी (देवनागरी), 1 ते 3 छोटी वाक्यं, 60 शब्दांपेक्षा कमी, आदराने. पालक English / Hinglish मध्ये लिहिले तरी उत्तर मराठीत.
 - Link फक्त FACTS मधली आणि गरज असेल तेव्हाच.
+- अंदाज करू नको: उत्तर FACTS मध्ये स्पष्ट लिहिलेलं नसेल तर ('बहुधा', 'साधारण', स्वतःच्या समजुतीने काहीही नाही) handoff.
+- evidence मध्ये FACTS मधला तो शब्दशः तुकडा (5 ते 15 शब्द) copy कर ज्यावरून उत्तर दिलं. असा तुकडा नसेल तर handoff.
 - handoff = true आणि answer रिकामं ठेव जर: उत्तर FACTS मध्ये नाही; पैसे कापले / payment अडकलं / refund / तक्रार; account, PIN किंवा device ची अडचण; पालक call मागतात किंवा रागावलेले आहेत; प्रश्न शिक्षण / NKs शी संबंधित नाही; तुला खात्री नाही.
 - "धन्यवाद", "ok" सारख्या मेसेजला छोटं धन्यवाद पुरे.
 - "free" / "फ्री" हा शब्द वापरू नको. "मोफत" फक्त: WhatsApp वरची 1 demo test, app मधल्या मोफत tests (फक्त app download केल्यावर) आणि महा-Test. "सगळं मोफत आहे का" विचारलं तर: demo test आणि app मधल्या काही tests मोफत, पूर्ण course (सगळे tests, notes, स्पष्टीकरण) साठी फी.`;
@@ -95,7 +97,7 @@ export async function aiAnswer(env, lead, question, now, WA, classes, model) {
     contents: [{ role: 'user', parts: [{ text: String(question).slice(0, 500) }] }],
     generationConfig: {
       temperature: 0.2, maxOutputTokens: 1024, responseMimeType: 'application/json',
-      responseSchema: { type: 'OBJECT', properties: { answer: { type: 'STRING' }, handoff: { type: 'BOOLEAN' } }, required: ['answer', 'handoff'] },
+      responseSchema: { type: 'OBJECT', properties: { answer: { type: 'STRING' }, evidence: { type: 'STRING' }, handoff: { type: 'BOOLEAN' } }, required: ['answer', 'evidence', 'handoff'] },
     },
   };
   try {
@@ -108,6 +110,10 @@ export async function aiAnswer(env, lead, question, now, WA, classes, model) {
     const txt = (j.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('');
     let out; try { out = JSON.parse(txt); } catch { return { handoff: true, answer: '', model: m, ms: Date.now() - t0, err: 'not JSON' }; }
     let answer = String(out.answer || '').trim().slice(0, 700), handoff = !!out.handoff || !answer;
+    // no guessing (owner 2026-11-15): the answer must rest on words that really are in the facts (a thank-you needs none)
+    const norm = x => String(x || '').replace(/[\s*_"'“”‘’()]+/g, ' ').trim().toLowerCase();
+    const ev = norm(out.evidence), courtesy = answer.length < 40 && /धन्यवाद|स्वागत|नमस्कार/.test(answer);
+    if (!handoff && !courtesy && (ev.length < 6 || !norm(fx).includes(ev))) return { handoff: true, answer, model: m, ms: Date.now() - t0, err: 'not in the facts (guess)' };
     // a number or a link that is not in the facts: never send it
     const dig = answer.replace(/[०-९]/g, d => String('०१२३४५६७८९'.indexOf(d)));   // Marathi digits count too
     const bad = !handoff && ((dig.match(/\d[\d,]{1,}/g) || []).some(n => !fx.includes(n.replace(/,$/, ''))) || (answer.match(/https?:\/\/\S+/g) || []).some(u => !fx.includes(u.replace(/[).,]+$/, ''))));
