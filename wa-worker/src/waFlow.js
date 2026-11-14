@@ -729,7 +729,7 @@
   // (the next two evenings), the महा-Test's own reminders if it falls inside, and one "keep the reminders?" near the end
   // owner (2026-11-12): within the 72 h every family is asked at least once to take the course — "give the test, get
   // 50 % off, take the course" (the offer starts with the first test: 50 % for 24 h, then 30 % until Sunday night)
-  const testOfferLine = '🎁 Test दिली की course वर *50% सूट* (24 तास), मग रविवारपर्यंत 30%.';
+  const testOfferLine = '🎁 Demo test सोडवली की course वर *50% सूट* (24 तास), मग रविवारपर्यंत 30%.';
   // short (owner: as little text as possible): one line of what the course is, the price, the link
   const shortCourse = (lead, now) => `🔓 ${lead.cls || 'पूर्ण'} course: सगळे tests + स्पष्टीकरण, notes, महा-Test${priceText(lead, false, now) ? '\n💳 ' + priceText(lead, false, now) : ''}\n👉 ${L.pay(lead.gid)}`;
   const courseButtons = [{ id: 'pay', label: '💳 Course घ्या' }, { id: 'call_me', label: '📞 Call हवा' }];
