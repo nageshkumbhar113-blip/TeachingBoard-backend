@@ -187,6 +187,20 @@ try {
   const n13 = sent.length;
   await ev(A, 'test_done', { score: 8, total: 10 }); await sleep(1500);
   ok(sent.length === n13 && /मेसेज बंद/.test(textOf(sent[n13 - 1])), 'after STOP: one goodbye, then nothing (not even a test result)', textOf(sent[sent.length - 1]));
+  // 14) 🎬 teachers' demo page: name + number → one lead labelled "Demo – Teacher", the bot never writes to it
+  const demo = b => fetch(W + '/demo/lead', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
+  const nSent14 = sent.length;
+  let d = await demo({ name: 'पाटील सर', mobile: '98220 11223', school: 'ज्ञानदीप Classes' });
+  ok(d.success && /^[0-9A-F]{10}$/.test(d.gid || ''), 'demo login makes a lead', JSON.stringify(d));
+  const d2 = await demo({ name: 'पाटील सर', mobile: '+919822011223' });
+  ok(d2.success && d2.gid === d.gid && d2.again, 'the same number again → the same lead');
+  ok((await demo({ name: 'x', mobile: '12345' })).success === false, 'a wrong number is refused');
+  const dl = await crm(`lead/${d.gid}`);
+  const labels = (await crm('labels')).data || [];
+  const lab = labels.find(l => l.name === 'Demo – Teacher');
+  ok(dl.data && dl.data.lead && dl.data.lead.stopped && dl.data.lead.cls === 'Demo – Teacher' && lab && (dl.data.lead.labels || []).includes(lab.id), 'demo lead: label + class + bot stopped', JSON.stringify(dl.data && dl.data.lead && { cls: dl.data.lead.cls, labels: dl.data.lead.labels, stopped: dl.data.lead.stopped }));
+  await sleep(800);
+  ok(sent.length === nSent14, 'no WhatsApp to a demo lead');
 } catch (e) {
   ok(false, 'crashed: ' + e.stack);
 } finally {

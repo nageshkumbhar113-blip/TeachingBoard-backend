@@ -669,6 +669,40 @@ async function crm(env, req, url, who) {
   return json({ success: false, message: 'Not found' }, 404);
 }
 
+// ── 🎬 teachers' demo: one lead per number, label "Demo – Teacher", the bot never writes to it (stopped) ──
+async function demoLead(env, req) {
+  const b = await req.json().catch(() => ({}));
+  const mobile = String(b.mobile || '').replace(/\D/g, '').slice(-10);
+  if (!/^[6-9]\d{9}$/.test(mobile)) return { success: false, message: 'mobile?' };
+  const name = String(b.name || '').trim().slice(0, 60), school = String(b.school || '').trim().slice(0, 80);
+  // at most 30 sign-ins an hour from one address (one class demo = a few dozen phones, on different addresses mostly)
+  const ip = req.headers.get('CF-Connecting-IP') || 'x', rk = `demorl:${ip}:${new Date().toISOString().slice(0, 13)}`;
+  const n = Number(await S.kvGet(env, rk)) || 0;
+  if (n >= 30) return { success: false, message: 'busy' };
+  await S.kvSet(env, rk, n + 1);
+  const now = new Date();
+  const known = await S.kvGet(env, 'demo:' + mobile);
+  if (known && GID.test(known)) {
+    const lead = await S.getLead(env, known);
+    if (lead) {
+      lead.demoSeen = (lead.demoSeen || 1) + 1; lead.demoLastAt = now.toISOString();
+      if (name && (!lead.name || lead.name === 'Demo Teacher')) lead.name = name;
+      await S.saveLead(env, lead, null);
+      await S.addMsg(env, { gid: known, mobile, dir: 'in', body: `🎬 Demo पुन्हा उघडला${school ? ' · ' + school : ''}` });
+      return { success: true, gid: known, again: true };
+    }
+  }
+  const gid = newGid();
+  const lead = WA.createLead({ gid, name: name || 'Demo Teacher', source: 'demo' }, now);
+  Object.assign(lead, { mobile, cls: 'Demo – Teacher', via: 'demo', stopped: true, crm: 'call', demo: { school, at: now.toISOString() } });
+  lead.labels = [await labelIdFor(env, 'Demo – Teacher')].filter(Boolean);
+  await S.ensureRow(env, lead);
+  await S.saveLead(env, lead, null);
+  await S.addMsg(env, { gid, mobile, dir: 'in', body: `🎬 Teacher demo पाहिला: ${name || '-'}${school ? ' · ' + school : ''}` });
+  await S.kvSet(env, 'demo:' + mobile, gid);
+  return { success: true, gid };
+}
+
 export default {
   async fetch(req, env, ctx) {
     configure(env);
@@ -676,6 +710,8 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
     try {
       if (url.pathname === '/health') return json({ ok: true });
+      // 🎬 the teachers' demo (nkseduorbit.in/demo, a static page): name + number at its login → a CRM lead to call
+      if (url.pathname === '/demo/lead' && req.method === 'POST') return json(await demoLead(env, req));
       // 🤖 checking the AI's answers before AI_ON (AI_TEST_KEY: a secret only for this)
       if (url.pathname === '/ai/test' && req.method === 'POST') {
         if (!env.AI_TEST_KEY || !sameHex(req.headers.get('X-AI-Test') || '', env.AI_TEST_KEY)) return json({ success: false }, 401);
