@@ -293,6 +293,11 @@ exports.me = asyncHandler(async (req, res) => {
   if (!userDoc) {
     return res.status(404).json({ success: false, message: 'User not found' });
   }
+  // the app opened today: remember the day (at most one small write a day) — the 5 pm teacher push skips them
+  if (userDoc.role === 'student' && req.user.role === 'student') {
+    const day = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+    if (userDoc.last_seen_day !== day) User.updateOne({ user_id: userDoc.user_id }, { $set: { last_seen_day: day } }).catch(() => {});
+  }
 
   // A "parent" session may be backed by a Student document (student's own
   // code+PIN used to log in as parent) — dispatch on the JWT's role claim,

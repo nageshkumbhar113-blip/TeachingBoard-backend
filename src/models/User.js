@@ -36,6 +36,8 @@ const userSchema = new mongoose.Schema(
     // a teacher who registered from a Facebook / Instagram ad (Admin › Sync › Ads): that ad's id
     signup_ad:        { type: String, default: '', trim: true },
     last_login_at:    { type: Date, default: null },
+    // 'YYYY-MM-DD' (IST) the student app last opened (/auth/me) — the teacher push skips a student who opened today
+    last_seen_day:    { type: String, default: '' },
     school_name:      { type: String, default: '', trim: true },
     device_id:        { type: String, default: null },
     device_bound_at:  { type: Date, default: null },

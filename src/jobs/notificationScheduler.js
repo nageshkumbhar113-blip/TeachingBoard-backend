@@ -104,8 +104,9 @@ async function _sendDailyMotivation() {
   const students = await User.find({
     role: 'student',
     device_token: { $exists: true, $nin: [null, ''] },
-  }).select('device_token').lean();
-  const tokens = [...new Set(students.map(s => s.device_token).filter(Boolean))];
+  }).select('user_id device_token').lean();
+  const withPlan = new Set((await StudyPlan.find({ status: 'active' }, 'studentUserId').lean()).map(p => p.studentUserId));
+  const tokens = [...new Set(students.filter(s => !withPlan.has(s.user_id)).map(s => s.device_token).filter(Boolean))];
   if (!tokens.length) return;
 
   await sendToMany(tokens, '✨ आजचा विचार', quote, { type: 'daily_motivation' }).catch(err =>
@@ -160,11 +161,8 @@ async function _sendStudyPlanMorningPush() {
   const plans = await StudyPlan.find({ status: 'active' });
   for (const plan of plans) {
     try {
-      const tasks = await studyPlan.getTodayTasks(plan);
-      if (!tasks.length) continue;
-      await notifyStudent(plan.studentUserId, '📚 आजचा अभ्यास तयार आहे',
-        `आज ${tasks.length} Study Items — ${tasks.slice(0, 2).map(t => t.label).join(', ')}${tasks.length > 2 ? '...' : ''}`,
-        { type: 'study_plan_today', planId: String(plan._id) });
+      // only makes the day's tasks now: the student gets ONE push a day, the 5 pm Personal Digital Teacher one
+      await studyPlan.getTodayTasks(plan);
     } catch (err) {
       console.warn('study plan morning push failed for', plan.studentUserId, ':', err.message);
     }
@@ -182,10 +180,7 @@ async function _sendStudyPlanEveningJobs() {
       const completed = tasks.filter(t => t.status === 'completed').length;
       const pending = tasks.length - completed;
 
-      if (pending > 0) {
-        await notifyStudent(plan.studentUserId, '📚 आजचा अभ्यास अजून बाकी आहे',
-          `आज अजून ${pending} Study Items बाकी आहेत — पूर्ण करा.`, { type: 'study_plan_pending', planId: String(plan._id) });
-      }
+      void pending;   // the student's reminder is the 5 pm teacher push (_sendTeacherChatPush)
 
       // Parent accounts keep their children in `children` (they have no
       // student_code), so the old { role:'parent', student_code } query never
@@ -235,6 +230,44 @@ function _isoWeekKey(d = new Date()) {
   const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
   const week = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
   return `${date.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+// ── 6b. Personal Digital Teacher: ONE push a day that brings the student to the chat (owner 2026-11-15) ──
+// 5 pm IST (after school), only when today's Study Plan tasks are pending AND the app was not opened today
+// (users.last_seen_day, set by /auth/me). Greetings / reminders live inside the chat, not in notifications.
+// Not sent once the free days are over (nothing is open to study). TEACHER_PUSH_HOUR_IST, TEACHER_PUSH=off.
+const TEACHER_PUSH_HOUR_IST = Number(process.env.TEACHER_PUSH_HOUR_IST) || 17;
+async function _sendTeacherChatPush(now = new Date()) {
+  const today = studyPlan.todayStr(now);
+  const { freeWindowOver } = require('../utils/contentAccess');
+  const plans = await StudyPlan.find({ status: 'active' }).lean();
+  let sent = 0;
+  for (const plan of plans) {
+    try {
+      const u = await User.findOne({ user_id: plan.studentUserId, role: 'student', status: 'active' }, 'user_id name role free_tier created_at student_code last_seen_day device_token').lean();
+      if (!u || !u.device_token || u.last_seen_day === today || freeWindowOver(u)) continue;
+      const pending = await StudyTask.countDocuments({ studyPlanId: plan._id, date: today, status: 'pending' });
+      if (!pending) continue;
+      const first = String(u.name || '').trim().split(/\s+/)[0];
+      await notifyStudent(u.user_id, '🧑‍🏫 Personal Digital Teacher',
+        `${first ? first + ', ' : ''}आज ${pending} ${pending === 1 ? 'काम' : 'कामं'} तुमची वाट पाहत ${pending === 1 ? 'आहे' : 'आहेत'}. 10 मिनिटं द्या!`,
+        { type: 'teacher_chat' });
+      sent++;
+    } catch (err) {
+      console.warn('teacher push failed for', plan.studentUserId, ':', err.message);
+    }
+  }
+  return sent;
+}
+async function _runTeacherChatPushIfNeeded() {
+  if (String(process.env.TEACHER_PUSH || '').toLowerCase() === 'off') return;
+  const ist = _istNow();
+  if (ist.hour < TEACHER_PUSH_HOUR_IST) return;
+  const KEY = 'teacher_chat_push';
+  const state = await SchedulerState.findOne({ key: KEY }).lean();
+  if (state?.last_run_date === ist.date) return;
+  await SchedulerState.updateOne({ key: KEY }, { $set: { last_run_date: ist.date } }, { upsert: true });
+  await _sendTeacherChatPush().catch(err => console.warn('teacher push failed:', err.message));
 }
 
 // "Evening" means evening in India. The old gate used the server's local hour,
@@ -330,6 +363,7 @@ function start() {
     _runStudyPlanTeacherDigestIfNeeded().catch(err => console.warn('study plan teacher digest check failed:', err.message));
     _runGuestRemindersIfNeeded().catch(err => console.warn('guest reminders check failed:', err.message));
     _runStudyNudgesIfNeeded().catch(err => console.warn('study nudges check failed:', err.message));
+    _runTeacherChatPushIfNeeded().catch(err => console.warn('teacher push check failed:', err.message));
     // Weekly महा-Test: next week's test ready ahead of time; ranks once a window closes.
     const W = require('../utils/weeklyTests');
     W.ensureUpcoming().catch(err => console.warn('weekly ensure failed:', err.message));
@@ -339,4 +373,4 @@ function start() {
   console.log('notificationScheduler: started (poll every', QUEUE_POLL_MS / 1000, 's)');
 }
 
-module.exports = { start, _internals: { _istNow, _runStudyPlanEveningJobsIfNeeded, _sendStudyPlanEveningJobs } };
+module.exports = { start, _internals: { _istNow, _runStudyPlanEveningJobsIfNeeded, _sendStudyPlanEveningJobs, _sendTeacherChatPush } };
