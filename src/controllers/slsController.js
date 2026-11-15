@@ -642,14 +642,17 @@ exports.createPaperManual = async (req, res) => {
     const limited = await _teacherPaperLimitResponse(req, batchId);
     if (limited) return res.status(403).json(limited);
 
-    if (questions.some(q => !q || (!q.questionId && !q.mcqId))) {
+    if (questions.some(q => !q || (!q.questionId && !q.mcqId && !(q.quizRef && q.quizRef.quizId && q.quizRef.qId)))) {
       return res.status(400).json({ success: false, message: 'Every question needs a questionId' });
     }
+    // MCQ-bank questions (1 mark each) — board sections, or a plain competitive MCQ paper (owner 2026-11-15)
     const mcqItems = questions.filter(q => q.mcqId);
-    if (mcqItems.length && structure.layout !== 'board') {
-      return res.status(400).json({ success: false, message: 'MCQ-bank questions can only be used in board-style papers' });
-    }
-    const ids = questions.filter(q => !q.mcqId).map(q => q.questionId);
+    // a question that lives inside a published test of this class: { quizRef: { quizId, qId } }
+    const quizRefItems = questions.filter(q => q.quizRef && !q.mcqId);
+    const quizDocs = quizRefItems.length ? await require('../models/Quiz').find({ quiz_id: { $in: [...new Set(quizRefItems.map(q => String(q.quizRef.quizId)))] }, batch: batchId, status: 'published' }).lean() : [];
+    const quizQMap = new Map();
+    for (const qz of quizDocs) for (const qq of qz.questions || []) quizQMap.set(`${qz.quiz_id}|${qq.q_id}`, { ...qq, _id: qq.q_id, subject: qq.subject || qz.subject, chapter: qq.chapter || qz.chapter, type: qq.type || 'mcq' });
+    const ids = questions.filter(q => !q.mcqId && !q.quizRef).map(q => q.questionId);
     const found = await SLSQuestion.find({ _id: { $in: ids } }).lean();
     const foundMap = new Map(found.map(q => [q._id.toString(), q]));
     const mcqFound = mcqItems.length ? await McqQuestion.find({ _id: { $in: mcqItems.map(q => q.mcqId) } }).lean() : [];
@@ -659,6 +662,14 @@ exports.createPaperManual = async (req, res) => {
     let totalMarks = 0;
     let order = 0;
     for (const item of questions) {
+      if (item.quizRef && !item.mcqId) {
+        const qq = quizQMap.get(`${item.quizRef.quizId}|${item.quizRef.qId}`);
+        if (!qq || (qq.type || 'mcq') !== 'mcq') return res.status(400).json({ success: false, message: `Question ${item.quizRef.qId} not found in a published test of this batch` });
+        order += 1;
+        selectedQuestions.push({ questionId: `quiz:${item.quizRef.quizId}:${qq.q_id}`, marks: 1, difficulty: qq.difficulty || 'medium', questionType: 'MCQ', sectionId: String(item.sectionId || ''), mcq: mcqSnapshot(qq), displayOrder: order, totalAttempts: 0, correctAttempts: 0, averageScore: 0 });
+        totalMarks += 1;
+        continue;
+      }
       if (item.mcqId) {
         const mq = mcqMap.get(String(item.mcqId));
         if (!mq || mq.type !== 'mcq') {

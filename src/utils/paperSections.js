@@ -93,7 +93,11 @@ function boardTotalMarks(sections) {
 function mcqSnapshot(q) {
   const options = {};
   for (const k of ['A', 'B', 'C', 'D']) options[k] = _str((q.options || {})[k], 300);
-  return { qid: String(q._id), text: _str(q.question, 1500), options, answer: _str(q.answer, 8).toUpperCase() };
+  // pictures (reasoning / figure questions) and the उकल travel with the paper, so its PDF is complete
+  const option_images = {};
+  for (const k of ['A', 'B', 'C', 'D']) option_images[k] = _str((q.option_images || {})[k], 600);
+  return { qid: String(q._id), text: _str(q.question, 1500), options, answer: _str(q.answer, 8).toUpperCase(),
+    image: _str(q.image, 600), option_images, explanation: _str(q.explanation, 2000), subject: _str(q.subject, 80), chapter: _str(q.chapter, 120) };
 }
 
 function mcqFormat(m) {
