@@ -241,17 +241,25 @@ async function _sendTeacherChatPush(now = new Date()) {
   const today = studyPlan.todayStr(now);
   const { freeWindowOver } = require('../utils/contentAccess');
   const plans = await StudyPlan.find({ status: 'active' }).lean();
+  const Batch = require('../models/Batch');
+  const mediumOf = new Map();
   let sent = 0;
   for (const plan of plans) {
     try {
-      const u = await User.findOne({ user_id: plan.studentUserId, role: 'student', status: 'active' }, 'user_id name role free_tier created_at student_code last_seen_day device_token').lean();
+      const u = await User.findOne({ user_id: plan.studentUserId, role: 'student', status: 'active' }, 'user_id name role free_tier created_at student_code last_seen_day device_token assigned_batches').lean();
       if (!u || !u.device_token || u.last_seen_day === today || freeWindowOver(u)) continue;
       const pending = await StudyTask.countDocuments({ studyPlanId: plan._id, date: today, status: 'pending' });
       if (!pending) continue;
       const first = String(u.name || '').trim().split(/\s+/)[0];
-      await notifyStudent(u.user_id, '🧑‍🏫 Personal Digital Teacher',
-        `${first ? first + ', ' : ''}आज ${pending} ${pending === 1 ? 'काम' : 'कामं'} तुमची वाट पाहत ${pending === 1 ? 'आहे' : 'आहेत'}. 10 मिनिटं द्या!`,
-        { type: 'teacher_chat' });
+      // the class's medium decides the language (English medium never gets Marathi)
+      const batch = (u.assigned_batches || [])[0];
+      if (batch && !mediumOf.has(batch)) mediumOf.set(batch, (await Batch.findOne({ name: batch }, 'medium').lean())?.medium || '');
+      const m = mediumOf.get(batch) || '', lang = /hindi/i.test(m) ? 'hi' : (/english/i.test(m) && !/semi/i.test(m)) ? 'en' : 'mr';
+      const who = first ? first + ', ' : '';
+      const body = lang === 'en' ? `${who}${pending} ${pending === 1 ? 'task is' : 'tasks are'} waiting for you today. Give it 10 minutes!`
+        : lang === 'hi' ? `${who}आज ${pending} काम आपका इंतज़ार कर ${pending === 1 ? 'रहा है' : 'रहे हैं'}। 10 मिनट दीजिए!`
+        : `${who}आज ${pending} ${pending === 1 ? 'काम' : 'कामं'} तुमची वाट पाहत ${pending === 1 ? 'आहे' : 'आहेत'}. 10 मिनिटं द्या!`;
+      await notifyStudent(u.user_id, '🧑‍🏫 Personal Digital Teacher', body, { type: 'teacher_chat' });
       sent++;
     } catch (err) {
       console.warn('teacher push failed for', plan.studentUserId, ':', err.message);
