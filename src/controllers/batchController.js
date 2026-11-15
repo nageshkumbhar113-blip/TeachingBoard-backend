@@ -22,7 +22,7 @@ const PassageBlock = require('../models/PassageBlock');
 // Same composite chapterId scheme as SLS concepts/exercises — reused here
 // (not reimplemented) so a subject/chapter rename can correctly remap it.
 const { makeChapterId } = require('./youtubeTeacherController');
-const { isChapterFree, listFreeChapters, invalidateContentAccessCache } = require('../utils/contentAccess');
+const { isChapterFree, listFreeChapters, invalidateContentAccessCache, freeWindowOver } = require('../utils/contentAccess');
 
 /**
  * Shared merge logic behind GET /api/batches and the student-scoped
@@ -739,7 +739,7 @@ exports.getStudentFreeChapters = asyncHandler(async (req, res) => {
     (Array.isArray(req.userDoc?.assigned_batches) ? req.userDoc.assigned_batches : [])
       .map(b => String(b || '').trim().toLowerCase())
   );
-  const all = await listFreeChapters();
+  const all = freeWindowOver(req.userDoc) ? [] : await listFreeChapters();
   const free = all
     .filter(f => assigned.has(String(f.batch).trim().toLowerCase()))
     .map(({ batch, subject, chapter }) => ({ batch, subject, chapter }));

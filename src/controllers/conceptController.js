@@ -269,7 +269,7 @@ exports.getStudentFullSync = asyncHandler(async (req, res) => {
   if (!hasFullAccess(req.userDoc)) {
     const freeIds = new Set();
     for (const id of new Set([...concepts, ...exerciseQuestions].map(x => x.chapterId))) {
-      if (await isChapterIdFree(id)) freeIds.add(id);
+      if (await isChapterIdFree(id, req.userDoc)) freeIds.add(id);
     }
     concepts = concepts.filter(c => freeIds.has(c.chapterId));
     exerciseQuestions = exerciseQuestions.filter(q => freeIds.has(q.chapterId));
@@ -550,7 +550,7 @@ exports.searchConcepts = asyncHandler(async (req, res) => {
   // Locked chapters must not surface in search for free-tier / expired students.
   if (!hasFullAccess(req.userDoc)) {
     const kept = [];
-    for (const c of filtered) if (await isChapterIdFree(c.chapterId)) kept.push(c);
+    for (const c of filtered) if (await isChapterIdFree(c.chapterId, req.userDoc)) kept.push(c);
     filtered = kept;
   }
 

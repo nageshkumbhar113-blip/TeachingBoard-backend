@@ -27,7 +27,7 @@ const crypto = require('crypto');
 const asyncHandler = require('../utils/asyncHandler');
 const Quiz = require('../models/Quiz');
 const Question = require('../models/Question');
-const { hasFullAccess, isQuizLocked, isChapterFree } = require('../utils/contentAccess');
+const { hasFullAccess, isQuizLocked, isChapterFree, freeWindowOver } = require('../utils/contentAccess');
 
 const _memo = new Map(); // key -> { at, quizzes, questions }
 
@@ -63,7 +63,7 @@ async function _questionsFingerprint(userDoc, batches) {
     .select('q_id updated_at batch subject chapter').lean();
   if (!hasFullAccess(userDoc)) {
     const kept = [];
-    for (const r of rows) if (await isChapterFree(r.batch, r.subject, r.chapter)) kept.push(r);
+    for (const r of rows) if (await isChapterFree(r.batch, r.subject, r.chapter, userDoc)) kept.push(r);
     rows = kept;
   }
   const parts = rows.map(r => `${r.q_id}|${_ts(r.updated_at)}`).sort();
@@ -78,13 +78,14 @@ exports.getSyncState = asyncHandler(async (req, res) => {
   const batches = (Array.isArray(userDoc.assigned_batches) ? userDoc.assigned_batches : [])
     .map(b => String(b || '').trim()).filter(Boolean).sort();
   const full = hasFullAccess(userDoc);
+  const over = !full && freeWindowOver(userDoc);   // free window ended → everything locked
   // Batches are part of `access` so assigning/removing a class (which also
   // changes the profile the app shows) forces a full sync including /auth/me.
-  const access = `${full ? 'full' : 'free'}|${userDoc.expiry_date ? new Date(userDoc.expiry_date).toISOString().slice(0, 10) : ''}|${batches.join(',')}`;
+  const access = `${full ? 'full' : over ? 'over' : 'free'}|${userDoc.expiry_date ? new Date(userDoc.expiry_date).toISOString().slice(0, 10) : ''}|${batches.join(',')}`;
 
   let fp = { quizzes: '0:', questions: '0:' };
   if (batches.length) {
-    const key = `${batches.join(',')}|${full ? 'F' : 'R'}`;
+    const key = `${batches.join(',')}|${full ? 'F' : over ? 'O' : 'R'}`;
     const hit = _memo.get(key);
     if (hit && Date.now() - hit.at < MEMO_MS) {
       fp = hit;

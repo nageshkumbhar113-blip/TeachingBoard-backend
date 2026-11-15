@@ -211,7 +211,9 @@ exports.result = asyncHandler(async (req, res) => {
       me: mine?.submitted_at ? { score: mine.score, total: mine.total, correct: mine.correct, wrong: mine.wrong, skipped: mine.skipped, rank: mine.rank, time_taken: mine.time_taken, by_subject: mine.by_subject || [] } : null,
       top: top.map(t => ({ name: hidden.has(t.student_code) && t.student_code !== me.code ? HIDDEN_NAME : (String(t.name || '').trim().slice(0, 40) || 'Student'), score: t.score, total: t.total, rank: t.rank, me: t.student_code === me.code })),
       hide_in_toppers: me.hide,
-      review: ev.questions.map(q => ({ q_id: q.q_id, type: q.type, question: q.question, options: q.options, answer: q.answer, explanation: q.explanation, image: q.image, subject: q.subject || '', marks: q.marks || 1, given: given.get(q.q_id) || '' })),
+      // महा-Test is free for everyone, but the answer key + उकल are for paid students only (owner 2026-11-15).
+      review_locked: !me.full,
+      review: ev.questions.map(q => ({ q_id: q.q_id, type: q.type, question: q.question, options: q.options, answer: me.full ? q.answer : '', explanation: me.full ? q.explanation : '', image: q.image, subject: q.subject || '', marks: q.marks || 1, given: given.get(q.q_id) || '' })),
     },
   });
 });

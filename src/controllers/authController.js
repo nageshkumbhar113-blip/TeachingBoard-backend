@@ -2,7 +2,7 @@ const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const { createToken } = require('../utils/token');
 const { normalizeExpiryDate } = require('../utils/accountStatus');
-const { hasFullAccess } = require('../utils/contentAccess');
+const { hasFullAccess, freeUntil } = require('../utils/contentAccess');
 const { isExpiredDate: _isExpiredDate } = require('../utils/accountStatus');
 
 function normalizeBatches(value) {
@@ -24,6 +24,9 @@ function serializeStudent(student) {
     // 'full' = every chapter; 'free' = free chapters only (self-registered
     // and unpaid, or paid period expired). Drives the lock UI in the app.
     access_level: hasFullAccess(student) ? 'full' : 'free',
+    // free-tier only: when the free part closes (ISO). The app locks everything after it, offline too.
+    free_until: freeUntil(student)?.toISOString() || '',
+    server_time: new Date().toISOString(),
   };
 }
 
@@ -329,6 +332,8 @@ exports.me = asyncHandler(async (req, res) => {
         expiry_date: normalizeExpiryDate(userDoc.expiry_date),
         shared_device: !!userDoc.shared_device,
         access_level: hasFullAccess(userDoc) ? 'full' : 'free',
+        free_until: freeUntil(userDoc)?.toISOString() || '',
+        server_time: new Date().toISOString(),
       },
     });
   }

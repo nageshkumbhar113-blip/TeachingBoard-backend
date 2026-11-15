@@ -130,7 +130,33 @@ function hasFullAccess(userDoc) {
   return true;
 }
 
-async function isChapterIdFree(chapterId) {
+// ── 5-day free window (owner 2026-11-15) ──
+// A self-registered, never-paid student (free_tier) may use the free part for FREE_DAYS days
+// from sign-up; after that every chapter / test is locked (महा-Test stays open, see
+// weeklyController). Accounts that already existed when this started get GRACE_DAYS more
+// from FREE_LOCK_START. Paid, admin/teacher-made (not free_tier) and exempt codes are never
+// touched. Kill switch: FREE_WINDOW=off.
+const DAY = 864e5;
+function freeUntil(userDoc) {
+  if (!userDoc || userDoc.role !== 'student' || userDoc.free_tier !== true) return null;
+  if (String(process.env.FREE_WINDOW || '').toLowerCase() === 'off') return null;
+  const exempt = String(process.env.LOCK_EXEMPT_CODES || '').split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
+  if (exempt.includes(String(userDoc.student_code || '').toUpperCase())) return null;
+  const created = userDoc.created_at ? new Date(userDoc.created_at).getTime() : NaN;
+  if (!Number.isFinite(created)) return null;
+  const days = Number(process.env.FREE_DAYS) > 0 ? Number(process.env.FREE_DAYS) : 5;
+  const start = new Date(process.env.FREE_LOCK_START || '2026-11-15T22:00:00+05:30').getTime();
+  const grace = Number(process.env.FREE_GRACE_DAYS) >= 0 && process.env.FREE_GRACE_DAYS !== undefined && process.env.FREE_GRACE_DAYS !== '' ? Number(process.env.FREE_GRACE_DAYS) : 2;
+  return new Date(Math.max(created + days * DAY, start + grace * DAY));
+}
+function freeWindowOver(userDoc) {
+  const t = freeUntil(userDoc);
+  return !!t && Date.now() >= t.getTime();
+}
+
+// userDoc (optional): a student whose free window is over has no free chapters left.
+async function isChapterIdFree(chapterId, userDoc = null) {
+  if (userDoc && freeWindowOver(userDoc)) return false;
   const c = await _load();
   const id = String(chapterId || '');
   if (c.freeChapterIds.has(id)) return true;
@@ -138,18 +164,18 @@ async function isChapterIdFree(chapterId) {
   return c.freeBatches.has(batchPart);
 }
 
-async function isChapterFree(batch, subject, chapter) {
-  return isChapterIdFree(makeChapterId(batch, subject, chapter));
+async function isChapterFree(batch, subject, chapter, userDoc = null) {
+  return isChapterIdFree(makeChapterId(batch, subject, chapter), userDoc);
 }
 
 async function canAccessChapterId(userDoc, chapterId) {
   if (hasFullAccess(userDoc)) return true;
-  return isChapterIdFree(chapterId);
+  return isChapterIdFree(chapterId, userDoc);
 }
 
 async function canAccessChapter(userDoc, batch, subject, chapter) {
   if (hasFullAccess(userDoc)) return true;
-  return isChapterFree(batch, subject, chapter);
+  return isChapterFree(batch, subject, chapter, userDoc);
 }
 
 // A quiz is locked for a free-tier / expired student unless it belongs to
@@ -157,6 +183,7 @@ async function canAccessChapter(userDoc, batch, subject, chapter) {
 // chapters, or paper_mode 'mixed') are always locked.
 async function isQuizLocked(userDoc, quiz) {
   if (hasFullAccess(userDoc)) return false;
+  if (freeWindowOver(userDoc)) return true;
   const src = typeof quiz.toObject === "function" ? quiz.toObject() : quiz;
   if (src.paper_mode === "mixed") return true;
   const refs = new Set([`${src.batch}|${src.subject}|${src.chapter}`]);
@@ -182,6 +209,8 @@ function chapterLockedBody() {
 module.exports = {
   makeChapterId,
   hasFullAccess,
+  freeUntil,
+  freeWindowOver,
   isChapterFree,
   isChapterIdFree,
   listFreeChapters,

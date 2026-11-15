@@ -269,7 +269,7 @@ exports.searchExerciseQuestions = async (req, res) => {
     // Locked chapters must not leak question text through search.
     if (!hasFullAccess(req.userDoc)) {
       const kept = [];
-      for (const r of filtered) if (await isChapterIdFree(r.chapterId)) kept.push(r);
+      for (const r of filtered) if (await isChapterIdFree(r.chapterId, req.userDoc)) kept.push(r);
       filtered = kept;
     }
 
@@ -791,7 +791,7 @@ async function _canAccessPaper(userDoc, paper) {
   const ids = [...new Set([paper.chapterId, ...(paper.chapterIds || [])].filter(Boolean))];
   if (!ids.length) return false;
   for (const id of ids) {
-    if (!(await isChapterIdFree(id))) return false;
+    if (!(await isChapterIdFree(id, userDoc))) return false;
   }
   return true;
 }

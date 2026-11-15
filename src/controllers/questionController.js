@@ -118,7 +118,7 @@ exports.getQuestions = asyncHandler(async (req, res) => {
   // Free-tier / expired students only get questions of FREE chapters.
   if (!hasFullAccess(req.userDoc)) {
     const kept = [];
-    for (const r of rows) if (await isChapterFree(r.batch, r.subject, r.chapter)) kept.push(r);
+    for (const r of rows) if (await isChapterFree(r.batch, r.subject, r.chapter, req.userDoc)) kept.push(r);
     rows = kept;
   }
 
