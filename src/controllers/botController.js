@@ -65,6 +65,7 @@ async function syncOf(gid) {
     testsDone: lead.tests || 0,
     firstTestAt: first?.submitted_at || lead.offer?.issued_at || null,
     offerEnd: lead.offer?.expires_at || null,
+    teamOffer: lead.team_offer?.expires_at ? { pct: lead.team_offer.percent, end: new Date(lead.team_offer.expires_at).toISOString(), by: lead.team_offer.by || '' } : null,
     last: last ? { score: last.max_marks ? last.marks_obtained : last.score, total: last.max_marks || last.total_questions, title: lead.last_test || '' } : null,
   };
 }

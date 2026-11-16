@@ -41,6 +41,14 @@ const guestLeadSchema = new mongoose.Schema(
       expires_at: { type: Date, default: null },
       month:      { type: String, default: '' },   // IST 'YYYY-MM'
     },
+    // 🎁 a discount the team gave by hand (NKs Team app): 30 % or 50 % for 3 hours, first payment only (owner 2026-11-16)
+    team_offer: {
+      percent:    { type: Number, default: 0 },
+      issued_at:  { type: Date, default: null },
+      expires_at: { type: Date, default: null },
+      by:         { type: String, default: '' },
+      count:      { type: Number, default: 0 },
+    },
     // App only: push token for the evening "next free test" reminder (max 7, then stops).
     device_token:   { type: String, default: '', trim: true },
     reminders_sent: { type: Number, default: 0 },

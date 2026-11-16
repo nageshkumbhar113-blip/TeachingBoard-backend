@@ -61,7 +61,7 @@ export function facts(lead, now, WA, classes) {
     lead.totalTests ? `पूर्ण course मध्ये एकूण ${lead.totalTests} tests.` : '',
     `पूर्ण course मध्ये: सगळ्या chapters चे tests, प्रत्येक प्रश्नाचं स्पष्टीकरण, notes, Exercise आणि सराव, दर रविवारी महा-Test, पालकांना progress report. Internet नसतानाही app चालतं.`,
     price ? `फी: ${price}. Monthly = 30 दिवस, Yearly = या शैक्षणिक वर्षाच्या 30 एप्रिलपर्यंत (दोन्ही 30 एप्रिलला संपतात). Payment UPI / Card / Net banking ने pay link वरून; pay केलं की लगेच app मध्ये course उघडतो.` : 'फी: pay page वर.',
-    o ? `आत्ता पहिल्या payment वर ${o.pct}% सूट — ${WA.whenText(o.end, now)} पर्यंत.` : (lead.testsDone ? 'सध्या सूट चालू नाही.' : `Demo test सोडवली की 24 तास 50% सूट, नंतर रविवार रात्रीपर्यंत 30%.`),
+    o ? `आत्ता पहिल्या payment वर ${o.pct}% सूट — ${WA.whenText(o.end, now)} पर्यंत.` : (lead.testsDone ? 'सध्या सूट चालू नाही.' : `Demo test सोडवली की 24 तास 50% सूट, नंतर 2 दिवस 30%.`),
     `WhatsApp वर फक्त 1 demo test; रोज WhatsApp वर tests पाठवत नाही. पुढचे सगळे tests आणि रोजची आठवण app मध्ये.`,
     `App: ${C.play} — Login → Student Code + PIN (हे आधी WhatsApp वर पाठवलेले असतात). PIN विसरला तर App › Login › "📲 WhatsApp ने login".`,
     mt ? `महा-Test: ${mt} — सगळ्या विद्यार्थ्यांमध्ये क्रमांक, मोफत, नोंदणी इथे "महा-Test नोंदणी" बटणाने.` : 'महा-Test: दर रविवारी.',

@@ -39,7 +39,40 @@ async function _eventFor(req, me, { withKey = false } = {}) {
 
 const HIDDEN_NAME = 'नाव लपवलेलं';
 
-function _view(ev, entry, registered = 0, now = _now(), bannerUntil = null) {
+// Owner (2026-11-16): the rank board shows every child's name inside the app (no permission asked); on the website
+// (student-app on the web, the public महा-Test page) names stay hidden. The installed app's WebView sends its own origin.
+const APP_ORIGINS = new Set(['capacitor://localhost', 'https://localhost', 'http://localhost',
+  ...String(process.env.APP_ORIGINS || '').split(',').map(x => x.trim()).filter(Boolean)]);
+const _isApp = req => APP_ORIGINS.has(String(req.headers.origin || ''));
+
+// The child's family: this account + the free-part visits / accounts made with the same parent's number — so
+// "the first महा-Test" is the family's first, wherever it was given.
+async function _familyCodes(me) {
+  const codes = new Set([me.code]);
+  const leads = me.guest
+    ? await GuestLead.find({ gid: me.code.replace(/^GUEST-/, '') }).select('gid parent_mobile converted_code').lean()
+    : await GuestLead.find({ converted_code: me.code }).select('gid parent_mobile converted_code').limit(10).lean();
+  const mobiles = [...new Set(leads.map(l => l.parent_mobile).filter(Boolean))];
+  const all = mobiles.length ? [...leads, ...await GuestLead.find({ parent_mobile: { $in: mobiles } }).select('gid converted_code').limit(30).lean()] : leads;
+  for (const l of all) { codes.add('GUEST-' + l.gid); if (l.converted_code) codes.add(l.converted_code); }
+  return [...codes];
+}
+// a महा-Test this family submitted before `before` (other than `exceptId`; admin trials do not count)
+async function _priorEntry(codes, before, exceptId = '') {
+  const q = { student_code: { $in: codes }, submitted_at: { $ne: null, $lt: before } };
+  if (exceptId) q.event_id = { $ne: exceptId };
+  const rows = await WeeklyEntry.find(q).select('event_id').limit(20).lean();
+  if (!rows.length) return false;
+  return !!(await WeeklyEvent.exists({ _id: { $in: rows.map(r => r.event_id) }, is_trial: { $ne: true } }));
+}
+// On the website only the family's first महा-Test can be given; the next ones are in the app.
+const APP_ONLY_MSG = '📲 पुढचे महा-Test फक्त NKs EduOrbit app मध्ये — app download करा, तिथेच महा-Test मिळेल.';
+async function _webBlocked(req, me) {
+  if (_isApp(req)) return false;
+  return _priorEntry(await _familyCodes(me), _now());
+}
+
+function _view(ev, entry, registered = 0, now = _now(), bannerUntil = null, app = false) {
   const state = now < ev.starts_at ? 'upcoming' : now < ev.ends_at ? 'live' : 'closed';
   const reveal = W.revealOf(ev);
   const results = now >= reveal;
@@ -52,7 +85,7 @@ function _view(ev, entry, registered = 0, now = _now(), bannerUntil = null) {
     registered_count: registered,
     participants: ev.participants || 0,
     // Home banner: top 10 of this class until the next महा-Test starts
-    toppers: results ? (ev.toppers || []).map(t => ({ rank: t.rank, name: t.hidden ? HIDDEN_NAME : t.name, score: t.score, total: t.total })) : [],
+    toppers: results ? (ev.toppers || []).map(t => ({ rank: t.rank, name: app ? t.name : HIDDEN_NAME, score: t.score, total: t.total })) : [],
     banner_until: results ? (bannerUntil || new Date(reveal.getTime() + 7 * 864e5)) : null,
     me: entry ? {
       registered: true, submitted: !!entry.submitted_at, score: entry.submitted_at ? entry.score : null,
@@ -78,8 +111,12 @@ exports.my = asyncHandler(async (req, res) => {
   const nextOf = e => all.filter(x => x.schedule_id === e.schedule_id && !x.is_trial && x.starts_at > e.starts_at)
     .sort((a, b) => a.starts_at - b.starts_at)[0]?.starts_at || null;
   const now = _now();
-  const data = all.filter(e => e.open_to !== 'paid' || me.full).map(e => _view(e, byEvent.get(String(e._id)), countBy.get(String(e._id)) || 0, now, e.is_trial ? null : nextOf(e)));
-  res.json({ success: true, data, consent: await _consented(req, me) });
+  const app = _isApp(req);
+  const data = all.filter(e => e.open_to !== 'paid' || me.full).map(e => _view(e, byEvent.get(String(e._id)), countBy.get(String(e._id)) || 0, now, e.is_trial ? null : nextOf(e), app));
+  // website: after the family's first महा-Test, the next ones are in the app only
+  const appOnly = !app && data.length ? await _priorEntry(await _familyCodes(me), now) : false;
+  // the name is always shown now (no "माझं नाव दाखवा" question)
+  res.json({ success: true, data, consent: true, app_only: appOnly, app_only_msg: appOnly ? APP_ONLY_MSG : '' });
 });
 
 // GET /api/weekly/public?batch=… — for the public महा-Test page (no login): the next महा-Test of
@@ -99,7 +136,7 @@ async function mahaTestOf(batch) {
       question_count: await qn(next), sections: (next.sections || []).map(s => ({ subject: s.subject, count: s.count, marks: s.marks })), negative: next.negative || 0,
       open_to: next.open_to || 'all', registered_count: regs, state: now < next.starts_at ? 'upcoming' : 'live' } : null,
     last: last && now >= W.revealOf(last) ? { starts_at: last.starts_at, participants: last.participants || 0,
-      toppers: (last.toppers || []).slice(0, 10).map(t => ({ rank: t.rank, name: t.hidden ? HIDDEN_NAME : t.name, score: t.score, total: t.total })) } : null,
+      toppers: (last.toppers || []).slice(0, 10).map(t => ({ rank: t.rank, name: HIDDEN_NAME, score: t.score, total: t.total })) } : null,
   };
   _pubCache.set(batch, { at: Date.now(), data });
   return data;
@@ -135,8 +172,9 @@ exports.register = asyncHandler(async (req, res) => {
   const me = _me(req);
   const ev = await _eventFor(req, me);
   if (_now() >= ev.ends_at) throw new AppError('हा महा-Test संपला', 400);
-  // "माझं नाव दाखवा" — asked only the first time (not ticked = name hidden)
-  if (!(await _consented(req, me))) await _saveConsent(req, me, req.body?.show_name === true);
+  if (await _webBlocked(req, me)) return res.status(403).json({ success: false, code: 'APP_ONLY', message: APP_ONLY_MSG });
+  // the name now always shows in the app's rank board (owner 2026-11-16); the answer is still noted once
+  if (!(await _consented(req, me))) await _saveConsent(req, me, true);
   await WeeklyEntry.updateOne(
     { event_id: String(ev._id), student_code: me.code },
     { $setOnInsert: { name: me.name, is_guest: me.guest, registered_at: _now() } },
@@ -163,6 +201,7 @@ exports.key = asyncHandler(async (req, res) => {
   const now = _now();
   if (now < ev.starts_at) return res.status(425).json({ success: false, code: 'NOT_YET', starts_at: ev.starts_at });
   if (now >= ev.ends_at) throw new AppError('हा महा-Test संपला', 400);
+  if (await _webBlocked(req, me)) return res.status(403).json({ success: false, code: 'APP_ONLY', message: APP_ONLY_MSG });
   res.json({ success: true, key: ev.key_b64 });
 });
 
@@ -201,21 +240,45 @@ exports.result = asyncHandler(async (req, res) => {
   const mine = await WeeklyEntry.findOne({ event_id: String(ev._id), student_code: me.code }).lean();
   // Rank board: the top 50 (first names only); the student's own row is added below if outside it.
   const top = await WeeklyEntry.find({ event_id: String(ev._id), submitted_at: { $ne: null } }).sort({ rank: 1, score: -1 }).limit(50).select('name score total rank time_taken student_code').lean();
-  const hidden = await W.hiddenCodes(top.map(t => t.student_code));
+  const app = _isApp(req);
   const given = new Map((mine?.answers || []).map(a => [a.q_id, a.given]));
+  // the family's first महा-Test: the whole result free — answers + उकल too (owner 2026-11-16); later ones: paid only
+  const first = !me.full && !!mine?.submitted_at && !(await _priorEntry(await _familyCodes(me), mine.submitted_at, String(ev._id)));
+  const open = me.full || first;
   res.json({
     success: true,
     data: {
       event_id: String(ev._id), subject: ev.subject, participants: ev.participants,
       paper_order: ev.paper_order || '', negative: ev.negative || 0,
       me: mine?.submitted_at ? { score: mine.score, total: mine.total, correct: mine.correct, wrong: mine.wrong, skipped: mine.skipped, rank: mine.rank, time_taken: mine.time_taken, by_subject: mine.by_subject || [] } : null,
-      top: top.map(t => ({ name: hidden.has(t.student_code) && t.student_code !== me.code ? HIDDEN_NAME : (String(t.name || '').trim().slice(0, 40) || 'Student'), score: t.score, total: t.total, rank: t.rank, me: t.student_code === me.code })),
-      hide_in_toppers: me.hide,
-      // महा-Test is free for everyone, but the answer key + उकल are for paid students only (owner 2026-11-15).
-      review_locked: !me.full,
-      review: ev.questions.map(q => ({ q_id: q.q_id, type: q.type, question: q.question, options: q.options, answer: me.full ? q.answer : '', explanation: me.full ? q.explanation : '', image: q.image, subject: q.subject || '', marks: q.marks || 1, given: given.get(q.q_id) || '' })),
+      top: top.map(t => ({ name: !app && t.student_code !== me.code ? HIDDEN_NAME : (String(t.name || '').trim().slice(0, 40) || 'Student'), score: t.score, total: t.total, rank: t.rank, me: t.student_code === me.code })),
+      hide_in_toppers: false,
+      // महा-Test is free for everyone; the answer key + उकल: the family's first महा-Test, then paid students only
+      review_locked: !open,
+      first_free: first,
+      review: ev.questions.map(q => ({ q_id: q.q_id, type: q.type, question: q.question, options: q.options, answer: open ? q.answer : '', explanation: open ? q.explanation : '', image: q.image, subject: q.subject || '', marks: q.marks || 1, given: given.get(q.q_id) || '' })),
     },
   });
+});
+
+// GET /api/weekly/history — Me › Analytics "🏆 माझे महा-Test": every महा-Test this child gave (newest first, up to 30)
+exports.history = asyncHandler(async (req, res) => {
+  const me = _me(req);
+  const codes = await _familyCodes(me);
+  const entries = await WeeklyEntry.find({ student_code: { $in: codes }, submitted_at: { $ne: null } })
+    .sort({ submitted_at: -1 }).limit(40).select('event_id score total correct wrong skipped rank time_taken by_subject submitted_at').lean();
+  const evs = await WeeklyEvent.find({ _id: { $in: entries.map(e => e.event_id) }, is_trial: { $ne: true } })
+    .select('batch subject title starts_at ends_at reveal_at participants status').lean();
+  const byId = new Map(evs.map(e => [String(e._id), e]));
+  const now = _now();
+  const data = entries.filter(e => byId.has(e.event_id)).slice(0, 30).map(e => {
+    const ev = byId.get(e.event_id), results = now >= W.revealOf(ev);
+    return { event_id: e.event_id, batch: ev.batch, subject: ev.subject, title: ev.title || 'महा-Test', starts_at: ev.starts_at, reveal_at: W.revealOf(ev),
+      results, participants: results ? ev.participants || 0 : 0, rank: results ? e.rank ?? null : null,
+      score: e.score, total: e.total, correct: e.correct, wrong: e.wrong, skipped: e.skipped, time_taken: e.time_taken, by_subject: e.by_subject || [],
+      can_open: me.batches.includes(ev.batch) };
+  });
+  res.json({ success: true, data });
 });
 
 // POST /api/weekly/toppers/privacy { hide } — show / hide my name on toppers and rank boards.

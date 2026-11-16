@@ -31,6 +31,7 @@ router.post('/admin/bot-backfill', requireAdmin, c.adminBotBackfill);
 router.post('/admin/leads-add', T.requireAdminOrStaff, c.adminLeadsAdd);
 router.get('/admin/mt-list', T.requireAdminOrStaff, c.adminMtList);
 router.post('/admin/lead-paid', requireAdmin, c.adminLeadPaid);
+router.post('/admin/team-offer', T.requireAdminOrStaff, c.adminTeamOffer);
 router.post('/admin/app-students-backfill', requireAdmin, c.adminAppStudentsBackfill);
 router.post('/admin/mt-reminded', T.requireAdminOrStaff, c.adminMtReminded);
 // WhatsApp bot (Cloudflare Worker, wa-worker/): the child's facts, its requests, and Admin › CRM's token

@@ -58,12 +58,14 @@ async function resolveStudentDiscount(student, batch, basePrice) {
 async function _firstTestOffer(student, basePrice) {
   if (!student?.student_code) return null;
   const GuestLead = require('../models/GuestLead');
-  const lead = await GuestLead.findOne({ converted_code: student.student_code }).sort({ created_at: -1 }).lean();
-  const o = lead ? require('./guestController').offerNow(lead) : null;
+  // every lead of this account (the team's 🎁 offer may sit on an older one) — the best offer running now
+  const leads = await GuestLead.find({ converted_code: student.student_code }).sort({ created_at: -1 }).limit(5).lean();
+  const offerNow = require('./guestController').offerNow;
+  const o = leads.map(l => offerNow(l)).filter(Boolean).sort((x, y) => y.percent - x.percent)[0] || null;
   if (!o) return null;
   const priorPaid = await StudentSubscription.exists({ student_code: student.student_code, payment_verified: true, is_trial: false });
   if (priorPaid) return null;
-  return { percent: o.percent, amount: Math.round(basePrice * (100 - o.percent) / 100), source: 'first_test_offer', first_payment_only: true, ends: o.ends };
+  return { percent: o.percent, amount: Math.round(basePrice * (100 - o.percent) / 100), source: o.stage === 'team' ? 'team_offer' : 'first_test_offer', first_payment_only: true, ends: o.ends };
 }
 async function _youtubeDiscount(student, batch, basePrice) {
   const none = { percent: 0, amount: basePrice, source: '' };

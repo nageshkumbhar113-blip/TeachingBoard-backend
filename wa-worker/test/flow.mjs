@@ -92,19 +92,25 @@ const end = new Date(lead.offerEnd);
 out = W.tick(lead, new Date(end.getTime() - 3 * 3600e3 + 60e3));
 ok(out.some(x => x.to === 'wa' && /3 तासांत संपेल/.test(x.text)), 'offer: one reminder 3 hours before the end', JSON.stringify(out.map(x => x.text || x.what)));
 
-// 10) two-step offer: 50 % for 24 h, then 30 % until the first Sunday 11 pm, then the full price
+// 10) two-step offer: 50 % for 24 h, then 30 % for 2 more days (owner 2026-11-16), then the full price
 lead = W.createLead({ gid: 'HHHH111111', name: 'Om', cls: '8th NMMS', freeTotal: 18 }, now);
 W.event(lead, 'sync', { prices: { monthly: 200 } }, now);
 W.event(lead, 'test_done', { n: 1, score: 5, total: 10 }, now);              // Tuesday 6:30 pm → 50 % until Wednesday 6:30 pm
 const thu = new Date('2026-11-12T08:00:00Z');                                 // Thursday 1:30 pm
 out = W.inbound(lead, 'RESULT HHHH111111', thu);
 r = out.find(x => x.to === 'wa');
-ok(r.text.includes('Monthly ₹200 → ₹140') && r.text.includes('30% सूट') && /रविवारी रात्री 11/.test(r.text), 'after 24 h: 30 % until Sunday 11 pm', r.text);
+ok(r.text.includes('Monthly ₹200 → ₹140') && r.text.includes('30% सूट') && /उद्या संध्याकाळी 6:30/.test(r.text), 'after 24 h: 30 % for 2 days (till Friday 6:30 pm)', r.text);
+ok(W.offerNow(lead, new Date('2026-11-14T12:00:00Z')) === null, 'after the 2 days: no offer');
 const mon = new Date('2026-11-16T08:00:00Z');                                 // Monday
 W.inbound(lead, 'hi', mon);
 out = W.event(lead, 'test_done', { n: 2, score: 6, total: 10 }, mon);
 r = out.find(x => x.to === 'wa');
-ok(r && !/सूट/.test(r.text) && r.text.includes('Monthly ₹200') && !r.text.includes('→'), 'after Sunday: the full price', r && r.text);
+ok(r && !/सूट/.test(r.text) && r.text.includes('Monthly ₹200') && !r.text.includes('→'), 'after the 2 days: the full price', r && r.text);
+// the team's 🎁 offer (3 h) comes first, then nothing
+W.event(lead, 'sync', { teamOffer: { pct: 50, end: '2026-11-16T11:00:00Z', by: 'Sunita' } }, mon);
+ok(W.offerNow(lead, mon)?.pct === 50 && W.offerNow(lead, mon).stage === 'team', 'team offer: 50 % while its 3 h last');
+ok(W.offerNow(lead, new Date('2026-11-16T11:01:00Z')) === null, 'team offer over: the full price');
+delete lead.teamOffer;
 lead = W.createLead({ gid: 'IIII111111', name: 'Om', cls: '8th', freeTotal: 18 }, now);
 W.event(lead, 'sync', { prices: { monthly: 200 } }, now);
 W.event(lead, 'test_done', { n: 1, score: 5, total: 10 }, now);

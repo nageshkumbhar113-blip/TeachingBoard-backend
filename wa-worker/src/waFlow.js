@@ -22,7 +22,7 @@
   // ── settings: change here, not in the rules ──
   const CONFIG = {
     offerHours: 24, offerPercent: 50,
-    offer2Percent: 30,            // after the 24 h: this much until the first Sunday 11 pm (IST), then the full price
+    offer2Percent: 30, offer2Hours: 48,   // after the 24 h: this much for 2 more days (owner 2026-11-16), then the full price
     windowHours: 24,              // the free window after the parent's own message
     ctwaHours: 72,                // a click-to-WhatsApp ad: the bot may write free this long after the parent's first message
     earlyHours: 1,                // the daily test goes this much before the window closes, if the chosen time is later
@@ -89,13 +89,15 @@
   }
   // "Monthly ₹200 → ₹100 · Yearly ₹1,500 → ₹750" from the class's real prices (lead.prices), nothing when unknown
   const rs = n => '₹' + Number(n).toLocaleString('en-IN');
-  // the offer right now: { pct, end } (50 % for 24 h, then 30 % until the first Sunday 11 pm), or null
+  // the offer right now: { pct, end } (50 % for 24 h, then 30 % for 2 days; the team's own 🎁 30 / 50 % for 3 h first), or null
   function offerNow(lead, now) {
-    if (lead.paid || !lead.offerEnd) return null;
+    if (lead.paid) return null;
+    const t = lead.teamOffer;
+    if (t && t.end && now < new Date(t.end)) return { pct: t.pct, end: new Date(t.end), stage: 'team' };
+    if (!lead.offerEnd) return null;
     const e1 = new Date(lead.offerEnd);
     if (now < e1) return { pct: CONFIG.offerPercent, end: e1, stage: 1 };
-    let d = atIST(e1, 23, 0, 0);
-    for (let i = 0; i < 9 && (dow(d) !== 0 || d <= e1); i++) d = atIST(e1, 23, 0, i + 1);
+    const d = new Date(e1.getTime() + CONFIG.offer2Hours * H);
     return now < d ? { pct: CONFIG.offer2Percent, end: d, stage: 2 } : null;
   }
   function priceText(lead, withOffer, now) {
@@ -557,7 +559,7 @@
     if (type === 'sync') {
       // fresh facts from the server (name, class, free tests, courses, prices, next महा-Test, paid, app…); no message
       const hadAcct = !!(lead.acct && lead.acct.code);
-      for (const k of ['subjects', 'prevPapers', 'name', 'cls', 'freeTotal', 'totalTests', 'kind', 'freeLessons', 'courses', 'prices', 'mtNext', 'mtReg', 'paid', 'app', 'pushOn', 'mobile', 'testsDone', 'acct']) if (data[k] !== undefined && data[k] !== null && !((k === 'cls' || k === 'name') && !data[k])) lead[k] = data[k];
+      for (const k of ['subjects', 'prevPapers', 'name', 'cls', 'freeTotal', 'totalTests', 'kind', 'freeLessons', 'courses', 'prices', 'mtNext', 'mtReg', 'paid', 'app', 'pushOn', 'mobile', 'testsDone', 'acct', 'teamOffer']) if (data[k] !== undefined && data[k] !== null && !((k === 'cls' || k === 'name') && !data[k])) lead[k] = data[k];
       // a family that started on WhatsApp: the free account comes after the name — one message with it
       if (!hadAcct && lead.acct && lead.acct.code && lead.acct.pin && lead.welcomed && !lead.awaiting && !lead.app && !lead.paid && isOpen(lead, now))
         out.push(wa(lead, now, `📲 ${lead.name} चं app account पण तयार — app मध्ये ${appLeft(lead)} (फक्त app download केल्यावर), रोजची आठवण app मधून:\n${acctLine(lead)}\nApp 👇 Login → Code आणि PIN टाका\n${CONFIG.play}`));
@@ -730,7 +732,7 @@
   // (the next two evenings), the महा-Test's own reminders if it falls inside, and one "keep the reminders?" near the end
   // owner (2026-11-12): within the 72 h every family is asked at least once to take the course — "give the test, get
   // 50 % off, take the course" (the offer starts with the first test: 50 % for 24 h, then 30 % until Sunday night)
-  const testOfferLine = '🎁 Demo test सोडवली की course वर *50% सूट* (24 तास), मग रविवारपर्यंत 30%.';
+  const testOfferLine = '🎁 Demo test सोडवली की course वर *50% सूट* (24 तास), मग 2 दिवस 30%.';
   // short (owner: as little text as possible): one line of what the course is, the price, the link
   const shortCourse = (lead, now) => `🔓 ${lead.cls || 'पूर्ण'} course: सगळे tests + स्पष्टीकरण, notes, महा-Test${priceText(lead, false, now) ? '\n💳 ' + priceText(lead, false, now) : ''}\n👉 ${L.pay(lead.gid)}`;
   const courseButtons = [{ id: 'pay', label: '💳 Course घ्या' }, { id: 'call_me', label: '📞 Call हवा' }];

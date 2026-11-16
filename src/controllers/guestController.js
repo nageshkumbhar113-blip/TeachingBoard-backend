@@ -27,20 +27,27 @@ const { isChapterIdFree, makeChapterId } = require('../utils/contentAccess');
 
 const OFFER_PERCENT = 50;
 const OFFER_HOURS = 24;
-// the second step: after the 24 hours, 30 % until the first Sunday 11 pm (IST) after them; then the full price
+// the second step: after the 24 hours, 30 % for 2 more days (owner 2026-11-16; was "until Sunday night"); then the full price
 const OFFER2_PERCENT = 30;
-const IST_MS = 5.5 * 3600 * 1000;
+const OFFER2_HOURS = 48;
 function _offer2End(o) {
-  const end = new Date(o.expires_at).getTime();
-  const x = new Date(end + IST_MS);
-  let d = Date.UTC(x.getUTCFullYear(), x.getUTCMonth(), x.getUTCDate(), 23, 0) - IST_MS;   // that day, 11 pm IST
-  for (let i = 0; i < 9 && (new Date(d + IST_MS).getUTCDay() !== 0 || d <= end); i++) d += 864e5;
-  return new Date(d);
+  return new Date(new Date(o.expires_at).getTime() + OFFER2_HOURS * 3600 * 1000);
 }
-// the offer right now: { percent, ends, stage } or null
+// 🎁 the team's own discount (NKs Team app): 30 % or 50 % for 3 hours, when the parent is ready to pay
+const TEAM_OFFER_HOURS = 3;
+const TEAM_OFFER_PERCENTS = [30, 50];
+function _teamOfferNow(lead, now = Date.now()) {
+  const t = lead?.team_offer;
+  if (!t?.expires_at || !t.percent) return null;
+  const e = new Date(t.expires_at).getTime();
+  return now < e ? { percent: t.percent, ends: new Date(e), stage: 'team' } : null;
+}
+// the offer right now: { percent, ends, stage } or null — the team's offer first (it is given on purpose)
 function _offerNow(lead, now = Date.now()) {
+  const team = _teamOfferNow(lead, now);
   const o = lead?.offer;
-  if (!o?.expires_at) return null;
+  if (!o?.expires_at) return team;
+  if (team) return team;
   const e1 = new Date(o.expires_at).getTime();
   if (now < e1) return { percent: o.percent || OFFER_PERCENT, ends: new Date(e1), stage: 1 };
   const e2 = _offer2End(o);
@@ -85,6 +92,8 @@ function _profile(lead) {
 
 function _offerView(lead) {
   const o = lead?.offer;
+  const team = _teamOfferNow(lead);
+  if (team) return { percent: team.percent, expires_at: team.ends, active: true, stage: 'team', month: o?.month || '', steps: [{ percent: team.percent, ends: team.ends }] };
   if (!o || !o.expires_at) return null;
   const now = _offerNow(lead);
   // percent / expires_at / active = the step running now (what the pages show and the checkout uses);
@@ -482,6 +491,30 @@ exports.adminLeadPin = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { ...acc, name: lead.name || '' } });
 });
 
+// POST /api/guest/admin/team-offer { gid, percent: 30|50 } — NKs Team app / Admin: the parent is ready to pay, so the
+// team gives 30 % or 50 % off the first payment for 3 hours (owner 2026-11-16). Only when no other offer is running and
+// the child has never paid. The pay link (parent-pay.html?g=) and the app's own payment both use it.
+exports.adminTeamOffer = asyncHandler(async (req, res) => {
+  const gid = String(req.body?.gid || '').trim().toUpperCase();
+  const percent = Number(req.body?.percent);
+  if (!TEAM_OFFER_PERCENTS.includes(percent)) throw new AppError('सूट 30% किंवा 50% निवडा', 400);
+  const lead = /^[0-9A-F]{10}$/.test(gid) ? await GuestLead.findOne({ gid }) : null;
+  if (!lead) throw new AppError('Lead सापडला नाही', 404);
+  if (!lead.batch) throw new AppError('या family चा class नाही — आधी class ठरवा', 400);
+  const running = _offerNow(lead);
+  if (running) throw new AppError(`आधीच ${running.percent}% सूट चालू आहे (${new Date(running.ends).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', day: 'numeric', month: 'short' })} पर्यंत)`, 400);
+  const codes = [lead.converted_code].filter(Boolean);
+  if (lead.parent_mobile) for (const l of await GuestLead.find({ parent_mobile: lead.parent_mobile, converted_code: { $ne: '' } }).select('converted_code').lean()) codes.push(l.converted_code);
+  if (codes.length && await StudentSubscription.exists({ student_code: { $in: [...new Set(codes)] }, payment_verified: true, is_trial: false })) {
+    throw new AppError('या family ने आधीच pay केलं आहे — सूट फक्त पहिल्या payment वर', 400);
+  }
+  const now = new Date();
+  lead.team_offer = { percent, issued_at: now, expires_at: new Date(now.getTime() + TEAM_OFFER_HOURS * 3600 * 1000), by: req.staff?.name || 'Admin', count: (lead.team_offer?.count || 0) + 1 };
+  await lead.save();
+  BOT.notify(lead.gid, 'sync', {}, { sync: { teamOffer: { pct: percent, end: lead.team_offer.expires_at.toISOString(), by: lead.team_offer.by } } });
+  res.json({ success: true, data: { gid: lead.gid, percent, expires_at: lead.team_offer.expires_at, pay_url: `https://nkseduorbit.in/parent-pay.html?g=${lead.gid}` } });
+});
+
 // POST /api/guest/admin/lead-paid { gid, period: 'monthly'|'yearly', amount? } — Admin › CRM "✅ Paid (हाताने)":
 // the parent paid outside our pay page (Razorpay payment link / UPI / cash). The free account (made now if missing)
 // gets the full course for the period, the payment is recorded (Admin's "Pay केलं" counts it, the offer stops) and
@@ -707,7 +740,7 @@ exports.checkout = asyncHandler(async (req, res) => {
     status: 'created',
     is_trial: false,
     discount_applied_percent: percent,
-    discount_source: useOffer ? (_offerNow(lead).stage === 2 ? 'test_offer_2' : 'test_offer') : '',
+    discount_source: useOffer ? ({ 2: 'test_offer_2', team: 'team_offer' }[_offerNow(lead).stage] || 'test_offer') : '',
   });
 
   res.status(201).json({
@@ -1190,4 +1223,5 @@ exports.freeTestCounts = _freeTestCounts;
 exports.noteLead = gid => _adLead(gid).catch(err => console.warn('[ad lead] bot', err.message));
 exports.noteAdPurchase = (sub) => noteAdPurchase(sub).catch(err => console.warn('[meta capi] purchase', err.message));
 
-exports.offerNow = _offerNow;   // the first-payment offer right now (bot + tests)
+exports.offerNow = _offerNow;
+exports.TEAM_OFFER_HOURS = TEAM_OFFER_HOURS;   // the first-payment offer right now (bot + tests)

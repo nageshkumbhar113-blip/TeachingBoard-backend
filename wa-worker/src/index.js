@@ -244,7 +244,7 @@ async function adminOk(env, req) {
 // 👥 one line per thing a person did (Admin › 👥 Team shows who did what)
 const act = (env, who, gid, action, detail) => env.DB.prepare('INSERT INTO acts (at, by_id, by_name, gid, action, detail) VALUES (?, ?, ?, ?, ?, ?)')
   .bind(Date.now(), who?.id || 'admin', who?.name || 'Admin', gid || null, action, detail == null ? null : String(detail).slice(0, 300)).run().catch(() => {});
-const ACT_NAMES = { wa: '💬 WhatsApp', sms: '✉️ SMS', next: '✅ बोललो → पुढची Step', paying: '💳 Pay करणार', later: '⏰ नंतर', noanswer: '📵 उचलला नाही', close: '❌ नको', reply: '✍️ उत्तर', note: '📝 Note', add: '➕ नवीन', acct: '🔑 Code + PIN', answered: '✅ प्रश्न सुटला', step: '📋 Step', labels: '🏷️ Label', mt: '🏆 महा-Test आठवण' };
+const ACT_NAMES = { wa: '💬 WhatsApp', sms: '✉️ SMS', next: '✅ बोललो → पुढची Step', paying: '💳 Pay करणार', later: '⏰ नंतर', noanswer: '📵 उचलला नाही', close: '❌ नको', reply: '✍️ उत्तर', note: '📝 Note', add: '➕ नवीन', acct: '🔑 Code + PIN', answered: '✅ प्रश्न सुटला', step: '📋 Step', labels: '🏷️ Label', mt: '🏆 महा-Test आठवण', offer: '🎁 Team सूट' };
 // 📲 App · free: the child uses the app (logged in / notifications) and has not paid, not closed — with how much
 // they use it (Render: the last day seen, tests, minutes in 7 days), the most active on top
 async function appFree(env, withUsage = true) {
@@ -361,7 +361,7 @@ async function callFirst(env) {
   }
   return rows.sort((a, b) => a._k - b._k).slice(0, 100).map(({ _k, ...r }) => r);
 }
-// the first-payment offer right now: { pct, end } or null (50 % for 24 h, then 30 % until Sunday night)
+// the first-payment offer right now: { pct, end } or null (50 % for 24 h, then 30 % for 2 days; the team's 🎁 3 h offer first)
 const offerOf = (d, now) => { const o = d.paid ? null : WA.offerNow(d, now); return o ? { pct: o.pct, end: o.end.toISOString() } : null; };
 // ── 📋 follow-up steps ──
 const FU_DEFAULT = [
@@ -627,7 +627,7 @@ async function crm(env, req, url, who) {
     }
     // something done on Render for this family from the CRM (➕ a family, 🔑 Code + PIN, 🏆 reminder): counted for the person
     if (parts[3] === 'act') {
-      const a = ['add', 'acct', 'mt'].includes(body.action) ? body.action : null;
+      const a = ['add', 'acct', 'mt', 'offer'].includes(body.action) ? body.action : null;
       if (!a) return json({ success: false, message: 'action?' }, 400);
       await act(env, who, gid, a, body.detail || '');
       return json({ success: true });
