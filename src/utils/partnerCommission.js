@@ -247,4 +247,5 @@ async function ensurePreviousMonthClosed() {
 module.exports = {
   getConfig, monthKey, monthRange, previousMonthKey,
   recordCommissionForPayment, reverseEntry, closeMonth, settlePartnerNow, ensurePreviousMonthClosed,
+  findPartnerForStudent, commissionFor,
 };

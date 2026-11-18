@@ -11,6 +11,7 @@ const {
   updateOwnDeviceToken,
 } = require('../controllers/studentController');
 const { getSyncState } = require('../controllers/syncStateController');
+const { previewImport, runImport } = require('../controllers/studentImportController');
 
 const router = express.Router();
 
@@ -24,6 +25,9 @@ const registerLimiter = createRateLimiter({
 router.post('/register', registerLimiter, selfRegister); // public — no auth needed
 router.get('/', requireAdmin, getStudents);
 router.post('/', requireAdmin, createStudent);
+// Admin › Students › 📥 Import (many students at once; preview first, nothing saved)
+router.post('/import/preview', requireAdmin, previewImport);
+router.post('/import', requireAdmin, runImport);
 router.patch('/:id', requireAdmin, updateStudent);
 router.delete('/:id', requireAdmin, deleteStudent);
 router.post('/:id/reset-device', requireAdmin, resetDevice);

@@ -46,6 +46,13 @@ const studentSubscriptionSchema = new mongoose.Schema(
     // for every ordinary full-price order.
     discount_applied_percent: { type: Number, default: 0, min: 0, max: 100 },
     discount_source:          { type: String, default: '', trim: true }, // e.g. 'youtube_subscriber_approved'
+
+    // 'admin_bulk' = paid offline to the admin and created by Admin › Students › Import
+    // (razorpay_payment_id then holds a "bulk:<import>:<student>:<batch>" key so a repeated
+    // import never records the money twice).
+    source:     { type: String, enum: ['online', 'admin_bulk'], default: 'online' },
+    import_id:  { type: String, default: '', index: true },
+    list_price: { type: Number, default: 0, min: 0 }, // price before the discount
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },

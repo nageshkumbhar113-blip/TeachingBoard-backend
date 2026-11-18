@@ -15,6 +15,7 @@ const {
   chapterLockedBody,
 } = require('../utils/contentAccess');
 const { getQuota, limitMessage } = require('../utils/paperQuota');
+const { rulesPending, RULES_URL } = require('../utils/teacherRules');
 const { sanitizeStructure, boardTotalMarks, mcqSnapshot, mcqFormat } = require('../utils/paperSections');
 const McqQuestion = require('../models/Question');
 const PassageBlock = require('../models/PassageBlock');
@@ -23,6 +24,11 @@ const PassageBlock = require('../models/PassageBlock');
 // that batch's students have paid (utils/paperQuota.js). Admins are never limited.
 async function _teacherPaperLimitResponse(req, batchId) {
   if (req.user?.role !== 'teacher') return null;
+  // After a bulk import the teacher must accept the rules first (utils/teacherRules.js).
+  // Code PAPER_LIMIT on purpose: app 9.0.0 shows the server's message only for that code.
+  if (rulesPending(req.userDoc)) {
+    return { success: false, code: 'PAPER_LIMIT', rules_required: true, message: `📜 Paper बनवण्याआधी नियम मान्य करा: ${RULES_URL} (तुमचा teacher code आणि PIN वापरा)` };
+  }
   const quota = await getQuota(req.userDoc || {}, batchId);
   if (quota.allowed) return null;
   return { success: false, code: 'PAPER_LIMIT', message: limitMessage(quota), quota };

@@ -1,6 +1,7 @@
 const { randomUUID } = require('crypto');
 const User = require('../models/User');
 const Attempt = require('../models/Attempt');
+const StudentSubscription = require('../models/StudentSubscription');
 const asyncHandler = require('../utils/asyncHandler');
 // Marks-based % that matches what the student saw (falls back for old attempts)
 const { OBTAINED, MAXIMUM } = require('../utils/attemptScore');
@@ -18,6 +19,14 @@ function parseValidity(value) {
   return new Date(d.toISOString().slice(0, 10));
 }
 const { invalidateUserCache } = require('../middleware/auth');
+
+// Student discount (%) for this teacher's bulk-imported students (Admin › Students › Import).
+function parseBulkDiscount(value) {
+  if (value === '' || value == null) return 0;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || n > 100) throw new AppError('bulk_discount_percent must be 0–100', 400);
+  return Math.round(n * 100) / 100;
+}
 
 // Version of the terms a self-registering teacher agrees to: the free plan allows
 // 4 papers per batch, and unlimited Paper Builder needs 10 paid students in that batch.
@@ -61,6 +70,11 @@ function serializeTeacher(t) {
     commission_mode: t.commission_mode || 'flat',
     commission_value: t.commission_value || 0,
     commission_first_payment_only: t.commission_first_payment_only !== false,
+    bulk_discount_percent: Number(t.bulk_discount_percent || 0),
+    paper_unlimited: (t.paper_unlimited || []).map(e => ({ batch: e.batch, until: normalizeExpiryDate(e.until) })),
+    rules_required: t.rules_required === true,
+    rules_version_accepted: t.rules_version_accepted || '',
+    rules_accepted_at: t.rules_accepted_at || null,
     payout_upi_id: t.payout_upi_id || '',
     payout_name: t.payout_name || '',
     pan: t.pan || '',
@@ -210,6 +224,7 @@ exports.createTeacher = asyncHandler(async (req, res) => {
     board_papers_allowed: req.body.board_papers_allowed === true,
     validity_until: parseValidity(req.body.validity_until),
     assigned_students: normalizeStudentCodes(req.body.assigned_students),
+    bulk_discount_percent: parseBulkDiscount(req.body.bulk_discount_percent),
     pin_hash: User.hashPin(pin),
   });
 
@@ -263,6 +278,7 @@ exports.updateTeacher = asyncHandler(async (req, res) => {
   if (req.body.validity_until !== undefined) {
     teacher.validity_until = parseValidity(req.body.validity_until);
   }
+  if (req.body.bulk_discount_percent !== undefined) teacher.bulk_discount_percent = parseBulkDiscount(req.body.bulk_discount_percent);
 
   if (req.body.status !== undefined) {
     const status = String(req.body.status || '').trim().toLowerCase();
@@ -336,8 +352,13 @@ exports.getMyStudents = asyncHandler(async (req, res) => {
 
   // Fetch student records
   const students = await User.find({ student_code: { $in: studentCodes }, role: 'student' })
-    .select('user_id name student_code mobile school_name assigned_batches')
+    .select('user_id name student_code mobile school_name assigned_batches expiry_date')
     .lean();
+
+  // Students with a verified, paid, still-running subscription (online or the admin's bulk import)
+  const paidCodes = new Set(await StudentSubscription.distinct('student_code', {
+    student_code: { $in: studentCodes }, payment_verified: true, is_trial: false, status: 'active', expiry_date: { $gt: new Date() },
+  }));
 
   // Aggregate attempt stats per student
   const statsPipeline = [
@@ -364,6 +385,8 @@ exports.getMyStudents = asyncHandler(async (req, res) => {
       mobile: s.mobile || '',
       school_name: s.school_name || '',
       assigned_batches: s.assigned_batches || [],
+      expiry_date: normalizeExpiryDate(s.expiry_date),
+      paid: paidCodes.has(s.student_code),
       total_attempts: st.total_attempts || 0,
       avg_score_pct: totalQ > 0 ? Math.round((st.total_score / totalQ) * 100) : 0,
       last_attempt: st.last_attempt || null,

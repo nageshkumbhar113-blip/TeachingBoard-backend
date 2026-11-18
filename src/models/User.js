@@ -57,6 +57,21 @@ const userSchema = new mongoose.Schema(
     assigned_students:  { type: [String], default: [] }, // array of student_codes
     fee_upi_id:         { type: String, default: '', trim: true },
     fee_upi_name:       { type: String, default: '', trim: true },
+    // Bulk student import (Admin › Students › Import): the student discount this teacher's
+    // bulk students get by default (admin may change it per import).
+    bulk_discount_percent: { type: Number, default: 0, min: 0, max: 100 },
+    // Paper Builder unlimited for these batches until the date (set by a bulk import, ends on
+    // its own — after `until` the normal paper quota applies again). Never touches validity.
+    paper_unlimited: {
+      type: [{ _id: false, batch: { type: String, required: true, trim: true }, until: { type: Date, required: true } }],
+      default: [],
+    },
+    // "नियम आणि धोरण" (utils/teacherRules.js): required after a bulk import; paper saving waits
+    // until the current version is accepted on nkseduorbit.in/teacher-rules.
+    rules_required:         { type: Boolean, default: false },
+    rules_version_accepted: { type: String, default: '' },
+    rules_accepted_at:      { type: Date, default: null },
+    rules_accepted_ip:      { type: String, default: '' },
     // Admin-set last valid day for a teacher account (null = no limit). Kept separate from
     // expiry_date, which is derived from the teacher's students and is informational only.
     validity_until:     { type: Date, default: null },

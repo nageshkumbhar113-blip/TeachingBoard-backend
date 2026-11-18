@@ -32,6 +32,12 @@ async function countPaidStudents(teacherDoc, batch) {
   return paid.length;
 }
 
+// A bulk import's "unlimited until 30 April" for this batch, if still running.
+function bulkUnlimitedUntil(teacherDoc, batch, now = new Date()) {
+  const entry = (teacherDoc.paper_unlimited || []).find(e => e.batch === batch && new Date(e.until) > now);
+  return entry ? new Date(entry.until) : null;
+}
+
 function findOverride(teacherDoc, batch) {
   const list = teacherDoc.paper_quota_overrides || [];
   return list.find(o => o.batch === batch) || list.find(o => o.batch === '*') || null;
@@ -53,8 +59,10 @@ async function getQuota(teacherDoc, batch, cfg) {
     countPaidStudents(teacherDoc, batch),
   ]);
 
-  const unlimited = (ov && ov.mode === 'unlimited') || paid >= need;
+  const bulkUntil = bulkUnlimitedUntil(teacherDoc, batch);
+  const unlimited = (ov && ov.mode === 'unlimited') || paid >= need || !!bulkUntil;
   return {
+    bulk_unlimited_until: bulkUntil ? bulkUntil.toISOString() : null,
     batch,
     used,
     limit,
@@ -71,4 +79,4 @@ function limitMessage(q) {
   return `You have used the ${q.limit} free papers for this batch. Unlimited Paper Builder unlocks when ${q.need} students of this batch have paid (${q.paid} / ${q.need} so far).`;
 }
 
-module.exports = { getConfig, countPaidStudents, getQuota, limitMessage };
+module.exports = { getConfig, countPaidStudents, getQuota, limitMessage, bulkUnlimitedUntil };
