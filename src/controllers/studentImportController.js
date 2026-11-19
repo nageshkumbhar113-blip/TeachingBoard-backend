@@ -240,7 +240,7 @@ async function planImport(body, now = new Date()) {
       teacher_code: c, name: t.name, mobile: t.mobile || '',
       bulk_discount_percent: Number(t.bulk_discount_percent || 0),
       commission_enabled: t.commission_enabled === true, commission_mode: t.commission_mode || 'flat', commission_value: t.commission_value || 0,
-      rules_pending: !t.rules_version_accepted || t.rules_version_accepted !== RULES_VERSION,
+      rules_pending: rulesPending({ ...t, rules_required: true }),   // an earlier accepted version still counts
       students: ok.filter(r => r.teacher_code === c).length,
     };
   });

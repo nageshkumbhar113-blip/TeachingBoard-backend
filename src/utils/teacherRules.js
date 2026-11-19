@@ -71,8 +71,11 @@ const RULES = {
 };
 
 /** True when this teacher must (still) accept the current rules. */
+// owner 2026-11-20: a teacher who already accepted an earlier version is not asked again for Paper Builder
+// (v2 only added the सूट / Students-tab points; that tab asks for v2 itself before a payment)
+const STILL_OK = ['teacher-rules-v1', RULES_VERSION];
 function rulesPending(teacher) {
-  return Boolean(teacher && teacher.rules_required && teacher.rules_version_accepted !== RULES_VERSION);
+  return Boolean(teacher && teacher.rules_required && !STILL_OK.includes(teacher.rules_version_accepted));
 }
 
 const RULES_URL = 'https://nkseduorbit.in/teacher-rules';
