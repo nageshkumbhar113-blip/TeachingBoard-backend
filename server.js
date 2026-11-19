@@ -104,6 +104,7 @@ async function start() {
   await connectToDatabase();
   await seedAdmin();
 
+  await require('./src/utils/offerConfig').refresh();   // 🎁 the admin's offer settings in memory
   require('./src/jobs/notificationScheduler').start();
 
   // Initialize FCM at startup so we know immediately if it's configured

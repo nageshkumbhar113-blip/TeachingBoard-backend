@@ -92,6 +92,11 @@
   // the offer right now: { pct, end } (50 % for 24 h, then 30 % for 2 days; the team's own 🎁 30 / 50 % for 3 h first), or null
   function offerNow(lead, now) {
     if (lead.paid) return null;
+    // the server keeps the offer (Admin may stop / change it): its promised steps, team first; [] = no offer
+    if (lead.srvOffer && Array.isArray(lead.srvOffer.steps)) {
+      const s = lead.srvOffer.steps.find(x => x && x.end && now < new Date(x.end));
+      return s ? { pct: s.pct, end: new Date(s.end), stage: s.stage, name: lead.srvOffer.name || '' } : null;
+    }
     const t = lead.teamOffer;
     if (t && t.end && now < new Date(t.end)) return { pct: t.pct, end: new Date(t.end), stage: 'team' };
     if (!lead.offerEnd) return null;
@@ -99,6 +104,16 @@
     if (now < e1) return { pct: CONFIG.offerPercent, end: e1, stage: 1 };
     const d = new Date(e1.getTime() + CONFIG.offer2Hours * H);
     return now < d ? { pct: CONFIG.offer2Percent, end: d, stage: 2 } : null;
+  }
+  // "🎁 Demo test सोडवली की course वर 50% सूट (24 तास), मग 2 दिवस 30%." from Admin's settings; '' when the offer is off
+  function ruleText(lead, { short = false, bold = true } = {}) {
+    const c = lead.offerCfg || { on: true, name: '', p1: CONFIG.offerPercent, h1: CONFIG.offerHours, p2: CONFIG.offer2Percent, h2: CONFIG.offer2Hours };
+    if (!c.on || !c.p1) return '';
+    const hrs = h => h % 24 === 0 ? `${h / 24 === 1 ? '24 तास' : h / 24 + ' दिवस'}` : `${h} तास`;
+    const pct = bold ? `*${c.p1}% सूट*` : `${c.p1}% सूट`;
+    const head = c.name ? `${c.name}: ` : '';
+    if (short) return `${head}Free test दिली की ${c.p1}% सूट (${hrs(c.h1)}).`;
+    return `${head}Demo test सोडवली की course वर ${pct} (${hrs(c.h1)})${c.p2 && c.h2 ? `, मग ${hrs(c.h2)} ${c.p2}%` : ''}.`;
   }
   function priceText(lead, withOffer, now) {
     const o = withOffer ? offerNow(lead, now || new Date()) : null;
@@ -289,7 +304,7 @@
     if (!lead.paid) lead.payWantAt = now.toISOString();   // 💳 asked for the course here: a warm family for the team
     if (lead.paid) { out.push(wa(lead, now, `✅ ${lead.name} चं account आधीच चालू आहे.`)); return; }
     const o = offerNow(lead, now);
-    out.push(wa(lead, now, `${o ? `🎁 पहिल्या payment वर ${o.pct}% सूट — ${whenText(o.end, now)} पर्यंत.${priceText(lead, true, now) ? '\n' + priceText(lead, true, now) : ''}` : '📚 सगळे chapters, tests, notes आणि महा-Test' + (priceText(lead, false, now) ? '\n💳 ' + priceText(lead, false, now) : '') + (lead.testsDone ? '' : '\n🎁 Free test दिली की 50% सूट (24 तास).')}\n👇 ${L.pay(lead.gid)}`,
+    out.push(wa(lead, now, `${o ? `🎁 पहिल्या payment वर ${o.pct}% सूट — ${whenText(o.end, now)} पर्यंत.${priceText(lead, true, now) ? '\n' + priceText(lead, true, now) : ''}` : '📚 सगळे chapters, tests, notes आणि महा-Test' + (priceText(lead, false, now) ? '\n💳 ' + priceText(lead, false, now) : '') + (lead.testsDone || !ruleText(lead) ? '' : '\n🎁 ' + ruleText(lead, { short: true }))}\n👇 ${L.pay(lead.gid)}`,
       [{ id: 'ask', label: '❓ प्रश्न' }, { id: 'call_me', label: '📞 Call हवा' }]));
   }
   function answer(lead, now, out, text) {
@@ -326,7 +341,7 @@
       `✅ प्रत्येक प्रश्नाची trick / स्पष्टीकरण${subj.length ? ' · ✅ सगळे विषय: ' + subj.join(', ') : ''}\n` +
       `✅ Notes · दर रविवारी महा-Test · पालकांना progress report` +
       (price ? `\n💳 ${price.replace(/Monthly /, '').replace(/ · Yearly /, '/महिना · ')} (30 एप्रिलपर्यंत)` : '') +
-      `\n\n🎁 *Demo test सोडवा आणि course वर 50% सूट मिळवा* 👇${hello ? teamLine() : ''}`;
+      (ruleText(lead) ? `\n\n🎁 *Demo test सोडवा आणि course वर ${lead.offerCfg?.p1 || CONFIG.offerPercent}% सूट मिळवा* 👇` : '\n\n📝 *Demo test सोडवा* (10 मिनिटं, login नाही) 👇') + (hello ? teamLine() : '');
   }
   function linkFirst(lead, now, out, hello) {
     lead.awaiting = null;
@@ -509,7 +524,7 @@
     if (t === 'next') { out.push(wa(lead, now, '👍 उद्या पुढची पाठवतो.')); if (!lead.shared && lead.testsDone >= 2) shareMsg(lead, now, out); return out; }
     if (t === 'ask') { out.push(wa(lead, now, 'कोणता प्रश्न?', [{ id: 'ask:fee', label: 'फी किती?' }, { id: 'ask:app', label: 'App कसा वापरायचा?' }, { id: 'ask:other', label: '💬 दुसरा प्रश्न' }])); return out; }
     if (t === 'ask:other') { lead.awaiting = 'question'; out.push(wa(lead, now, '✍️ तुमचा प्रश्न लिहा 👇')); return out; }
-    if (t === 'fee') { out.push(wa(lead, now, `💳 ${priceText(lead, true, now) || 'फी pay page वर'}${offerLine(lead, now)}${offerNow(lead, now) || lead.testsDone ? '' : '\n🎁 Free test दिली की 50% सूट (24 तास).'}\nसगळे tests, notes आणि महा-Test 👇\n${L.pay(lead.gid)}`, [{ id: 'pay', label: '💳 Course घ्या' }, { id: 'call_me', label: '📞 Call हवा' }])); return out; }
+    if (t === 'fee') { out.push(wa(lead, now, `💳 ${priceText(lead, true, now) || 'फी pay page वर'}${offerLine(lead, now)}${offerNow(lead, now) || lead.testsDone || !ruleText(lead) ? '' : '\n🎁 ' + ruleText(lead, { short: true })}\nसगळे tests, notes आणि महा-Test 👇\n${L.pay(lead.gid)}`, [{ id: 'pay', label: '💳 Course घ्या' }, { id: 'call_me', label: '📞 Call हवा' }])); return out; }
     if (t === 'ask:fee') { answer(lead, now, out, `${priceText(lead, false, now) || 'फी: pay page वर'}.${offerLine(lead, now)}\nPay नंतर सगळे tests, notes, स्वाध्याय उत्तरं आणि महा-Test.`); return out; }
     if (t === 'ask:app') { answer(lead, now, out, lead.acct && lead.acct.code ? `Play Store वरून install करा → Login → ${acctLine(lead)} → Home वर "पुढचा test". PIN विसरलात तर Login वर "📲 WhatsApp ने login".` : 'Play Store वरून install करा → login लागत नाही → Home वर "पुढचा test". Pay नंतर Student Code + PIN किंवा WhatsApp login.'); return out; }
     if (t === 'ask:pin') { answer(lead, now, out, 'App → Login → "📲 WhatsApp ने login" → नवीन PIN. 1 मिनिट.'); return out; }
@@ -536,8 +551,9 @@
       lead.testDay = dayKey(now);   // one free test a day, wherever it was taken (website or WhatsApp link)
       if (first) {
         if (!lead.firstTestAt) lead.firstTestAt = now.toISOString();
-        if (!lead.offerEnd) lead.offerEnd = new Date(new Date(lead.firstTestAt).getTime() + CONFIG.offerHours * H).toISOString();
-        out.push(log('OFFER', `पहिली test → ${CONFIG.offerPercent}% सूट ${CONFIG.offerHours} तास (test संपल्यापासून).`));
+        if (!lead.offerEnd && !lead.srvOffer) lead.offerEnd = new Date(new Date(lead.firstTestAt).getTime() + CONFIG.offerHours * H).toISOString();
+        const o0 = offerNow(lead, now);
+        out.push(log('OFFER', o0 ? `पहिली test → ${o0.name ? o0.name + ': ' : ''}${o0.pct}% सूट ${whenText(o0.end, now)} पर्यंत.` : 'पहिली test → सूट नाही (Admin ने सूट बंद ठेवली आहे / आधीच मिळाली).'));
         if (lead.via === 'wa' && lead.lastInboundAt) firstAnswer(lead, now, out);   // the parent-alone path: the child's first test
         return out;
       }
@@ -559,11 +575,13 @@
     if (type === 'sync') {
       // fresh facts from the server (name, class, free tests, courses, prices, next महा-Test, paid, app…); no message
       const hadAcct = !!(lead.acct && lead.acct.code);
-      for (const k of ['subjects', 'prevPapers', 'name', 'cls', 'freeTotal', 'totalTests', 'kind', 'freeLessons', 'courses', 'prices', 'mtNext', 'mtReg', 'paid', 'app', 'pushOn', 'mobile', 'testsDone', 'acct', 'teamOffer']) if (data[k] !== undefined && data[k] !== null && !((k === 'cls' || k === 'name') && !data[k])) lead[k] = data[k];
+      for (const k of ['subjects', 'prevPapers', 'name', 'cls', 'freeTotal', 'totalTests', 'kind', 'freeLessons', 'courses', 'prices', 'mtNext', 'mtReg', 'paid', 'app', 'pushOn', 'mobile', 'testsDone', 'acct', 'teamOffer', 'srvOffer', 'offerCfg']) if (data[k] !== undefined && data[k] !== null && !((k === 'cls' || k === 'name') && !data[k])) lead[k] = data[k];
       // a family that started on WhatsApp: the free account comes after the name — one message with it
       if (!hadAcct && lead.acct && lead.acct.code && lead.acct.pin && lead.welcomed && !lead.awaiting && !lead.app && !lead.paid && isOpen(lead, now))
         out.push(wa(lead, now, `📲 ${lead.name} चं app account पण तयार — app मध्ये ${appLeft(lead)} (फक्त app download केल्यावर), रोजची आठवण app मधून:\n${acctLine(lead)}\nApp 👇 Login → Code आणि PIN टाका\n${CONFIG.play}`));
-      if (data.firstTestAt && !lead.firstTestAt) { lead.firstTestAt = data.firstTestAt; lead.offerEnd = data.offerEnd || new Date(new Date(data.firstTestAt).getTime() + CONFIG.offerHours * H).toISOString(); }
+      if (data.firstTestAt && !lead.firstTestAt) { lead.firstTestAt = data.firstTestAt; lead.offerEnd = data.offerEnd || (lead.srvOffer ? null : new Date(new Date(data.firstTestAt).getTime() + CONFIG.offerHours * H).toISOString()); }
+      // the server's offer: the reminders' clock follows its first step (none when stopped / off)
+      if (data.srvOffer) { const s1 = (data.srvOffer.steps || []).find(x => x.stage === 1); lead.offerEnd = s1 ? s1.end : null; }
       if (data.last) lead.last = data.last;
       if (lead.paid && lead.crm !== 'paid') lead.crm = 'paid';
       return out;
@@ -673,9 +691,10 @@
       else if (canPush(lead)) out.push(push(`🌅 आजचा प्रश्न — 1 मिनिट${offerLine(lead, now).replace('\n', ' · ')}`, [{ id: 'push:OFFER', label: '💬 WhatsApp वर सूट' }]));
     });
     nudge('nudge3', new Date(offerEnd.getTime() - 3 * H), (out, now) => {
-      const o2 = offerNow(lead, new Date(offerEnd.getTime() + 60e3));
-      if (isOpen(lead, now)) out.push(wa(lead, now, `⏳ ${CONFIG.offerPercent}% सूट 3 तासांत संपेल${priceText(lead, true, now) ? ' (' + priceText(lead, true, now) + ')' : ''}.${o2 ? `\nत्यानंतर ${whenText(o2.end, now)} पर्यंत ${o2.pct}%.` : ''}\n👇 ${L.pay(lead.gid)}\nकाही शंका असेल तर आमची team call करू शकते.`, [{ id: 'call_me', label: '📞 Call हवा' }], { own: true }));
-      else if (canPush(lead)) out.push(push(`⏳ ${CONFIG.offerPercent}% सूट 3 तासांत संपेल`, [{ id: 'push:OFFER', label: '💬 WhatsApp वर सूट' }]));
+      const o2 = offerNow(lead, new Date(offerEnd.getTime() + 60e3)), o1 = offerNow(lead, now);
+      if (!o1) return;   // stopped meanwhile (Admin)
+      if (isOpen(lead, now)) out.push(wa(lead, now, `⏳ ${o1.pct}% सूट 3 तासांत संपेल${priceText(lead, true, now) ? ' (' + priceText(lead, true, now) + ')' : ''}.${o2 ? `\nत्यानंतर ${whenText(o2.end, now)} पर्यंत ${o2.pct}%.` : ''}\n👇 ${L.pay(lead.gid)}\nकाही शंका असेल तर आमची team call करू शकते.`, [{ id: 'call_me', label: '📞 Call हवा' }], { own: true }));
+      else if (canPush(lead)) out.push(push(`⏳ ${o1.pct}% सूट 3 तासांत संपेल`, [{ id: 'push:OFFER', label: '💬 WhatsApp वर सूट' }]));
     });
     // 📲 the next evening, still no app: once more (before the daily test)
     const appEve = atIST(first, 18, 30, 1);
@@ -732,7 +751,7 @@
   // (the next two evenings), the महा-Test's own reminders if it falls inside, and one "keep the reminders?" near the end
   // owner (2026-11-12): within the 72 h every family is asked at least once to take the course — "give the test, get
   // 50 % off, take the course" (the offer starts with the first test: 50 % for 24 h, then 30 % until Sunday night)
-  const testOfferLine = '🎁 Demo test सोडवली की course वर *50% सूट* (24 तास), मग 2 दिवस 30%.';
+  const testOfferLine = lead => (ruleText(lead) ? '🎁 ' + ruleText(lead) : '📝 Demo test: 10 मिनिटं, login नाही.');
   // short (owner: as little text as possible): one line of what the course is, the price, the link
   const shortCourse = (lead, now) => `🔓 ${lead.cls || 'पूर्ण'} course: सगळे tests + स्पष्टीकरण, notes, महा-Test${priceText(lead, false, now) ? '\n💳 ' + priceText(lead, false, now) : ''}\n👉 ${L.pay(lead.gid)}`;
   const courseButtons = [{ id: 'pay', label: '💳 Course घ्या' }, { id: 'call_me', label: '📞 Call हवा' }];
@@ -760,8 +779,8 @@
           return;
         }
         if (lead.awaiting === 'cls') out.push(wa(lead, now, '🙏 पाल्याची free test अजून बाकी आहे. कोणत्या class साठी? 👇', clsButtons(lead), { own: true }));
-        else if (lead.awaiting === 'name') out.push(wa(lead, now, `🙏 ${lead.cls ? lead.cls + ' ची ' : ''}free test अजून बाकी आहे (10 मिनिटं).\n${testOfferLine}\n✍️ पाल्याचं नाव लिहा — link लगेच पाठवतो 👇`, [], { own: true }));
-        else (lead.courseAsked = true, out.push(wa(lead, now, `📝 ${lead.name === 'तुमचा पाल्य' ? 'पाल्याने' : lead.name + ' ने'} free test दिली का? फक्त 10 मिनिटं, login नाही 👇\n${L.child(lead.gid)}\n\n${testOfferLine}\n${shortCourse(lead, now)}`, [{ id: 'got', label: '👍 पाल्याला दिली' }, ...courseButtons], { own: true })));
+        else if (lead.awaiting === 'name') out.push(wa(lead, now, `🙏 ${lead.cls ? lead.cls + ' ची ' : ''}free test अजून बाकी आहे (10 मिनिटं).\n${testOfferLine(lead)}\n✍️ पाल्याचं नाव लिहा — link लगेच पाठवतो 👇`, [], { own: true }));
+        else (lead.courseAsked = true, out.push(wa(lead, now, `📝 ${lead.name === 'तुमचा पाल्य' ? 'पाल्याने' : lead.name + ' ने'} free test दिली का? फक्त 10 मिनिटं, login नाही 👇\n${L.child(lead.gid)}\n\n${testOfferLine(lead)}\n${shortCourse(lead, now)}`, [{ id: 'got', label: '👍 पाल्याला दिली' }, ...courseButtons], { own: true })));
       } });
     }
     let last = new Date(end.getTime() - 3 * H);
@@ -772,7 +791,7 @@
       if (lead.courseAsked && lead.lastInboundAt && Date.parse(lead.lastInboundAt) + CONFIG.windowHours * H > end.getTime()) return;
       lead.courseAsked = true;
       const who = lead.name === 'तुमचा पाल्य' ? 'तुमच्या पाल्यासाठी' : lead.name + ' साठी';
-      out.push(wa(lead, now, `🙏 ${who} course घ्यायचा आहे का?${lead.testsDone ? '' : '\n' + testOfferLine}\n👉 ${L.pay(lead.gid)}\n\nपुढच्या आठवणी हव्या असतील तर ✅ दाबा.${teamLine()}`, [{ id: 'keep', label: '✅ हो, आठवण हवी' }, ...courseButtons], { own: true }));
+      out.push(wa(lead, now, `🙏 ${who} course घ्यायचा आहे का?${lead.testsDone ? '' : '\n' + testOfferLine(lead)}\n👉 ${L.pay(lead.gid)}\n\nपुढच्या आठवणी हव्या असतील तर ✅ दाबा.${teamLine()}`, [{ id: 'keep', label: '✅ हो, आठवण हवी' }, ...courseButtons], { own: true }));
     } });
     if (lead.mtNext) mtItems(lead, items, [new Date(lead.mtNext)], true);
   }
@@ -818,5 +837,5 @@
     return best;
   }
 
-  return { CONFIG, L, createLead, inbound, welcome, event, tick, nextDue, isOpen, whenText, dayKey, atIST, priceText, offerNow };
+  return { CONFIG, L, createLead, inbound, welcome, event, tick, nextDue, isOpen, whenText, dayKey, atIST, priceText, offerNow, ruleText };
 });

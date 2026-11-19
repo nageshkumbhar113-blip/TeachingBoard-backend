@@ -66,8 +66,24 @@ async function syncOf(gid) {
     firstTestAt: first?.submitted_at || lead.offer?.issued_at || null,
     offerEnd: lead.offer?.expires_at || null,
     teamOffer: lead.team_offer?.expires_at ? { pct: lead.team_offer.percent, end: new Date(lead.team_offer.expires_at).toISOString(), by: lead.team_offer.by || '' } : null,
+    // the offer as the server keeps it (team first, then the test offer's promised steps); [] = none / stopped
+    srvOffer: _srvOffer(lead),
+    offerCfg: require('../utils/offerConfig').publicView(),
     last: last ? { score: last.max_marks ? last.marks_obtained : last.score, total: last.max_marks || last.total_questions, title: lead.last_test || '' } : null,
   };
+}
+
+function _srvOffer(lead) {
+  const OC = require('../utils/offerConfig');
+  const now = Date.now();
+  const team = OC.teamNow(lead, now);
+  const o = lead.offer;
+  const testOn = o?.expires_at && !o.stopped_at && !(OC.current().stop_all_at && new Date(o.issued_at) < new Date(OC.current().stop_all_at));
+  const steps = [
+    ...(team ? [{ pct: team.percent, end: team.ends.toISOString(), stage: 'team' }] : []),
+    ...(testOn ? OC.testSteps(o).map((s, i) => ({ pct: s.percent, end: s.ends.toISOString(), stage: i + 1 })) : []),
+  ];
+  return { steps, name: testOn ? o.name || '' : '' };
 }
 
 // ── a family that wrote to the bot first ──

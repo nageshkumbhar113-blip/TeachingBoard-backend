@@ -25,34 +25,25 @@ const { isChapterIdFree, makeChapterId } = require('../utils/contentAccess');
 // token for the one batch they picked; middleware/auth.js turns it into a
 // free-tier student that can only read free content and submit tests.
 
-const OFFER_PERCENT = 50;
-const OFFER_HOURS = 24;
-// the second step: after the 24 hours, 30 % for 2 more days (owner 2026-11-16; was "until Sunday night"); then the full price
-const OFFER2_PERCENT = 30;
-const OFFER2_HOURS = 48;
-function _offer2End(o) {
-  return new Date(new Date(o.expires_at).getTime() + OFFER2_HOURS * 3600 * 1000);
-}
-// 🎁 the team's own discount (NKs Team app): 30 % or 50 % for 3 hours, when the parent is ready to pay
-const TEAM_OFFER_HOURS = 3;
-const TEAM_OFFER_PERCENTS = [30, 50];
-function _teamOfferNow(lead, now = Date.now()) {
-  const t = lead?.team_offer;
-  if (!t?.expires_at || !t.percent) return null;
-  const e = new Date(t.expires_at).getTime();
-  return now < e ? { percent: t.percent, ends: new Date(e), stage: 'team' } : null;
-}
-// the offer right now: { percent, ends, stage } or null — the team's offer first (it is given on purpose)
-function _offerNow(lead, now = Date.now()) {
-  const team = _teamOfferNow(lead, now);
-  const o = lead?.offer;
-  if (!o?.expires_at) return team;
-  if (team) return team;
-  const e1 = new Date(o.expires_at).getTime();
-  if (now < e1) return { percent: o.percent || OFFER_PERCENT, ends: new Date(e1), stage: 1 };
-  const e2 = _offer2End(o);
-  if (now < e2.getTime()) return { percent: OFFER2_PERCENT, ends: e2, stage: 2 };
-  return null;
+// 🎁 first-payment offers: the admin runs them (Admin › Sync › 🎁 सूट settings — on/off, %, hours, name, repeat,
+// end date, stop all); the rules live in utils/offerConfig.js. A given offer keeps its own promised steps.
+const OC = require('../utils/offerConfig');
+const _teamOfferNow = (lead, now = Date.now()) => OC.teamNow(lead, now);
+// the offer right now: { percent, ends, stage, name } or null — the team's offer first (it is given on purpose)
+const _offerNow = (lead, now = Date.now()) => OC.offerNow(lead, now);
+// a new test offer for this family now (once per the admin's repeat rule; a sibling on the same parent number
+// shares the family's offer), or nothing when the admin has it off
+async function _giveOffer(lead) {
+  const now = new Date();
+  if (!OC.mayGive(lead.offer, now)) return false;
+  if (lead.parent_mobile) {
+    const others = await GuestLead.find({ parent_mobile: lead.parent_mobile, gid: { $ne: lead.gid }, 'offer.issued_at': { $ne: null } }).sort({ 'offer.issued_at': -1 }).limit(5).lean();
+    const kept = others.find(x => !OC.mayGive(x.offer, now));
+    if (kept) { lead.offer = kept.offer; await lead.save(); return true; }
+  }
+  lead.offer = OC.newOffer(now);
+  await lead.save();
+  return true;
 }
 // 'ad' = a Facebook / Instagram ad's link (ref = the ad's id, Admin › Sync › Ads)
 const SOURCES = new Set(['admin', 'friend', 'teacher', 'student', 'shop', 'ad', 'web']);
@@ -93,18 +84,20 @@ function _profile(lead) {
 function _offerView(lead) {
   const o = lead?.offer;
   const team = _teamOfferNow(lead);
-  if (team) return { percent: team.percent, expires_at: team.ends, active: true, stage: 'team', month: o?.month || '', steps: [{ percent: team.percent, ends: team.ends }] };
+  if (team) return { percent: team.percent, expires_at: team.ends, active: true, stage: 'team', name: '', month: o?.month || '', steps: [{ percent: team.percent, ends: team.ends }] };
   if (!o || !o.expires_at) return null;
   const now = _offerNow(lead);
+  const steps = o.stopped_at || (OC.current().stop_all_at && new Date(o.issued_at) < new Date(OC.current().stop_all_at)) ? [] : OC.testSteps(o);
   // percent / expires_at / active = the step running now (what the pages show and the checkout uses);
-  // steps = the whole rule, shown on the pay page
+  // steps = the whole rule, shown on the pay page; name = the admin's name for it ("दिवाळी offer")
   return {
     percent: now ? now.percent : o.percent,
     expires_at: now ? now.ends : o.expires_at,
     active: !!now,
     stage: now ? now.stage : 0,
+    name: o.name || '',
     month: o.month,
-    steps: [{ percent: o.percent || OFFER_PERCENT, ends: o.expires_at }, { percent: OFFER2_PERCENT, ends: _offer2End(o) }],
+    steps,
   };
 }
 
@@ -254,30 +247,51 @@ exports.getRank = asyncHandler(async (req, res) => {
   res.json({ success: true, data: await rankOnTest(quizId, req.user.student_code) });
 });
 
-// POST /api/guest/offer — after finishing a test: 50 % off the FIRST PAYMENT (monthly or yearly),
-// 24 hours, at most once per calendar month (per guest, and per parent mobile).
-// Repeated calls return the same offer (active or expired) — never a new one.
+// POST /api/guest/offer — after finishing a test: the admin's first-payment offer (Admin › 🎁 सूट settings),
+// at most once per the admin's repeat rule (per guest, and per parent mobile). Repeated calls return the same
+// offer (active or expired) — never a new one before the rule allows. Nothing when the admin has it off.
 exports.claimOffer = asyncHandler(async (req, res) => {
   const lead = await _lead(req);
-  const month = _istMonth();
-  if (lead.offer?.month === month) return res.json({ success: true, offer: _offerView(lead) });
-
+  if (!OC.mayGive(lead.offer)) return res.json({ success: true, offer: _offerView(lead) });
   const tested = (lead.steps || []).includes('lesson') || await Attempt.exists({ student_code: req.user.student_code });
   if (!tested) throw new AppError('Finish a test first', 400);
-
-  if (lead.parent_mobile) {
-    const other = await GuestLead.findOne({ parent_mobile: lead.parent_mobile, 'offer.month': month, gid: { $ne: lead.gid } }).lean();
-    if (other) {
-      lead.offer = other.offer;
-      await lead.save();
-      return res.json({ success: true, offer: _offerView(lead) });
-    }
-  }
-
-  const now = new Date();
-  lead.offer = { percent: OFFER_PERCENT, issued_at: now, expires_at: new Date(now.getTime() + OFFER_HOURS * 3600 * 1000), month };
-  await lead.save();
+  await _giveOffer(lead);
   res.json({ success: true, offer: _offerView(lead) });
+});
+
+// GET /api/guest/offer-config — the rule as pages, the app, the team app and the bot show it
+exports.offerConfig = asyncHandler(async (_req, res) => {
+  res.set('Cache-Control', 'public, max-age=60');
+  res.json({ success: true, data: OC.publicView() });
+});
+// GET / PUT /api/guest/admin/offer-config — Admin › Sync › 🎁 सूट settings ({ stop_all, new_campaign } = the buttons)
+exports.adminOfferConfig = asyncHandler(async (_req, res) => {
+  const c = await OC.refresh();
+  const running = await GuestLead.countDocuments({ $or: [{ 'offer.expires_at': { $gt: new Date(Date.now() - 7 * 864e5) } }, { 'team_offer.expires_at': { $gt: new Date() } }] });
+  res.json({ success: true, data: { ...OC.DEFAULTS, ...c, _id: undefined, key: undefined, public: OC.publicView(c), recent_families: running } });
+});
+exports.adminSaveOfferConfig = asyncHandler(async (req, res) => {
+  let c;
+  try { c = await OC.save(req.body || {}, req.user?.name || 'Admin'); } catch (err) { throw new AppError(err.message, err.status || 400); }
+  res.json({ success: true, data: { ...c, _id: undefined, key: undefined, public: OC.publicView(c) } });
+});
+// POST /api/guest/admin/stop-offer { gid } — CRM / NKs Team "🛑 सूट थांबवा": this family's running offer (test and
+// team, on every lead of the same parent number) stops now. The family can get one again only by the repeat rule.
+exports.adminStopOffer = asyncHandler(async (req, res) => {
+  const gid = String(req.body?.gid || '').trim().toUpperCase();
+  const lead = /^[0-9A-F]{10}$/.test(gid) ? await GuestLead.findOne({ gid }).lean() : null;
+  if (!lead) throw new AppError('Lead सापडला नाही', 404);
+  const now = new Date();
+  const q = lead.parent_mobile ? { $or: [{ gid }, { parent_mobile: lead.parent_mobile }] } : { gid };
+  const leads = await GuestLead.find(q).select('gid offer team_offer').lean();
+  for (const l of leads) {
+    const set = {};
+    if (l.offer?.expires_at && !l.offer.stopped_at) set['offer.stopped_at'] = now;
+    if (l.team_offer?.expires_at && !l.team_offer.stopped_at) set['team_offer.stopped_at'] = now;
+    if (Object.keys(set).length) await GuestLead.updateOne({ gid: l.gid }, { $set: set });
+    BOT.notify(l.gid, 'sync', {}, { sync: { srvOffer: { steps: [], name: '' } } });
+  }
+  res.json({ success: true, data: { families: leads.length, by: req.staff?.name || 'Admin' } });
 });
 
 function _offerActive(lead) {
@@ -497,7 +511,9 @@ exports.adminLeadPin = asyncHandler(async (req, res) => {
 exports.adminTeamOffer = asyncHandler(async (req, res) => {
   const gid = String(req.body?.gid || '').trim().toUpperCase();
   const percent = Number(req.body?.percent);
-  if (!TEAM_OFFER_PERCENTS.includes(percent)) throw new AppError('सूट 30% किंवा 50% निवडा', 400);
+  const cfg = OC.current();
+  if (!cfg.team_enabled) throw new AppError('Team सूट सध्या Admin ने बंद ठेवली आहे', 400);
+  if (!(cfg.team_percents || []).includes(percent)) throw new AppError(`सूट ${(cfg.team_percents || []).map(x => x + '%').join(' किंवा ')} निवडा`, 400);
   const lead = /^[0-9A-F]{10}$/.test(gid) ? await GuestLead.findOne({ gid }) : null;
   if (!lead) throw new AppError('Lead सापडला नाही', 404);
   if (!lead.batch) throw new AppError('या family चा class नाही — आधी class ठरवा', 400);
@@ -509,10 +525,10 @@ exports.adminTeamOffer = asyncHandler(async (req, res) => {
     throw new AppError('या family ने आधीच pay केलं आहे — सूट फक्त पहिल्या payment वर', 400);
   }
   const now = new Date();
-  lead.team_offer = { percent, issued_at: now, expires_at: new Date(now.getTime() + TEAM_OFFER_HOURS * 3600 * 1000), by: req.staff?.name || 'Admin', count: (lead.team_offer?.count || 0) + 1 };
+  lead.team_offer = { percent, issued_at: now, expires_at: new Date(now.getTime() + cfg.team_hours * 3600 * 1000), by: req.staff?.name || 'Admin', count: (lead.team_offer?.count || 0) + 1, stopped_at: null };
   await lead.save();
   BOT.notify(lead.gid, 'sync', {}, { sync: { teamOffer: { pct: percent, end: lead.team_offer.expires_at.toISOString(), by: lead.team_offer.by } } });
-  res.json({ success: true, data: { gid: lead.gid, percent, expires_at: lead.team_offer.expires_at, pay_url: `https://nkseduorbit.in/parent-pay.html?g=${lead.gid}` } });
+  res.json({ success: true, data: { gid: lead.gid, percent, hours: cfg.team_hours, expires_at: lead.team_offer.expires_at, pay_url: `https://nkseduorbit.in/parent-pay.html?g=${lead.gid}` } });
 });
 
 // POST /api/guest/admin/lead-paid { gid, period: 'monthly'|'yearly', amount? } — Admin › CRM "✅ Paid (हाताने)":
@@ -818,7 +834,7 @@ exports.adminLeads = asyncHandler(async (req, res) => {
     best_pct: l.best_pct,
     last_test: l.last_test,
     steps: l.steps,
-    offer: l.offer?.expires_at ? { expires_at: l.offer.expires_at, active: new Date(l.offer.expires_at) > new Date() } : null,
+    offer: l.offer?.expires_at ? (o => ({ expires_at: o ? o.ends : l.offer.expires_at, active: !!o, percent: o ? o.percent : 0, stopped: !!l.offer.stopped_at }))(_offerNow(l)) : null,
     student_code: l.converted_code,
     paid: paid.has(l.converted_code),
     created_at: l.created_at,
@@ -1141,15 +1157,7 @@ exports.adminMetaCreateAd = asyncHandler(async (req, res) => {
 async function _ensureOffer(gid) {
   const lead = await GuestLead.findOne({ gid });
   if (!lead) return;
-  const month = _istMonth();
-  if (lead.offer?.month === month) return;
-  if (lead.parent_mobile) {
-    const other = await GuestLead.findOne({ parent_mobile: lead.parent_mobile, 'offer.month': month, gid: { $ne: gid } }).lean();
-    if (other) { lead.offer = other.offer; await lead.save(); return; }
-  }
-  const now = new Date();
-  lead.offer = { percent: OFFER_PERCENT, issued_at: now, expires_at: new Date(now.getTime() + OFFER_HOURS * 3600 * 1000), month };
-  await lead.save();
+  await _giveOffer(lead);
 }
 // a test by a free account (code + PIN, free tier) made from a visitor: count it for that family
 async function noteAccountAttempt(studentCode, quizTitle, pct, score, total) {
@@ -1224,4 +1232,4 @@ exports.noteLead = gid => _adLead(gid).catch(err => console.warn('[ad lead] bot'
 exports.noteAdPurchase = (sub) => noteAdPurchase(sub).catch(err => console.warn('[meta capi] purchase', err.message));
 
 exports.offerNow = _offerNow;
-exports.TEAM_OFFER_HOURS = TEAM_OFFER_HOURS;   // the first-payment offer right now (bot + tests)
+exports.TEAM_OFFER_HOURS = 3;   // (old name, kept for callers; the real hours: Admin › 🎁 सूट settings)   // the first-payment offer right now (bot + tests)

@@ -34,12 +34,19 @@ const guestLeadSchema = new mongoose.Schema(
     last_test:     { type: String, default: '', trim: true },
     parent_mobile: { type: String, default: '', trim: true, index: true },
     consent_at:    { type: Date, default: null },
-    // Test-completion offer: 50 % off the first payment (monthly or yearly), 24 hours, once a calendar month.
+    // Test-completion offer on the first payment (monthly or yearly) — the admin's rule when it was given
+    // (utils/offerConfig.js): step 1 percent till expires_at, then step 2 for step2_hours, cut at `until`.
     offer: {
       percent:    { type: Number, default: 0 },
       issued_at:  { type: Date, default: null },
       expires_at: { type: Date, default: null },
       month:      { type: String, default: '' },   // IST 'YYYY-MM'
+      step2_percent: { type: Number },              // missing on offers before 2026-11-19 (= 30 % for 48 h)
+      step2_hours:   { type: Number },
+      name:       { type: String, default: '' },   // e.g. "दिवाळी offer"
+      until:      { type: String, default: '' },   // IST 'YYYY-MM-DD'
+      campaign:   { type: String, default: '' },
+      stopped_at: { type: Date, default: null },   // CRM / NKs Team "🛑 सूट थांबवा"
     },
     // 🎁 a discount the team gave by hand (NKs Team app): 30 % or 50 % for 3 hours, first payment only (owner 2026-11-16)
     team_offer: {
@@ -48,6 +55,7 @@ const guestLeadSchema = new mongoose.Schema(
       expires_at: { type: Date, default: null },
       by:         { type: String, default: '' },
       count:      { type: Number, default: 0 },
+      stopped_at: { type: Date, default: null },
     },
     // App only: push token for the evening "next free test" reminder (max 7, then stops).
     device_token:   { type: String, default: '', trim: true },

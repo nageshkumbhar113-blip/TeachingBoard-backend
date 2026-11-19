@@ -17,9 +17,9 @@ const GENERAL = [
 
 function messageFor(lead, now = new Date()) {
   const name = lead.name ? `${lead.name}, ` : '';
-  if (lead.offer?.expires_at && new Date(lead.offer.expires_at) > now) {
-    return ['⏳ तुमची सवलत लवकरच संपेल', `${name}पहिल्या payment वर ${lead.offer.percent || 50}% सवलत — सगळे tests उघडा`];
-  }
+  // the offer running now (the admin may have stopped it, or it is in its second step)
+  const o = require('./offerConfig').offerNow(lead, now.getTime());
+  if (o) return ['⏳ तुमची सवलत लवकरच संपेल', `${name}${o.name ? o.name + ': ' : ''}पहिल्या payment वर ${o.percent}% सवलत — सगळे tests उघडा`];
   if (!lead.tests) return ['🎯 पहिला free test द्या!', `${name}10 मिनिटांत तुमचा result आणि क्रमांक बघा`];
   const [title, body] = GENERAL[(lead.reminders_sent || 0) % GENERAL.length];
   return [title, name + body];
