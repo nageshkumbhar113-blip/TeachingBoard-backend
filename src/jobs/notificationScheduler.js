@@ -28,6 +28,8 @@ const studyPlan = require('../utils/studyPlan');
 const { notifyBatch, notifyStudent } = require('../utils/studentNotify');
 const { sendToMany } = require('../utils/fcm');
 const { parentTokensFor } = require('../utils/parentTokens');
+// 🔔 the admin's notification timetable: each job's time / on-off (Admin › Notifications), see utils/notifySchedule.js
+const NS = require('../utils/notifySchedule');
 
 const QUEUE_POLL_MS       = 5 * 60 * 1000;   // check the debounce queue every 5 min
 const QUEUE_QUIET_MS      = 2 * 60 * 1000;   // ...but only send once a batch/chapter has been quiet 2 min
@@ -270,7 +272,7 @@ async function _sendTeacherChatPush(now = new Date()) {
 async function _runTeacherChatPushIfNeeded() {
   if (String(process.env.TEACHER_PUSH || '').toLowerCase() === 'off') return;
   const ist = _istNow();
-  if (ist.hour < TEACHER_PUSH_HOUR_IST) return;
+  if (!(await NS.due('teacher_chat'))) return;   // was: ist.hour < TEACHER_PUSH_HOUR_IST
   const KEY = 'teacher_chat_push';
   const state = await SchedulerState.findOne({ key: KEY }).lean();
   if (state?.last_run_date === ist.date) return;
@@ -291,7 +293,7 @@ function _istNow(now = new Date()) {
 
 async function _runStudyPlanEveningJobsIfNeeded() {
   const ist = _istNow();
-  if (ist.hour < EVENING_HOUR_IST) return;
+  if (!(await NS.due('plan_evening'))) return;   // was: ist.hour < EVENING_HOUR_IST
   const KEY = 'study_plan_evening';
   const today = ist.date;
   const state = await SchedulerState.findOne({ key: KEY }).lean();
@@ -305,7 +307,7 @@ async function _runStudyPlanEveningJobsIfNeeded() {
 async function _runGuestRemindersIfNeeded() {
   if (String(process.env.GUEST_REMINDERS || '').toLowerCase() === 'off') return;
   const ist = _istNow();
-  if (ist.hour < EVENING_HOUR_IST) return;
+  if (!(await NS.due('guest'))) return;   // was: ist.hour < EVENING_HOUR_IST
   const KEY = 'guest_reminders';
   const state = await SchedulerState.findOne({ key: KEY }).lean();
   if (state?.last_run_date === ist.date) return;
@@ -319,7 +321,7 @@ const STUDY_NUDGE_HOUR_IST = Number(process.env.STUDY_NUDGE_HOUR_IST) || 19;
 async function _runStudyNudgesIfNeeded() {
   if (String(process.env.STUDY_NUDGES || '').toLowerCase() === 'off') return;
   const ist = _istNow();
-  if (ist.hour < STUDY_NUDGE_HOUR_IST) return;
+  if (!(await NS.due('nudge'))) return;   // was: ist.hour < STUDY_NUDGE_HOUR_IST (7 pm — the SAT paper's time)
   const KEY = 'study_nudges';
   const state = await SchedulerState.findOne({ key: KEY }).lean();
   if (state?.last_run_date === ist.date) return;
@@ -328,6 +330,7 @@ async function _runStudyNudgesIfNeeded() {
 }
 
 async function _runStudyPlanTeacherDigestIfNeeded() {
+  if (!(await NS.due('digest'))) return;
   const KEY = 'study_plan_teacher_weekly';
   const week = _isoWeekKey();
   const state = await SchedulerState.findOne({ key: KEY }).lean();
@@ -337,7 +340,8 @@ async function _runStudyPlanTeacherDigestIfNeeded() {
 }
 
 async function _runDailyJobsIfNeeded() {
-  const today = _todayStr();
+  if (!(await NS.due('morning'))) return;   // was: the first tick of the (UTC) day, whenever that was
+  const today = NS.ist().date;
   const KEY = 'daily_student_notifications';
 
   // Read-then-write, not atomic — a duplicate run in the rare case two
@@ -372,6 +376,7 @@ function start() {
     _runGuestRemindersIfNeeded().catch(err => console.warn('guest reminders check failed:', err.message));
     _runStudyNudgesIfNeeded().catch(err => console.warn('study nudges check failed:', err.message));
     _runTeacherChatPushIfNeeded().catch(err => console.warn('teacher push check failed:', err.message));
+    NS.runCustom().catch(err => console.warn('custom notifications failed:', err.message));
     // Weekly महा-Test: next week's test ready ahead of time; ranks once a window closes.
     const W = require('../utils/weeklyTests');
     W.ensureUpcoming().catch(err => console.warn('weekly ensure failed:', err.message));

@@ -26,11 +26,13 @@ async function report() {
   if (!url || !key) return null;
   const on = await adsRunning();
   if (on === null) return null;
+  // 🔔 and when the server must be awake for notifications / papers (the bot's "gajar")
+  const wake = await require('./notifySchedule').wakeTimes().catch(() => []);
   try {
     const r = await fetch(url.replace(/\/$/, '') + '/ads-state', {
       method: 'POST', signal: AbortSignal.timeout(8000),
       headers: { 'Content-Type': 'application/json', 'X-Bot-Key': key },
-      body: JSON.stringify({ on }),
+      body: JSON.stringify({ on, wake }),
     });
     if (r.ok && _last !== on) console.log(`[ads-awake] ads ${on ? 'running → bot keeps the server awake' : 'stopped → the server may sleep'}`);
     if (r.ok) _last = on;

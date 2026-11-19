@@ -788,7 +788,9 @@ export default {
       if (url.pathname === '/ads-state' && req.method === 'POST') {
         if (!keyOk(env, req)) return json({ success: false }, 401);
         const b = await req.json().catch(() => ({}));
-        await S.kvSet(env, 'ads_on', JSON.stringify({ on: b.on === true, at: Date.now() }));
+        // 🔔 wake: the times (ms) Render must be awake for notifications / papers — the "gajar"
+        const wake = (Array.isArray(b.wake) ? b.wake : []).map(Number).filter(Number.isFinite).slice(0, 100);
+        await S.kvSet(env, 'ads_on', JSON.stringify({ on: b.on === true, wake, at: Date.now() }));
         return json({ success: true });
       }
       if (url.pathname === '/tick' && req.method === 'POST') { if (!keyOk(env, req)) return json({ success: false }, 401); return json({ success: true, data: await runTick(env) }); }
@@ -815,10 +817,14 @@ export default {
     // for it — only while ads run (owner 2026-11-19; Render reports it, see utils/adsAwake.js there). KEEP_AWAKE:
     // '0' never, '1' always (in the hours), else only with ads
     const h = (new Date(Date.now() + 5.5 * 3600e3)).getUTCHours();
-    if (env.KEEP_AWAKE !== '0' && h >= 6 && h < 23) ctx.waitUntil((async () => {
-      let ads = false;
-      try { ads = JSON.parse((await S.kvGet(env, 'ads_on')) || '{}').on === true; } catch { /* no report yet */ }
-      if (ads || env.KEEP_AWAKE === '1') await ping(env);
+    // …and, at any hour, around each time Render gave us (a notification / a paper's reminder / its result):
+    // pinged from 12 min before to 12 min after it
+    if (env.KEEP_AWAKE !== '0') ctx.waitUntil((async () => {
+      let st = {};
+      try { st = JSON.parse((await S.kvGet(env, 'ads_on')) || '{}'); } catch { /* no report yet */ }
+      const now = Date.now(), day = h >= 6 && h < 23;
+      const gajar = (st.wake || []).some(t => Math.abs(now - t) <= 12 * 60000);
+      if (gajar || (day && (st.on === true || env.KEEP_AWAKE === '1'))) await ping(env);
     })());
   },
 };
