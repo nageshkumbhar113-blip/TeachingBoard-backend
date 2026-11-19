@@ -35,6 +35,11 @@ function extractVideoId(url) {
   if (m) return m[1];
   m = s.match(/^https?:\/\/(?:www\.)?(?:youtube|youtube-nocookie)\.com\/embed\/([A-Za-z0-9_-]{11})/);
   if (m) return m[1];
+  // the YouTube app's share links: m.youtube.com, Shorts, live videos
+  m = s.match(/^https?:\/\/(?:www\.|m\.)?youtube\.com\/(?:shorts|live|embed)\/([A-Za-z0-9_-]{11})/);
+  if (m) return m[1];
+  m = s.match(/^https?:\/\/m\.youtube\.com\/watch\?[^#]*\bv=([A-Za-z0-9_-]{11})/);
+  if (m) return m[1];
   // Bare 11-char video ID, already extracted client-side
   if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
   return '';
@@ -394,10 +399,32 @@ exports.listMissingVideos = asyncHandler(async (req, res) => {
 // and for good after a rejected edit.
 const LIVE = { $nin: ['', null] };
 
+// 🎬 the student's own teachers' videos (TeacherVideo) on this Exercise / Notes concept / Test — one card per
+// teacher, id "t:<teacher user_id>", shown before any YouTube-partner card (owner 2026-11-19)
+async function _ownTeacherVideos(req, contentType, teacherUserId) {
+  const tv = require('./teacherVideoController');   // lazy: that controller requires this one
+  let where;
+  if (contentType === 'concept') where = { concept_id: String(req.query.concept_id || '').trim() };
+  else if (contentType === 'quiz_test') where = { quiz_id: String(req.query.quiz_id || '').trim() };
+  else where = { batch: String(req.query.batch || '').trim(), subject: String(req.query.subject || '').trim(), chapter: String(req.query.chapter || '').trim(), exercise_no: String(req.query.exercise || '').trim() };
+  if (Object.values(where).some(v => !v)) return [];
+  if (teacherUserId) where.teacher_id = teacherUserId;
+  return tv.visibleFor(req.userDoc, where).catch(() => []);
+}
+function _ownTeacherCards(list) {
+  const by = new Map();
+  for (const v of list) {
+    const c = by.get(v.teacher_id) || { teacher_id: 't:' + v.teacher_id, name: `${v.teacher_name || 'तुमचे सर'} (तुमचे सर)`, profile_photo: '', teaching_subject: '', intro_video_id: '', video_count: 0, open_count: 0, is_premium: false, own: true };
+    c.video_count++; by.set(v.teacher_id, c);
+  }
+  return [...by.values()];
+}
+
 exports.videosForExerciseStep1 = asyncHandler(async (req, res) => {
   const contentType = String(req.query.content_type || 'exercise').trim();
   const conceptId = String(req.query.concept_id || '').trim();
   const quizId = String(req.query.quiz_id || '').trim();
+  const ownCards = _ownTeacherCards(await _ownTeacherVideos(req, contentType));
 
   let filter;
   if (contentType === 'concept') {
@@ -422,7 +449,7 @@ exports.videosForExerciseStep1 = asyncHandler(async (req, res) => {
   }
 
   const videos = await YoutubeTeacherVideo.find(filter).lean();
-  if (!videos.length) return res.json({ success: true, data: [] });
+  if (!videos.length) return res.json({ success: true, data: ownCards });
 
   const teacherIds = [...new Set(videos.map(v => String(v.youtube_teacher_id)))];
   const now = new Date();
@@ -464,7 +491,7 @@ exports.videosForExerciseStep1 = asyncHandler(async (req, res) => {
   });
   cards = cards.slice(0, 5);
 
-  res.json({ success: true, data: cards });
+  res.json({ success: true, data: [...ownCards, ...cards] });
 });
 
 // GET /api/youtube-teacher/videos-for-exercise?...&teacher_id=
@@ -473,6 +500,11 @@ exports.videosForExerciseStep2 = asyncHandler(async (req, res) => {
   const { content_type: contentTypeRaw, teacher_id: teacherId } = req.query;
   const contentType = String(contentTypeRaw || 'exercise').trim();
   if (!teacherId) throw new AppError('teacher_id is required', 400);
+  // the student's own teacher: that teacher's videos here, each one a "part" named by its title
+  if (String(teacherId).startsWith('t:')) {
+    const list = await _ownTeacherVideos(req, contentType, String(teacherId).slice(2));
+    return res.json({ success: true, data: list.slice().reverse().map(v => ({ id: String(v._id), part_label: v.title, video_id: v.video_id })) });
+  }
 
   let filter;
   if (contentType === 'concept') {
@@ -514,7 +546,9 @@ exports.videosForExerciseStep2 = asyncHandler(async (req, res) => {
 // POST /api/youtube-teacher/video-open/:videoId — public counter increment,
 // called by the student app when a video actually starts playing.
 exports.recordVideoOpen = asyncHandler(async (req, res) => {
-  await YoutubeTeacherVideo.updateOne({ _id: req.params.videoId, live_video_id: LIVE }, { $inc: { open_count: 1 } });
+  const r = await YoutubeTeacherVideo.updateOne({ _id: req.params.videoId, live_video_id: LIVE }, { $inc: { open_count: 1 } }).catch(() => ({ matchedCount: 0 }));
+  // not a partner video → maybe the student's own teacher's video
+  if (!r.matchedCount) return require('./teacherVideoController').open({ ...req, params: { id: req.params.videoId } }, res, () => res.json({ success: true }));
   res.json({ success: true });
 });
 

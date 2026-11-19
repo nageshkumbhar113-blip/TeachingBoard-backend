@@ -16,7 +16,11 @@ const authLimiter = createRateLimiter({
 // ── Teacher-facing: /api/youtube-teacher ─────────────────────────────────────
 const teacherRouter = express.Router();
 
-teacherRouter.post('/register', authLimiter, authCtrl.register);
+// owner 2026-11-19: the YouTube Teacher Partner programme is closed — school teachers add their own videos
+// for their own students instead (/api/teacher-videos). These answer "closed"; the code stays for later.
+const closed = (_req, res) => res.status(410).json({ success: false, code: 'PROGRAMME_CLOSED', message: 'YouTube Teacher Partner नोंदणी सध्या बंद आहे.' });
+
+teacherRouter.post('/register', authLimiter, closed);
 teacherRouter.post('/login',    authLimiter, authCtrl.login);
 
 teacherRouter.get('/profile',  requireYoutubeTeacher, ctrl.getProfile);
@@ -43,9 +47,9 @@ teacherRouter.get('/subscriber-claims',              requireYoutubeTeacher, clai
 teacherRouter.post('/subscriber-claims/:id/approve', requireYoutubeTeacher, claimCtrl.approveClaim);
 teacherRouter.post('/subscriber-claims/:id/reject',  requireYoutubeTeacher, claimCtrl.rejectClaim);
 
-teacherRouter.post('/subscription/create',      requireYoutubeTeacher, payCtrl.createSubscriptionOrder);
+teacherRouter.post('/subscription/create',      requireYoutubeTeacher, closed);
 teacherRouter.post('/subscription/verify',      requireYoutubeTeacher, payCtrl.verifySubscription);
-teacherRouter.post('/subscription/start-trial', requireYoutubeTeacher, payCtrl.startTrial);
+teacherRouter.post('/subscription/start-trial', requireYoutubeTeacher, closed);
 teacherRouter.get('/subscription',              requireYoutubeTeacher, payCtrl.getMySubscription);
 teacherRouter.get('/payment-history',           requireYoutubeTeacher, payCtrl.getPaymentHistory);
 
@@ -65,9 +69,9 @@ teacherRouter.get('/videos-for-exercise', requireStudent, (req, res, next) => {
 });
 teacherRouter.post('/video-open/:videoId', requireStudent, ctrl.recordVideoOpen);
 
-teacherRouter.get('/subscriber-search',       requireStudent, claimCtrl.searchPartners);
+teacherRouter.get('/subscriber-search',       requireStudent, (_req, res) => res.json({ success: true, data: [] }));
 teacherRouter.get('/subscriber-claim/status', requireStudent, claimCtrl.getMyClaimStatus);
-teacherRouter.post('/subscriber-claim',       requireStudent, claimCtrl.claimSubscriber);
+teacherRouter.post('/subscriber-claim',       requireStudent, closed);
 
 // ── Admin-facing: /api/admin/youtube-teacher-* ───────────────────────────────
 const adminRouter = express.Router();

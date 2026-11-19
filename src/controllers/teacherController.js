@@ -100,7 +100,8 @@ exports.registerTeacher = asyncHandler(async (req, res) => {
   const channelUrl = String(req.body.channel_url || '').trim().slice(0, 300);
   const pin = String(req.body.pin || '').trim();
 
-  if (!['school', 'youtube'].includes(partnerType)) throw new AppError('Choose School teacher or YouTube partner', 400);
+  // owner 2026-11-19: the YouTube-partner sign-up is closed — only school / institute teachers register
+  if (partnerType !== 'school') throw new AppError('YouTube शिक्षक नोंदणी बंद आहे — School / Classes शिक्षक म्हणून नोंदणी करा', 400);
   if (!name) throw new AppError('Name is required', 400);
   if (!isValidMobile(mobile)) throw new AppError('A valid 10-digit mobile number is required', 400);
   if (partnerType === 'school' && !institute) throw new AppError('Institute / coaching name is required', 400);
@@ -257,7 +258,7 @@ exports.updateTeacher = asyncHandler(async (req, res) => {
   // Partner programme settings (admin only; this route is admin-only)
   if (req.body.partner_type !== undefined) {
     const pt = String(req.body.partner_type || '').trim().toLowerCase();
-    if (!['', 'school', 'youtube'].includes(pt)) throw new AppError('partner_type must be school or youtube', 400);
+    if (!['', 'school'].includes(pt) && pt !== teacher.partner_type) throw new AppError('partner_type must be school', 400);
     teacher.partner_type = pt;
   }
   if (req.body.commission_enabled !== undefined) teacher.commission_enabled = req.body.commission_enabled === true;
