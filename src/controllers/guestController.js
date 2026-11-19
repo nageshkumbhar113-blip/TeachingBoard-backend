@@ -259,6 +259,15 @@ exports.claimOffer = asyncHandler(async (req, res) => {
   res.json({ success: true, offer: _offerView(lead) });
 });
 
+// POST /api/guest/admin/ad-voice { text, voice: 'manohar'|'aarohi', rate: -40..50 } → audio/mpeg (Ad Studio voice-over)
+exports.adminAdVoice = asyncHandler(async (req, res) => {
+  let buf;
+  try { buf = await require('../utils/adVoice').speak(req.body?.text, req.body?.voice, req.body?.rate); }
+  catch (err) { throw new AppError(err.message || 'आवाज बनला नाही', err.status || 502); }
+  res.set({ 'Content-Type': 'audio/mpeg', 'Content-Length': buf.length, 'Cache-Control': 'private, max-age=3600' });
+  res.send(buf);
+});
+
 // GET /api/guest/offer-config — the rule as pages, the app, the team app and the bot show it
 exports.offerConfig = asyncHandler(async (_req, res) => {
   res.set('Cache-Control', 'public, max-age=60');

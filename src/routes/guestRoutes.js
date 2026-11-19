@@ -58,6 +58,9 @@ router.post('/admin/google/topup', requireAdmin, c.adminGoogleTopup);
 router.get('/admin/ad-scripts', requireAdmin, c.adminAdScripts);
 router.post('/admin/ad-scripts', requireAdmin, c.adminAdScriptSave);
 router.delete('/admin/ad-scripts/:sid', requireAdmin, c.adminAdScriptDelete);
+// 🗣️ Ad Studio: a script scene's line in Edge's free Marathi voice (admin only)
+const adVoiceLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 60, message: 'थोडं थांबा आणि पुन्हा प्रयत्न करा' });
+router.post('/admin/ad-voice', requireAdmin, adVoiceLimiter, c.adminAdVoice);
 router.delete('/admin/google/topup/:i', requireAdmin, c.adminGoogleTopupDelete);
 
 module.exports = router;
