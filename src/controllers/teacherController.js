@@ -30,7 +30,7 @@ function parseBulkDiscount(value) {
 
 // Version of the terms a self-registering teacher agrees to: the free plan allows
 // 4 papers per batch, and unlimited Paper Builder needs 10 paid students in that batch.
-const TEACHER_TERMS_VERSION = 'teacher-terms-v1';
+const TEACHER_TERMS_VERSION = 'teacher-terms-v2';   // v2 (2026-11-19): सूट when the teacher pays for students; no commission
 const YOUTUBE_TERMS_VERSION = 'youtube-partner-terms-v1';
 const { getConfig: getPartnerConfig } = require('../utils/partnerCommission');
 
@@ -144,9 +144,10 @@ exports.registerTeacher = asyncHandler(async (req, res) => {
     channel_name: isYoutube ? channelName : '',
     channel_url: isYoutube ? channelUrl : '',
     partner_type: partnerType,
-    commission_enabled: true,
-    commission_mode: isYoutube ? 'flat' : 'percent',
-    commission_value: isYoutube ? cfg.youtube_flat : cfg.school_percent,
+    // no सूट until the admin sets one (Admin › Teachers) — was: the default commission from Admin › Partners
+    commission_enabled: false,
+    commission_mode: 'percent',
+    commission_value: 0,
     commission_first_payment_only: true,
     status: 'pending',
     request_source: 'self',

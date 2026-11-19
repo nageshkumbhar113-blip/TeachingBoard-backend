@@ -50,7 +50,10 @@ const studentSubscriptionSchema = new mongoose.Schema(
     // 'admin_bulk' = paid offline to the admin and created by Admin › Students › Import
     // (razorpay_payment_id then holds a "bulk:<import>:<student>:<batch>" key so a repeated
     // import never records the money twice).
-    source:     { type: String, enum: ['online', 'admin_bulk'], default: 'online' },
+    // 'teacher_bulk' = a teacher made the account in the Teacher app and paid for it (TeacherOrder): `amount`
+    // is what was really paid, after the teacher's सूट (discount_source 'teacher_discount').
+    source:     { type: String, enum: ['online', 'admin_bulk', 'teacher_bulk'], default: 'online' },
+    paid_by_teacher:     { type: String, default: '', trim: true },
     import_id:  { type: String, default: '', index: true },
     list_price: { type: Number, default: 0, min: 0 }, // price before the discount
   },

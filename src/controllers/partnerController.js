@@ -116,7 +116,7 @@ exports.setPartnerConfig = asyncHandler(async (req, res) => {
 // ── Admin: overview of every partner's running balance ───────────────────────
 
 exports.listPartners = asyncHandler(async (_req, res) => {
-  const partners = await User.find({ role: 'teacher', $or: [{ commission_enabled: true }, { partner_type: { $in: ['school', 'youtube', 'shop'] } }] }).lean();
+  const partners = await User.find({ role: 'teacher', partner_type: 'shop' }   /* owner 2026-11-19: shops only — teachers earn nothing now */).lean();
   const now = new Date();
   const open = await CommissionEntry.find({ status: 'active', statement_id: '' }).lean();
   const statements = await PayoutStatement.find({}).lean();
@@ -202,7 +202,7 @@ exports.settlementOverview = asyncHandler(async (req, res) => {
 
   const PARTNER_FIELDS = 'user_id name teacher_code partner_type mobile institute_name shop_area status payout_upi_id payout_name pan commission_mode commission_value';
   const [partners, open, stmts, fyEntries, lifeAgg, claims] = await Promise.all([
-    User.find({ role: 'teacher', $or: [{ commission_enabled: true }, { partner_type: { $in: ['school', 'youtube', 'shop'] } }] })
+    User.find({ role: 'teacher', partner_type: 'shop' }   /* owner 2026-11-19: shops only — teachers earn nothing now */)
       .select(PARTNER_FIELDS).lean(),
     CommissionEntry.find({ status: 'active', statement_id: '' }, 'partner_user_id type amount payable_at').lean(),
     PayoutStatement.find({}).lean(),
@@ -427,7 +427,7 @@ exports.getMyEarnings = asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: {
-      enabled: t.commission_enabled === true,
+      enabled: t.commission_enabled === true && t.partner_type === 'shop',   // teachers: no earnings any more (2026-11-19)
       partner_type: t.partner_type || '',
       mode: t.commission_mode || 'flat',
       value: t.commission_value || 0,

@@ -303,6 +303,13 @@ exports.verifyPaymentPublic = asyncHandler(async (req, res) => {
     throw new AppError('Payment verification failed', 400);
   }
 
+  // ➕ a teacher's order for student accounts (Teacher app): accounts are made now
+  const TeacherOrder = require('../models/TeacherOrder');
+  if (await TeacherOrder.exists({ razorpay_order_id: orderId })) {
+    await require('./teacherOrderController').markPaid(orderId, paymentId);
+    return res.json({ success: true, message: 'Payment verified' });
+  }
+
   const sub = await StudentSubscription.findOne({ razorpay_order_id: orderId });
   if (!sub) throw new AppError('Order not found', 404);
 
@@ -357,6 +364,12 @@ exports.webhook = asyncHandler(async (req, res) => {
     // YouTube Teacher Partner subscriptions share this one webhook (no new
     // Render service) — distinguished by order.notes.type, set at order-create
     // time in youtubeTeacherPaymentController.createSubscriptionOrder.
+    // ➕ a teacher's order for student accounts (Teacher app)
+    if (paymentEntity?.notes?.type === 'teacher_students') {
+      await require('./teacherOrderController').markPaid(orderId, paymentId).catch(err => console.warn('teacher order:', err.message));
+      return res.status(200).json({ success: true, message: 'Teacher order processed' });
+    }
+
     if (paymentEntity?.notes?.type === 'youtube_teacher_subscription') {
       const YoutubeTeacherSubscription = require('../models/YoutubeTeacherSubscription');
       const ytSub = await YoutubeTeacherSubscription.findOne({ razorpay_order_id: orderId });

@@ -161,7 +161,8 @@ async function planImport(body, now = new Date()) {
     const pricePeriod = plan === 'monthly' ? 'monthly' : 'yearly';
     const listPrices = courses.map(b => Number(pricePeriod === 'monthly' ? b.monthly_price : b.yearly_price) || 0);
     const listTotal = round2(listPrices.reduce((a, b) => a + b, 0));
-    const discountPercent = discountOverride !== null ? discountOverride : Number(teacher?.bulk_discount_percent || 0);
+    // owner 2026-11-19: the teacher's old "bulk discount %" is no longer used (only the admin's own per-import value)
+    const discountPercent = discountOverride !== null ? discountOverride : 0;
     let netTotal = round2(listTotal * (1 - discountPercent / 100));
     const amountOverride = r.amount === '' || r.amount == null ? null : Number(r.amount);
     if (amountOverride !== null) {

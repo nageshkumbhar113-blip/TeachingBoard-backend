@@ -32,7 +32,7 @@ const userSchema = new mongoose.Schema(
     expiry_notified_for: { type: Date, default: null },
     approved_at:      { type: Date, default: null },
     approved_by:      { type: String, default: '' },
-    request_source:   { type: String, enum: ['admin', 'self'], default: 'admin' },
+    request_source:   { type: String, enum: ['admin', 'self', 'teacher'], default: 'admin' },
     // a teacher who registered from a Facebook / Instagram ad (Admin › Sync › Ads): that ad's id
     signup_ad:        { type: String, default: '', trim: true },
     last_login_at:    { type: Date, default: null },

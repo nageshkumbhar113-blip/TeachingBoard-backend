@@ -49,6 +49,9 @@ async function findPartnerForStudent(student) {
     if (linked.length === 1) teacher = linked[0];
   }
   if (!teacher || teacher.commission_enabled !== true) return null;
+  // owner 2026-11-19: teachers earn nothing on their students' payments (their only benefit is the सूट when
+  // they pay for students themselves — teacherOrderController); shops keep their share
+  if (teacher.partner_type !== 'shop') return null;
   if ((teacher.status || 'active') !== 'active') return null;
   // A shop never earns on its own number (shopkeeper's own family account).
   if (teacher.partner_type === 'shop' && teacher.mobile && teacher.mobile === student.mobile) return null;
