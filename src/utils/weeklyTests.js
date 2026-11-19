@@ -497,8 +497,8 @@ async function _paidStudents(batch, codes = null) {
   const { hasFullAccess } = require('./contentAccess');
   const q = { role: 'student', assigned_batches: batch };
   if (codes) q.student_code = { $in: codes };
-  const rows = await User.find(q, 'student_code name role free_tier expiry_date status device_token parent_device_token').lean();
-  return rows.filter(u => hasFullAccess(u) && !['inactive', 'blocked', 'deleted'].includes(String(u.status || '')));
+  const rows = await User.find(q, 'student_code name role free_tier expiry_date status device_token parent_device_token demo_of_teacher').lean();
+  return rows.filter(u => hasFullAccess(u) && !u.demo_of_teacher && !['inactive', 'blocked', 'deleted'].includes(String(u.status || '')));
 }
 async function _parentTokens(codes) {
   const parents = await User.find({ role: 'parent', children: { $in: codes }, device_token: { $nin: [null, ''] } }, 'children device_token').lean();

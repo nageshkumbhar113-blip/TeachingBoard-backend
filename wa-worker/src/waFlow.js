@@ -395,6 +395,7 @@
   // owner 2026-11-14: the bot answers less — the same words again within 6 h (TEST, hi, the ad's text) get no new
   // answer, and after CONFIG.dailyReplies answered messages in a day the team takes over (one "team will call")
   function inbound(lead, raw, now) {
+    if (lead.tdemo) return teacherInbound(lead, raw, now);
     const t = String(raw || '').trim().toLowerCase(), day = dayKey(now);
     if (/^(stop|start)$/.test(t)) return inbound0(lead, raw, now);
     if (lead.rDay !== day) { lead.rDay = day; lead.rN = 0; lead.rCapped = false; }
@@ -544,6 +545,17 @@
   function event(lead, type, data, now) {
     const out = [];
     data = data || {};
+    if (type === 'tdemo') {
+      const d = lead.tdemo || (lead.tdemo = {});
+      const seen = k => { if (!d[k]) { d[k] = now.toISOString(); out.push(log('TDEMO', TDEMO_DID[k] || k)); } };
+      if (data.tLogin) seen('tLogin');
+      if (data.sLogin) seen('sLogin');
+      if (data.paper) { d.papers = (d.papers || 0) + 1; seen('paperAt'); }
+      if (data.sTest) { d.sTests = (d.sTests || 0) + 1; seen('sTestAt'); }
+      if (data.order) { d.orders = (d.orders || 0) + 1; d.added = (d.added || 0) + (Number(data.added) || 0); d.paidRs = (d.paidRs || 0) + (Number(data.order) || 0); seen('orderAt'); lead.crm = 'hot'; }
+      if (data.again) out.push(log('TDEMO', 'हाच नंबर पुन्हा demo बुक करायला आला (नवीन code नाही) → call करा.'));
+      return out;
+    }
     if (type === 'test_done') {
       // data.n = the server's own count of this child's tests (the event may arrive after a sync that already counted it)
       const first = !lead.firstTestAt || data.n === 1;
@@ -669,11 +681,72 @@
     return out;
   }
 
+  // ── 🎯 a teacher's demo (booked from an ad): codes, then the 48-hour journey (owner 2026-11-20) ──
+  // Only inside the free WhatsApp window (the teacher wrote to the bot); a closed window → the CRM call list.
+  // Each message only when that thing is not done yet (the app tells the bot: login, paper, the demo
+  // student's test, students added). No "free", no prices: the सूट is the team's (8390484545).
+  const TDEMO_DID = { tLogin: '✅ शिक्षक login झाला', sLogin: '✅ school demo विद्यार्थी login झाला', paperAt: '📄 पहिला पेपर बनवला', sTestAt: '📝 demo विद्यार्थ्याने test दिला', orderAt: '💳 विद्यार्थ्यांची पहिली order' };
+  const TEAM_NO = '8390484545';
+  function codesText(lead) {
+    const d = lead.tdemo;
+    return `🎉 नमस्कार ${lead.name || 'सर / मॅडम'}! तुमचा NKs EduOrbit demo तयार आहे.\n\n👩‍🏫 *शिक्षक* — Code: *${d.tCode}*${d.tPin ? ' · PIN: *' + d.tPin + '*' : ' · PIN: तुम्ही ठेवलेला'}\n🎓 *School demo विद्यार्थी* — Code: *${d.sCode}*${d.sPin ? ' · PIN: *' + d.sPin + '*' : ''}\n\n📲 App 👇\n${CONFIG.play}\n\nआधी हे 3 करा:\n① तुमच्या वर्गाचा पेपर 1 मिनिटात बनवा (Teacher login › Paper)\n② School demo विद्यार्थ्याने एका धड्याचा test द्या\n③ त्याचे गुण आणि कमी पडलेले भाग तुमच्या phone वर पाहा (Teacher › Analytics)\n\nSchool demo विद्यार्थी 48 तास चालू. प्रश्न / मदत: ${TEAM_NO}`;
+  }
+  function teacherInbound(lead, raw, now) {
+    const out = [];
+    const up = String(raw || '').trim().toUpperCase();
+    lead.lastInboundAt = now.toISOString(); lead.unanswered = 0;
+    if (up === 'STOP') { lead.closed = 'STOP'; lead.stopped = true; out.push({ to: 'wa', kind: 'service', cost: 0, text: '🙏 ठीक आहे, आता मेसेज बंद. पुन्हा हवं असेल तर START पाठवा.', buttons: [] }); return out; }
+    if (up === 'START' && lead.closed === 'STOP') { lead.closed = null; lead.stopped = false; }
+    const d = lead.tdemo;
+    if (!d.welcomedAt) { d.welcomedAt = now.toISOString(); out.push(wa(lead, now, codesText(lead))); out.push(log('TDEMO', 'शिक्षकाने WhatsApp केलं → codes पाठवले (खिडकी 24 तास उघडी, ₹0).')); return out; }
+    if (/^(DEMO|CODE|PIN)\b/.test(up)) { out.push(wa(lead, now, codesText(lead))); return out; }
+    // anything else: the team answers
+    lead.crm = 'call'; lead.callAt = now.toISOString();
+    out.push(wa(lead, now, `🙏 धन्यवाद! आमची team तुम्हाला लवकरच call करेल. तातडीचं असेल तर: ${TEAM_NO}`));
+    out.push(log('CALL', 'शिक्षकाचा प्रश्न → team call करेल (📞 यादी).'));
+    return out;
+  }
+  function teacherItems(lead, items) {
+    const d = lead.tdemo, booked = new Date(d.bookedAt);
+    if (!d.bookedAt || lead.closed) return;
+    const msg = (key, at, fn) => items.push({ key: 't:' + key, at, run: fn });
+    const say = (out, now, text) => { if (isOpen(lead, now)) out.push(wa(lead, now, text, [], { own: true })); else out.push(log('₹ नाही', 'खिडकी बंद → संदेश नाही (team call करू शकते).')); };
+    const call = (out, now, why) => { lead.crm = 'call'; lead.callAt = now.toISOString(); out.push(log('CALL', why)); };
+    msg('2h', new Date(booked.getTime() + 2 * H), (out, now) => {
+      if (d.tLogin) return;
+      say(out, now, `Login मध्ये काही अडचण? App उघडा › 👩‍🏫 Teacher › Code *${d.tCode}* आणि PIN.\n📲 ${CONFIG.play}\nमदत: ${TEAM_NO}`);
+      call(out, now, '2 तास: शिक्षकाने login केलं नाही → call करा.');
+    });
+    msg('eve', atIST(booked, 18, 0, hourOf(booked) >= 17 ? 1 : 0), (out, now) => {
+      if (d.sTestAt) return;
+      say(out, now, `School demo विद्यार्थ्याने test दिला का? 📝\nविद्यार्थी code *${d.sCode}* ने login करून एका धड्याचा test द्या — त्याचे गुण आणि कमकुवत धडे तुमच्या Teacher › Analytics मध्ये दिसतील. तुमच्या प्रत्येक विद्यार्थ्याचे असेच दिसतील.`);
+    });
+    msg('morning', atIST(booked, 8, 30, 1), (out, now) => {
+      say(out, now, d.paperAt ? '👏 छान! तुम्ही पेपर बनवला. आता त्याची Answer sheet पण print करा (Paper › Preview › Answer Sheet).' : '🌅 उद्याच्या वर्गाचा पेपर आत्ता 1 मिनिटात बनवा — Teacher › Paper › धडे निवडा › पेपर + Answer sheet.');
+    });
+    msg('24h', new Date(booked.getTime() + 24 * H), (out, now) => {
+      say(out, now, '👩‍🎓 तुमच्या वर्गाची link / QR: Teacher › Share. मुलं थेट तुमच्याशी जोडली जातात.\n🎬 तुमचे YouTube videos फक्त तुमच्या विद्यार्थ्यांना: Teacher › Videos.');
+    });
+    msg('40h', new Date(booked.getTime() + 40 * H), (out, now) => {
+      if (!d.orderAt) say(out, now, `⏰ School demo विद्यार्थी उद्या बंद होईल.\nतुमच्या विद्यार्थ्यांची accounts: Teacher › ➕ Students बनवा.\nसूट साठी आमच्या team ला संपर्क करा: ${TEAM_NO}`);
+      if (!d.orderAt) call(out, now, '40 तास: demo संपत आला, विद्यार्थी जोडले नाहीत → call करा.');
+    });
+    msg('48h', new Date(booked.getTime() + 48 * H), (out, now) => {
+      say(out, now, `🙏 तुमचं शिक्षक account चालूच आहे — पेपर बनवा, Videos टाका, विद्यार्थी जोडा.\n10 विद्यार्थी झाले की पेपर बनवण्याची मर्यादा राहत नाही आणि school demo विद्यार्थी परत चालू होतो.\nमदत: ${TEAM_NO}`);
+    });
+    for (const [k, days] of [['d4', 4], ['d7', 7]]) msg(k, atIST(booked, 11, 0, days), (out, now) => {
+      if (d.orderAt) return;
+      if (isOpen(lead, now)) say(out, now, `नमस्कार ${lead.name || ''} 🙏 तुमच्या वर्गासाठी NKs EduOrbit कसं वाटलं? विद्यार्थी जोडायला मदत हवी असेल तर ${TEAM_NO}`);
+      else call(out, now, `${days} दिवस: विद्यार्थी जोडले नाहीत → call करा.`);
+    });
+  }
+
   // ── the bot's own schedule ──
   // every item: { key, at, run(out) }; tick() runs the due ones once, nextDue() tells when to call again
   function plan(lead) {
     const items = [];
     if (lead.closed === 'STOP') return items;
+    if (lead.tdemo) { teacherItems(lead, items); return items; }
     if (!lead.firstTestAt) { if (lead.ctwaUntil) ctwaItems(lead, items); return items; }
     const first = new Date(lead.firstTestAt), offerEnd = new Date(lead.offerEnd);
     const hasWa = !!lead.lastInboundAt;

@@ -669,6 +669,36 @@ async function crm(env, req, url, who) {
   return json({ success: false, message: 'Not found' }, 404);
 }
 
+async function teacherAdLead(env, b, mobile, name, school) {
+  const now = new Date();
+  const tdemo = {
+    bookedAt: now.toISOString(), school, ad: String(b.ad || '').slice(0, 40), course: String(b.course || '').slice(0, 120),
+    tCode: String(b.teacher_code || ''), tPin: String(b.teacher_pin || ''), sCode: String(b.student_code || ''), sPin: String(b.student_pin || ''),
+    until: String(b.until || ''),
+  };
+  const known = await S.kvGet(env, 'demo:' + mobile) || await S.phoneGid(env, mobile);
+  let gid = known && GID.test(known) ? known : null;
+  let lead = gid ? await S.getLead(env, gid) : null;
+  if (lead) {
+    // the same number again: keep what is there (no new codes), just mark it
+    if (!lead.tdemo) { lead.tdemo = tdemo; lead.cls = 'Teacher (Ad)'; }
+    lead.crm = 'call'; lead.callAt = now.toISOString();
+    await S.saveLead(env, lead, WA.nextDue(lead, now));
+    await S.addMsg(env, { gid, mobile, dir: 'log', kind: 'TDEMO', body: '🎯 हाच नंबर पुन्हा demo बुक करायला आला → call करा.' });
+    return { success: true, gid, again: true };
+  }
+  gid = newGid();
+  lead = WA.createLead({ gid, name: name || 'Teacher', source: 'teacher_ad' }, now);
+  Object.assign(lead, { mobile, cls: 'Teacher (Ad)', via: 'teacher_ad', tdemo, crm: 'call', callAt: now.toISOString() });
+  lead.labels = [await labelIdFor(env, 'Teacher (Ad)')].filter(Boolean);
+  await S.ensureRow(env, lead);
+  await S.saveLead(env, lead, WA.nextDue(lead, now));
+  await S.addMsg(env, { gid, mobile, dir: 'in', body: `🎯 Teacher ad मधून demo बुक: ${name || '-'} · ${school || '-'}${tdemo.ad ? ' · ad ' + tdemo.ad : ''}\nशिक्षक ${tdemo.tCode} · school demo विद्यार्थी ${tdemo.sCode}` });
+  await S.kvSet(env, 'demo:' + mobile, gid);
+  await S.setPhone(env, mobile, gid);
+  return { success: true, gid };
+}
+
 // ── 🎬 teachers' demo: one lead per number, label "Demo – Teacher", the bot never writes to it (stopped) ──
 async function demoLead(env, req) {
   const b = await req.json().catch(() => ({}));
@@ -678,9 +708,11 @@ async function demoLead(env, req) {
   // at most 30 sign-ins an hour from one address (one class demo = a few dozen phones, on different addresses mostly)
   const ip = req.headers.get('CF-Connecting-IP') || 'x', rk = `demorl:${ip}:${new Date().toISOString().slice(0, 13)}`;
   const n = Number(await S.kvGet(env, rk)) || 0;
-  if (n >= 30) return { success: false, message: 'busy' };
+  if (n >= 30 && !(b.kind === 'teacher_ad' && keyOk(env, req))) return { success: false, message: 'busy' };   // Render's own calls: no address limit
   await S.kvSet(env, rk, n + 1);
   const now = new Date();
+  // 🎯 a teacher who booked a demo from an ad (Render, with its key): CRM "Teacher (Ad)" + the 48-hour journey
+  if (b.kind === 'teacher_ad' && keyOk(env, req)) return teacherAdLead(env, b, mobile, name, school);
   const known = await S.kvGet(env, 'demo:' + mobile);
   if (known && GID.test(known)) {
     const lead = await S.getLead(env, known);

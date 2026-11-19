@@ -562,6 +562,7 @@ exports.generatePaper = async (req, res) => {
     });
 
     await paper.save();
+    if (req.user?.role === 'teacher') require('../utils/teacherDemo').teacherDid(req.userDoc, { paper: 1 });   // 🎯 demo teacher → the bot
 
     // Update question usage
     for (const q of selectedQuestions) {
@@ -771,6 +772,7 @@ exports.createPaperManual = async (req, res) => {
     });
 
     await paper.save();
+    if (req.user?.role === 'teacher') require('../utils/teacherDemo').teacherDid(req.userDoc, { paper: 1 });   // 🎯 demo teacher → the bot
 
     // Same usage-tracking bookkeeping generatePaper() does.
     for (const sq of selectedQuestions) {

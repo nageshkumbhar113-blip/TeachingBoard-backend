@@ -115,6 +115,7 @@ exports.login = asyncHandler(async (req, res) => {
 
     teacher.last_login_at = new Date();
     await teacher.save();
+    require('../utils/teacherDemo').teacherDid(teacher, { tLogin: true });   // 🎯 demo teacher → the bot
 
     return res.json({
       success: true,
@@ -241,6 +242,7 @@ exports.login = asyncHandler(async (req, res) => {
   }
   await student.save();
   require('../utils/waBot').appUsed(student.student_code);   // a free visitor's account: CRM shows the app
+  require('../utils/teacherDemo').studentDid(student, { sLogin: true }).catch(() => {});   // 🎯 a school demo student
   // the account was made in the middle of a website test (with the parent's number): the tests taken on the
   // website after that are still under the visitor's code — they come into the account at this login
   if (student.free_tier) {

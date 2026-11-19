@@ -79,6 +79,9 @@ function serializeTeacher(t) {
     payout_name: t.payout_name || '',
     pan: t.pan || '',
     request_source: t.request_source || 'admin',
+    demo_booked_at: t.demo_booked_at || null,
+    demo_course: t.demo_course || '',
+    demo_student: t._demoStudent || null,   // 🎯 { code, status, why, until } (getTeachers)
     terms_accepted_at: t.terms_accepted_at || null,
     approved_at: t.approved_at || null,
     last_login_at: t.last_login_at || null,
@@ -191,6 +194,10 @@ exports.getTeachers = asyncHandler(async (req, res) => {
     .skip(skip)
     .limit(limit)
     .lean();
+  // 🎯 each teacher's school demo student (ad demo)
+  const demos = await User.find({ role: 'student', demo_of_teacher: { $in: teachers.map(t => t.teacher_code).filter(Boolean) } }, 'student_code status demo_of_teacher demo_why expiry_date').lean();
+  const dm = new Map(demos.map(s => [s.demo_of_teacher, { code: s.student_code, status: s.expiry_date && new Date(s.expiry_date) > new Date() ? 'active' : 'off', why: s.demo_why || '', until: s.expiry_date }]));
+  teachers.forEach(t => { t._demoStudent = dm.get(t.teacher_code) || null; });
   res.json({ success: true, count: teachers.length, skip, limit, data: teachers.map(serializeTeacher) });
 });
 

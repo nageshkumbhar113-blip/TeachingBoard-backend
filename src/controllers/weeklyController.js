@@ -24,8 +24,9 @@ function _me(req) {
     name: req.userDoc.name || req.user.name || '',
     guest: !!req.user.guest,
     batches: Array.isArray(req.userDoc.assigned_batches) ? req.userDoc.assigned_batches : [],
-    full: hasFullAccess(req.userDoc),
+    full: hasFullAccess(req.userDoc) && !req.userDoc.demo_of_teacher,
     hide: req.userDoc.hide_in_toppers === true,
+    demo: !!req.userDoc.demo_of_teacher,   // 🎯 a teacher's school demo student: no daily papers / महा-Test
   };
 }
 
@@ -34,6 +35,7 @@ async function _eventFor(req, me, { withKey = false } = {}) {
   if (withKey) q.select('+key_b64');
   const ev = await q.catch(() => null);
   if (!ev || ev.status === 'skipped' || !me.batches.includes(ev.batch)) throw new AppError('Test not found', 404);
+  if (me.demo) throw new AppError('School demo विद्यार्थ्यासाठी हा पेपर नाही', 403);
   if (ev.open_to === 'paid' && !me.full) throw new AppError('हा महा-Test subscription असलेल्यांसाठी आहे', 403);
   return ev;
 }
@@ -132,6 +134,7 @@ exports.my = asyncHandler(async (req, res) => {
     .sort((a, b) => a.starts_at - b.starts_at)[0]?.starts_at || null;
   const now = _now();
   const app = _isApp(req);
+  if (me.demo) return res.json({ success: true, data: [], consent: true, app_only: false, app_only_msg: '', locked: [] });   // 🎯 school demo student
   const data = all.filter(e => e.open_to !== 'paid' || me.full).map(e => _view(e, byEvent.get(String(e._id)), countBy.get(String(e._id)) || 0, now, e.is_trial ? null : nextOf(e), app, dayOf(e)));
   // a free student: the class's paid practice papers are shown locked ("🔒 subscribe")
   const locked = me.full || me.guest ? [] : [...new Map(all.filter(e => e.open_to === 'paid' && e.kind === 'daily' && e.ends_at > now)
@@ -341,7 +344,7 @@ exports.practiceMe = asyncHandler(async (req, res) => {
 async function _practiceReport(codes, daysBack) {
   const { hasFullAccess } = require('../utils/contentAccess');
   const since = new Date(Date.now() - daysBack * 864e5).toISOString().slice(0, 10);
-  const students = await User.find({ role: 'student', student_code: { $in: codes } }, 'student_code name assigned_batches role free_tier expiry_date').lean();
+  const students = await User.find({ role: 'student', student_code: { $in: codes }, demo_of_teacher: { $in: [null, ''] } }, 'student_code name assigned_batches role free_tier expiry_date').lean();   // not the school demo student
   const batches = [...new Set(students.flatMap(s => s.assigned_batches || []))];
   const evs = batches.length ? await WeeklyEvent.find({ batch: { $in: batches }, kind: 'daily', is_trial: { $ne: true }, status: { $ne: 'skipped' }, day_key: { $gte: since }, starts_at: { $lte: _now() } },
     'schedule_id batch title subject day_key day_final status starts_at sections').sort({ starts_at: 1 }).lean() : [];

@@ -377,6 +377,7 @@ function start() {
     _runStudyNudgesIfNeeded().catch(err => console.warn('study nudges check failed:', err.message));
     _runTeacherChatPushIfNeeded().catch(err => console.warn('teacher push check failed:', err.message));
     NS.runCustom().catch(err => console.warn('custom notifications failed:', err.message));
+    require('../utils/teacherDemo').syncAll().catch(err => console.warn('teacher demo sync failed:', err.message));
     // Weekly महा-Test: next week's test ready ahead of time; ranks once a window closes.
     const W = require('../utils/weeklyTests');
     W.ensureUpcoming().catch(err => console.warn('weekly ensure failed:', err.message));

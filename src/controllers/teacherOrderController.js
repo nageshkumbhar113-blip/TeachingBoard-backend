@@ -260,6 +260,7 @@ async function fulfil(orderId) {
     await teacher.save();
     invalidateUserCache('teacher', teacher.user_id);
     o.status = 'done'; o.done_at = new Date();
+    require('../utils/teacherDemo').teacherDid(teacher, { order: o.amount, added: codes.size });   // 🎯 demo teacher → the bot
     o.markModified('rows');
     await o.save();
     if (teacher.device_token) {

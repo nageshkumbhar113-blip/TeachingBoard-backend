@@ -32,7 +32,7 @@ const userSchema = new mongoose.Schema(
     expiry_notified_for: { type: Date, default: null },
     approved_at:      { type: Date, default: null },
     approved_by:      { type: String, default: '' },
-    request_source:   { type: String, enum: ['admin', 'self', 'teacher'], default: 'admin' },
+    request_source:   { type: String, enum: ['admin', 'self', 'teacher', 'demo'], default: 'admin' },
     // a teacher who registered from a Facebook / Instagram ad (Admin › Sync › Ads): that ad's id
     signup_ad:        { type: String, default: '', trim: true },
     last_login_at:    { type: Date, default: null },
@@ -91,6 +91,16 @@ const userSchema = new mongoose.Schema(
     shop_area:          { type: String, default: '', trim: true },   // shop: village / area
     // Student / parent chose not to show the name on महा-Test toppers banner and rank board.
     hide_in_toppers:    { type: Boolean, default: false },
+    // 🎯 teacher demo from an ad (utils/teacherDemo.js). Student: the "school demo विद्यार्थी" of that teacher —
+    // demo_until (48 h), demo_admin_until (the admin switched it on), demo_why ('demo' | 'admin' | '10').
+    demo_of_teacher:  { type: String, default: '', index: true },
+    demo_until:       { type: Date, default: null },
+    demo_admin_until: { type: Date, default: null },
+    demo_why:         { type: String, default: '' },
+    // Teacher: the booking, its course and the bot's lead (CRM "Teacher (Ad)")
+    demo_booked_at:   { type: Date, default: null },
+    demo_course:      { type: String, default: '' },
+    demo_gid:         { type: String, default: '' },
     toppers_consent_at: { type: Date, default: null },   // parent's one-time tick at महा-Test registration
     payout_upi_id:      { type: String, default: '', trim: true },
     payout_name:        { type: String, default: '', trim: true },
