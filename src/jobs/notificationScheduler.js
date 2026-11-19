@@ -376,6 +376,8 @@ function start() {
     const W = require('../utils/weeklyTests');
     W.ensureUpcoming().catch(err => console.warn('weekly ensure failed:', err.message));
     W.finalizeDue().catch(err => console.warn('weekly finalize failed:', err.message));
+    // Paper Pattern Practice: 15-min reminder before each paper, marks / day result after it.
+    W.notifyDue().catch(err => console.warn('practice notify failed:', err.message));
   }, QUEUE_POLL_MS);
 
   console.log('notificationScheduler: started (poll every', QUEUE_POLL_MS / 1000, 's)');

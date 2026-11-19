@@ -47,6 +47,30 @@ const weeklyScheduleSchema = new mongoose.Schema(
       default: [],
     },
     next_paper_index: { type: Number, default: 0 },
+    // महा-Test (mode 'papers'): every paper on the same day, one after the other with a gap
+    // (owner 2026-11-19: NMMS महा-Test = MAT, 1 hour gap, SAT) instead of one paper a week by turns.
+    papers_same_day:  { type: Boolean, default: false },
+    gap_minutes:      { type: Number, min: 0, max: 240, default: 60 },
+    // 'daily' = "Paper Pattern Practice" (owner 2026-11-19): each paper at its own time on the chosen
+    // days, e.g. NMMS MAT Mon–Fri 07:00 + Sat 16:00, SAT Mon–Sat 19:00. One batch-wide time: the paper
+    // opens for everyone at once, may be started in the first `join_minutes`, and closes for everyone
+    // after duration_minutes. The day's papers add up to one day total + rank (Home banner till the
+    // next day's result). Questions: least used first. Patterns are per batch (NMMS is the first one).
+    kind:             { type: String, enum: ['weekly', 'daily'], default: 'weekly' },
+    slots: {
+      type: [{
+        _id: false,
+        paper: { type: String, trim: true, required: true },            // a paper's name (papers[].name)
+        dow:   { type: Number, min: 0, max: 6, required: true },          // 0 = Sunday (IST)
+        time:  { type: String, required: true, match: /^([01]\d|2[0-3]):[0-5]\d$/ },
+      }],
+      default: [],
+    },
+    join_minutes:     { type: Number, min: 0, max: 180, default: 0 },   // 0 = any time in the window
+    start_date:       { type: String, default: '', match: /^$|^\d{4}-\d{2}-\d{2}$/ }, // IST dates, '' = no limit
+    end_date:         { type: String, default: '', match: /^$|^\d{4}-\d{2}-\d{2}$/ },
+    skip_dates:       { type: [String], default: [] },                    // holidays 'YYYY-MM-DD'
+    banner_top:       { type: Number, min: 3, max: 10, default: 10 },     // how many toppers on the Home banner
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }, versionKey: false }
 );

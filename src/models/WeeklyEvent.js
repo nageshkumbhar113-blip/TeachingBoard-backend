@@ -50,6 +50,21 @@ const weeklyEventSchema = new mongoose.Schema(
     // parts that had fewer questions than asked (shown to the admin)
     shortages:        { type: [{ subject: String, want: Number, got: Number, _id: false }], default: [] },
     is_trial:         { type: Boolean, default: false },   // admin "try now" event
+    // Paper Pattern Practice (schedule kind 'daily') / महा-Test with every paper on one day:
+    // the IST day these papers belong to, and whether this is the day's last paper (it carries the
+    // day's total toppers for the Home banner).
+    kind:             { type: String, default: 'weekly' },
+    day_key:          { type: String, default: '', index: true },
+    day_final:        { type: Boolean, default: false },
+    join_until:       { type: Date, default: null },        // a paper can be started only till then
+    day_toppers: {
+      type: [{ rank: Number, name: String, score: Number, total: Number, code: String, hidden: Boolean, _id: false }],
+      default: [],
+    },
+    day_participants: { type: Number, default: 0 },
+    banner_until:     { type: Date, default: null },
+    notified_pre:     { type: Boolean, default: false },
+    notified_result:  { type: Boolean, default: false },
     // The paper is downloaded days ahead, encrypted with this key; the key is
     // handed out only from starts_at (a ~50-byte call), so the test itself
     // runs on the phone with no server load and nobody sees questions early.

@@ -1,6 +1,6 @@
 const express = require('express');
 const c = require('../controllers/weeklyController');
-const { attachUserIfPresent, requireAdmin } = require('../middleware/auth');
+const { attachUserIfPresent, requireAdmin, requireTeacher, requireParent } = require('../middleware/auth');
 const { createRateLimiter } = require('../middleware/rateLimiter');
 
 const router = express.Router();
@@ -12,12 +12,17 @@ router.post('/admin/schedules', requireAdmin, c.adminSaveSchedule);
 router.put('/admin/schedules/:id', requireAdmin, c.adminSaveSchedule);
 router.delete('/admin/schedules/:id', requireAdmin, c.adminDeleteSchedule);
 router.post('/admin/schedules/:id/trial', requireAdmin, c.adminTrial);
+router.get('/admin/schedules/:id/preview', requireAdmin, c.adminPreview);
 router.get('/admin/pool', requireAdmin, c.adminPool);
 router.get('/admin/events', requireAdmin, c.adminEvents);
 router.get('/admin/events/:id', requireAdmin, c.adminEventResults);
 router.delete('/admin/events/:id', requireAdmin, c.adminDeleteEvent);
 
 router.get('/my', attachUserIfPresent, c.my);
+// Paper Pattern Practice: my days + streak; a teacher's students / a parent's children day by day
+router.get('/practice/me', small, attachUserIfPresent, c.practiceMe);
+router.get('/practice/teacher', small, requireTeacher, c.practiceTeacher);
+router.get('/practice/parent', small, requireParent, c.practiceParent);
 router.get('/public', small, c.publicInfo);
 router.get('/history', small, attachUserIfPresent, c.history);
 router.post('/toppers/privacy', small, attachUserIfPresent, c.toppersPrivacy);
