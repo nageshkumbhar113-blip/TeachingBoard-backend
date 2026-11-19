@@ -784,6 +784,13 @@ export default {
         });
         return json({ success: true, data: r });
       }
+      // ⏰ Render tells us whether ads are running (it cannot be asked without waking it): ping only then
+      if (url.pathname === '/ads-state' && req.method === 'POST') {
+        if (!keyOk(env, req)) return json({ success: false }, 401);
+        const b = await req.json().catch(() => ({}));
+        await S.kvSet(env, 'ads_on', JSON.stringify({ on: b.on === true, at: Date.now() }));
+        return json({ success: true });
+      }
       if (url.pathname === '/tick' && req.method === 'POST') { if (!keyOk(env, req)) return json({ success: false }, 401); return json({ success: true, data: await runTick(env) }); }
       if (url.pathname === '/tick-one' && req.method === 'POST') {
         if (!keyOk(env, req)) return json({ success: false }, 401);
@@ -804,8 +811,14 @@ export default {
   async scheduled(event, env, ctx) {
     configure(env);
     ctx.waitUntil(runTick(env));
-    // keep Render (free plan, sleeps after 15 min) awake 6 am – 11 pm IST, so a parent's page and the bot never wait for it
+    // keep Render (free plan, sleeps after 15 min) awake 6 am – 11 pm IST, so a parent's page and the bot never wait
+    // for it — only while ads run (owner 2026-11-19; Render reports it, see utils/adsAwake.js there). KEEP_AWAKE:
+    // '0' never, '1' always (in the hours), else only with ads
     const h = (new Date(Date.now() + 5.5 * 3600e3)).getUTCHours();
-    if (env.KEEP_AWAKE !== '0' && h >= 6 && h < 23) ctx.waitUntil(ping(env));
+    if (env.KEEP_AWAKE !== '0' && h >= 6 && h < 23) ctx.waitUntil((async () => {
+      let ads = false;
+      try { ads = JSON.parse((await S.kvGet(env, 'ads_on')) || '{}').on === true; } catch { /* no report yet */ }
+      if (ads || env.KEEP_AWAKE === '1') await ping(env);
+    })());
   },
 };

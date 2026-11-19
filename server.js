@@ -106,6 +106,7 @@ async function start() {
 
   await require('./src/utils/offerConfig').refresh();   // 🎁 the admin's offer settings in memory
   require('./src/jobs/notificationScheduler').start();
+  require('./src/utils/adsAwake').start();   // ⏰ the bot keeps this server awake only while ads run
 
   // Initialize FCM at startup so we know immediately if it's configured
   try {

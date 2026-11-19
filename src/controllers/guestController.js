@@ -1020,7 +1020,7 @@ exports.adminMetaAction = asyncHandler(async (req, res) => {
   const b = req.body || {};
   try {
     let out;
-    if (b.action === 'pause' || b.action === 'resume') out = await META.setAdStatus(String(b.ad_id || ''), b.action === 'pause' ? 'PAUSED' : 'ACTIVE');
+    if (b.action === 'pause' || b.action === 'resume') { out = await META.setAdStatus(String(b.ad_id || ''), b.action === 'pause' ? 'PAUSED' : 'ACTIVE'); require('../utils/adsAwake').soon(); }
     else if (b.action === 'budget') out = await META.raiseBudget(String(b.adset_id || ''), 20);
     else if (b.action === 'set_budget') out = await META.setBudget(String(b.adset_id || ''), b.amount, { big: b.big === true });
     else if (b.action === 'retarget') out = await META.retarget(String(b.adset_id || ''), String(b.geo || ''));
@@ -1157,6 +1157,7 @@ exports.adminMetaCreateAd = asyncHandler(async (req, res) => {
       geo: ['gata', 'marathwada', 'nashik', 'kolhapur'].includes(b.geo) ? b.geo : 'all',
       ..._ages(b.age_min, b.age_max),
     });
+    require('../utils/adsAwake').soon();
     res.json({ success: true, ...out });
   } catch (err) { throw new AppError(err.message, err.status || 400); }
 });
