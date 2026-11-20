@@ -250,7 +250,7 @@ const ACT_NAMES = { wa: '💬 WhatsApp', sms: '✉️ SMS', next: '✅ बोल
 async function appFree(env, withUsage = true) {
   const { results } = await env.DB.prepare("SELECT gid, name, cls, mobile, crm, last_in, updated_at, data FROM leads WHERE mobile IS NOT NULL AND (crm IS NULL OR crm NOT IN ('paid', 'closed')) AND data LIKE '%\"app\":true%' ORDER BY updated_at DESC LIMIT 300").all();
   const now = new Date();
-  const rows = (results || []).map(r => ({ r, d: JSON.parse(r.data) })).filter(({ d }) => d.app && !d.paid && !d.closed)
+  const rows = (results || []).map(r => ({ r, d: JSON.parse(r.data) })).filter(({ d }) => d.app && !d.paid && !d.closed && !d.tdemo)
     .map(({ r, d }) => ({ gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, updated_at: r.updated_at, tests: d.testsDone, free_total: d.freeTotal,
       app: true, push_on: !!d.pushOn, open: WA.isOpen(d, now), offer: offerOf(d, now), labels: d.labels || [], place: d.place || '', sent: d.teamSent || 0, acct: !!(d.acct && d.acct.code) }));
   if (!withUsage) return rows;
@@ -263,7 +263,7 @@ async function appFree(env, withUsage = true) {
 async function newOnes(env) {
   const since = Date.now() - 48 * 3600e3, now = new Date();
   const { results } = await env.DB.prepare("SELECT gid, name, cls, mobile, crm, last_in, created_at, updated_at, data FROM leads WHERE mobile IS NOT NULL AND created_at >= ? AND (crm IS NULL OR crm NOT IN ('paid', 'closed')) ORDER BY created_at DESC LIMIT 200").bind(since).all();
-  return (results || []).map(r => ({ r, d: JSON.parse(r.data) })).filter(({ d }) => !d.paid && !d.closed && !((d.backfilled || d.imported) && !d.lastInboundAt))
+  return (results || []).map(r => ({ r, d: JSON.parse(r.data) })).filter(({ d }) => !d.paid && !d.closed && !d.tdemo && !((d.backfilled || d.imported) && !d.lastInboundAt))
     .map(({ r, d }) => ({ gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, created_at: r.created_at, updated_at: r.updated_at,
       tests: d.testsDone, free_total: d.freeTotal, app: d.app, open: WA.isOpen(d, now), offer: offerOf(d, now), labels: d.labels || [], place: d.place || '', sent: d.teamSent || 0,
       acct: !!(d.acct && d.acct.code), from: d.ctwaUntil ? 'ad' : d.source || d.via || '', question: d.question && !d.question.answered ? d.question : null, team: d.lastTeam || null }));
@@ -283,7 +283,7 @@ async function todayList(env) {
   const ms = x => Date.parse(x || '') || 0;
   for (const r of results || []) {
     const d = JSON.parse(r.data);
-    if (d.paid || d.closed) continue;
+    if (d.paid || d.closed || d.tdemo) continue;   // a teacher: the "👩‍🏫 शिक्षक" list
     const touched = Math.max(ms(d.lastTeam && d.lastTeam.at), ms(d.teamSentAt));
     const waiting = d.fu && (d.fu.done || (d.fu.due && d.fu.due > t && d.fu.setAt));   // the team set it for later / done
     const payAt = Math.max(ms(d.checkoutAt), ms(d.paySeenAt), ms(d.payWantAt));
@@ -317,7 +317,7 @@ async function todayList(env) {
 async function questions(env) {
   const { results } = await env.DB.prepare("SELECT gid, name, cls, mobile, crm, last_in, updated_at, data FROM leads WHERE data LIKE '%\"question\":{%' ORDER BY updated_at DESC LIMIT 300").all();
   const now = new Date();
-  return (results || []).map(r => ({ r, d: JSON.parse(r.data) })).filter(({ d }) => d.question && d.question.text && !d.question.answered)
+  return (results || []).map(r => ({ r, d: JSON.parse(r.data) })).filter(({ d }) => d.question && d.question.text && !d.question.answered && !d.tdemo)
     .map(({ r, d }) => ({ gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, updated_at: r.updated_at, tests: d.testsDone, free_total: d.freeTotal,
       app: d.app, paid: d.paid, open: WA.isOpen(d, now), offer: offerOf(d, now), labels: d.labels || [], place: d.place || '', sent: d.teamSent || 0, question: d.question }))
     .sort((a, b) => Date.parse(a.question.at) - Date.parse(b.question.at));
@@ -345,7 +345,7 @@ async function callFirst(env) {
   const rows = [];
   for (const r of results || []) {
     const d = JSON.parse(r.data);
-    if (d.paid || d.closed || !r.mobile) continue;
+    if (d.paid || d.closed || !r.mobile || d.tdemo) continue;
     const offer = d.offerEnd && new Date(d.offerEnd).getTime() > t ? new Date(d.offerEnd).getTime() : 0;
     const mt = d.mtLast && t - new Date(d.mtLast.at).getTime() < 3 * 864e5 ? d.mtLast : null;
     // gave the number but no test yet (the last 7 days): call them too, after the running offers
@@ -377,7 +377,7 @@ const IST_MS = 5.5 * 3600e3;
 const endOfToday = (t = Date.now()) => { const d = new Date(t + IST_MS); d.setUTCHours(23, 59, 59, 999); return d.getTime() - IST_MS; };
 // where this family stands now: { step (1-based), due (ms) } — or null (not in the follow-up)
 function fuOf(r, d, now, steps) {
-  if (!r.mobile || d.paid || d.closed || (d.fu && d.fu.done)) return null;
+  if (!r.mobile || d.paid || d.closed || d.tdemo || (d.fu && d.fu.done)) return null;   // teachers: their own list
   if (WA.isOpen(d, now)) return null;                         // talking to the bot right now: the bot does the work
   const f = d.fu ? { ...d.fu } : { step: 1, due: Date.parse(d.createdAt || '') || 0 };
   const at = name => steps.findIndex(s => s.tpl === name) + 1;   // a step by its message (0 = not in the list)
@@ -403,13 +403,32 @@ async function fuRows(env, now) {
   return { steps, rows };
 }
 
+// 👩‍🏫 teachers from teacher ads (a demo booked): the ones to call now on top (asked / the bot flagged a call and the
+// team has not spoken since), then the newest bookings; not the closed ones
+async function teacherList(env) {
+  const { results } = await env.DB.prepare("SELECT gid, name, cls, mobile, crm, last_in, created_at, updated_at, data FROM leads WHERE data LIKE '%\"tdemo\":{%' ORDER BY created_at DESC LIMIT 500").all();
+  const now = new Date(), ms = x => Date.parse(x || '') || 0;
+  const rows = [];
+  for (const r of results || []) {
+    const d = JSON.parse(r.data);
+    if (!d.tdemo || d.closed) continue;
+    const t = d.tdemo, touched = Math.max(ms(d.lastTeam && d.lastTeam.at), ms(d.teamSentAt));
+    const callNow = r.crm === 'call' && ms(d.callAt) > touched;
+    const stage = t.orderAt ? '💳 विद्यार्थी जोडले' : t.paperAt ? '📄 पेपर बनवला' : t.tLogin ? '✅ login झाला' : t.welcomedAt ? '💬 WhatsApp केलं' : '🆕 बुक केलं';
+    rows.push({ gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, created_at: r.created_at, updated_at: r.updated_at,
+      teacher: true, school: t.school || '', booked: t.bookedAt, stage, call_now: callNow, open: WA.isOpen(d, now), sent: d.teamSent || 0,
+      why: callNow ? '📞 आत्ता call करा' : '', when: callNow ? 'लगेच' : '', _k: (callNow ? 0 : 1e15) - ms(t.bookedAt) });
+  }
+  return rows.sort((a, b) => a._k - b._k).slice(0, 300).map(({ _k, ...x }) => x);
+}
+
 // 📲 the free account exists (code + PIN) but the app is not in use yet: call and help install
 async function noApp(env) {
   const { results } = await env.DB.prepare("SELECT gid, name, cls, mobile, crm, last_in, updated_at, data FROM leads WHERE crm IS NULL OR crm NOT IN ('paid', 'closed') ORDER BY updated_at DESC LIMIT 500").all();
   const rows = [], now = new Date();
   for (const r of results || []) {
     const d = JSON.parse(r.data);
-    if (d.paid || d.closed || d.app || !r.mobile || !(d.acct && d.acct.code)) continue;
+    if (d.paid || d.closed || d.app || d.tdemo || !r.mobile || !(d.acct && d.acct.code)) continue;
     rows.push({ gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, updated_at: r.updated_at,
       tests: d.testsDone, free_total: d.freeTotal, via: d.via, app: false, open: WA.isOpen(d, now), offer: offerOf(d, now), acct: true });
   }
@@ -421,7 +440,7 @@ async function crm(env, req, url, who) {
   const parts = url.pathname.split('/').filter(Boolean);   // crm, …
   if (parts[1] === 'summary' && req.method === 'GET') {
     const month = S.istDay().slice(0, 7);
-    const [today, fresh, grp, first, noapp, q, appfree, teamToday, nextyear, mc, jobsRow, costToday, lastTick, lastHook] = await Promise.all([
+    const [today, fresh, grp, first, noapp, q, appfree, teamToday, nextyear, mc, jobsRow, costToday, lastTick, lastHook, teachers] = await Promise.all([
       todayList(env),
       newOnes(env),
       env.DB.prepare('SELECT crm, COUNT(*) AS n FROM leads GROUP BY crm').all(),
@@ -430,10 +449,10 @@ async function crm(env, req, url, who) {
       env.DB.prepare("SELECT COUNT(*) AS n FROM leads WHERE crm = 'closed' AND revisit_at IS NOT NULL AND revisit_at <= ?").bind(Date.now()).first(),
       env.DB.prepare("SELECT SUM(CAST(v AS REAL)) AS s FROM kv WHERE k LIKE ?").bind('cost:' + month + '%').first(),
       env.DB.prepare('SELECT COUNT(*) AS n FROM jobs').first(),
-      S.todayCost(env), S.kvGet(env, 'last_tick'), S.kvGet(env, 'last_webhook'),
+      S.todayCost(env), S.kvGet(env, 'last_tick'), S.kvGet(env, 'last_webhook'), teacherList(env),
     ]);
     const counts = {}; for (const r of grp.results || []) counts[r.crm || 'active'] = r.n;
-    Object.assign(counts, { today: today.length, today_now: today.filter(r => r.cat <= 2).length, new: fresh.length, new_untouched: fresh.filter(r => !r.sent && !r.team).length, first: first.length, noapp: noapp.length, q: q.length, appfree: appfree.length, team_today: Number(teamToday) || 0, nextyear: nextyear.n });
+    Object.assign(counts, { today: today.length, today_now: today.filter(r => r.cat <= 2).length, new: fresh.length, new_untouched: fresh.filter(r => !r.sent && !r.team).length, first: first.length, noapp: noapp.length, q: q.length, appfree: appfree.length, team_today: Number(teamToday) || 0, nextyear: nextyear.n, teachers: teachers.length, teachers_now: teachers.filter(r => r.call_now).length });
     const jobs = jobsRow.n;
     return json({ success: true, data: {
       counts, cost_today: costToday, cost_month: mc?.s || 0, cap: Number(env.DAILY_CAP_RS) || 0,
@@ -442,6 +461,7 @@ async function crm(env, req, url, who) {
     } });
   }
   if (parts[1] === 'list' && req.method === 'GET' && url.searchParams.get('list') === 'q') return json({ success: true, data: await questions(env) });
+  if (parts[1] === 'list' && req.method === 'GET' && url.searchParams.get('list') === 'teacher') return json({ success: true, data: await teacherList(env) });
   if (parts[1] === 'list' && req.method === 'GET' && url.searchParams.get('list') === 'new') return json({ success: true, data: await newOnes(env) });
   if (parts[1] === 'list' && req.method === 'GET' && url.searchParams.get('list') === 'today') return json({ success: true, data: await todayList(env) });
   if (parts[1] === 'list' && req.method === 'GET' && url.searchParams.get('list') === 'appfree') return json({ success: true, data: await appFree(env) });
@@ -476,7 +496,7 @@ async function crm(env, req, url, who) {
     const list = url.searchParams.get('list') || 'all', q = (url.searchParams.get('q') || '').trim();
     const off = Math.max(0, Number(url.searchParams.get('offset')) || 0);
     const where = [], args = [];
-    if (LISTS.includes(list)) { where.push('crm = ?'); args.push(list); }
+    if (LISTS.includes(list)) { where.push('crm = ?'); args.push(list); if (list === 'call') where.push("data NOT LIKE '%\"tdemo\":{%'"); }
     else if (list === 'active') where.push('crm IS NULL');
     else if (list === 'nextyear') { where.push("crm = 'closed' AND revisit_at IS NOT NULL AND revisit_at <= ?"); args.push(Date.now()); }
     if (q) { where.push('(name LIKE ? OR mobile LIKE ? OR gid LIKE ?)'); args.push(`%${q}%`, `%${q}%`, `%${q.toUpperCase()}%`); }

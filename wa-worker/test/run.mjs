@@ -201,6 +201,28 @@ try {
   ok(dl.data && dl.data.lead && dl.data.lead.stopped && dl.data.lead.cls === 'Demo – Teacher' && lab && (dl.data.lead.labels || []).includes(lab.id), 'demo lead: label + class + bot stopped', JSON.stringify(dl.data && dl.data.lead && { cls: dl.data.lead.cls, labels: dl.data.lead.labels, stopped: dl.data.lead.stopped }));
   await sleep(800);
   ok(sent.length === nSent14, 'no WhatsApp to a demo lead');
+
+  // 15) 👩‍🏫 a teacher who booked a demo from a teacher ad (Render, with the key): own list + card, out of the parents' lists
+  const tad = b => fetch(W + '/demo/lead', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Bot-Key': SECRET }, body: JSON.stringify({ kind: 'teacher_ad', ...b }) }).then(r => r.json());
+  const t1 = await tad({ name: 'Kulkarni Sir', mobile: '9700001001', school: 'Gyandeep Classes', ad: 't-x1', course: '8th NMMS', teacher_code: 'KUL320', teacher_pin: '4347', student_code: 'GYA1001', student_pin: '9705' });
+  ok(t1.success && /^[0-9A-F]{10}$/.test(t1.gid || ''), 'teacher ad → a lead', JSON.stringify(t1));
+  const nobody = await fetch(W + '/demo/lead', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'teacher_ad', name: 'x', mobile: '9700001002', school: 'y' }) }).then(r => r.json());
+  const nl = nobody.gid ? (await crm('lead/' + nobody.gid)).data?.lead : null;
+  ok(!nl || !nl.tdemo, 'without the key: no teacher lead (only the plain demo one)');
+  const tl = (await crm('list?list=teacher')).data || [];
+  ok(tl.length === 1 && tl[0].gid === t1.gid && tl[0].school === 'Gyandeep Classes' && tl[0].call_now, 'the teacher list has them, "call now" on top', JSON.stringify(tl));
+  const callL = (await crm('list?list=call')).data || [], newL = (await crm('list?list=new')).data || [], todayL = (await crm('list?list=today')).data || [];
+  ok(!callL.some(r => r.gid === t1.gid) && !newL.some(r => r.gid === t1.gid) && !todayL.some(r => r.gid === t1.gid), 'teacher not in the parents call / new / today lists');
+  const sm = (await crm('summary')).data.counts;
+  ok(sm.teachers === 1 && sm.teachers_now === 1, 'summary counts the teachers', JSON.stringify({ t: sm.teachers, n: sm.teachers_now }));
+  const n15 = sent.length;
+  await signed(msg('919700001001', 'DEMO ' + t1.gid)); await waitSent(n15 + 1);
+  const w15 = sent.slice(n15).map(textOf).join(' | ');
+  ok(/KUL320/.test(w15) && /4347/.test(w15) && /GYA1001/.test(w15) && !/free/i.test(w15), 'teacher writes DEMO + id → both codes on WhatsApp', w15.slice(0, 200));
+  const card = (await crm('lead/' + t1.gid)).data.lead;
+  ok(card.tdemo && card.tdemo.welcomedAt && card.cls === 'Teacher (Ad)', 'teacher card: tdemo with the WhatsApp step');
+  const again = await tad({ name: 'Kulkarni Sir', mobile: '9700001001', school: 'Gyandeep', teacher_code: 'NEW999' });
+  ok(again.gid === t1.gid && again.again && (await crm('lead/' + t1.gid)).data.lead.tdemo.tCode === 'KUL320', 'teacher: same number again → same lead, codes unchanged');
 } catch (e) {
   ok(false, 'crashed: ' + e.stack);
 } finally {

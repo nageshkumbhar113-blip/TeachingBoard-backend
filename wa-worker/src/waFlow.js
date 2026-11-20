@@ -584,6 +584,7 @@
       if (done && !lead.paid && !lead.crm) { lead.crm = 'hot'; out.push(log('CRM', '🔥 सगळे free tests पूर्ण, pay नाही → गरम call यादी.')); }
       return out;
     }
+    if (type === 'sync' && lead.tdemo) return out;   // 👩‍🏫 a teacher's lead: no family facts from the server
     if (type === 'sync') {
       // fresh facts from the server (name, class, free tests, courses, prices, next महा-Test, paid, app…); no message
       const hadAcct = !!(lead.acct && lead.acct.code);
