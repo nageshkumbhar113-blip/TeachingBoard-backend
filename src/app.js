@@ -193,6 +193,7 @@ app.use("/api/sls",             slsRouter);
 // video CRUD) shouldn't share that tight 30-req/15min budget.
 app.use("/api/youtube-teacher", youtubeTeacherRouter);
 app.use("/api/teacher-videos",  require("./routes/teacherVideoRoutes"));
+app.use("/api/sch-stock",       require("./routes/schStockRoutes"));   // 📚 admin: scholarship generator stock
 app.use("/api/notify-schedule", require("./routes/notifyScheduleRoutes"));   // 🔔 Admin › Notifications
 app.use("/api/teacher-orders",  require("./routes/teacherOrderRoutes"));     // ➕ a teacher makes + pays for student accounts
 app.use("/api/teacher-demo",    require("./routes/teacherDemoRoutes"));      // 🎯 teacher demo booked from an ad   // 🎬 a school teacher's videos for their own students
