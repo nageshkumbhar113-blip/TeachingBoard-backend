@@ -139,8 +139,8 @@ exports.my = asyncHandler(async (req, res) => {
   const app = _isApp(req);
   if (me.demo) return res.json({ success: true, data: [], consent: true, app_only: false, app_only_msg: '', locked: [] });   // 🎯 school demo student
   const data = all.filter(e => e.open_to !== 'paid' || me.full).map(e => _view(e, byEvent.get(String(e._id)), countBy.get(String(e._id)) || 0, now, e.is_trial ? null : nextOf(e), app, dayOf(e)));
-  // a free student: the class's paid practice papers are shown locked ("🔒 subscribe")
-  const locked = me.full || me.guest ? [] : [...new Map(all.filter(e => e.open_to === 'paid' && e.kind === 'daily' && e.ends_at > now)
+  // a free student or a guest: the class's paid practice papers are shown locked ("🔒 subscribe"), the next paper of each schedule
+  const locked = me.full ? [] : [...new Map(all.filter(e => e.open_to === 'paid' && e.kind === 'daily' && e.ends_at > now).reverse()
     .map(e => [e.schedule_id, { title: e.title, batch: e.batch, subject: e.subject, starts_at: e.starts_at, question_count: e.questions?.length || 0, duration_minutes: e.duration_minutes }])).values()];
   // website: after the family's first महा-Test, the next ones are in the app only
   const appOnly = !app && data.length ? await _priorEntry(await _familyCodes(me), now) : false;
