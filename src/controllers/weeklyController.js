@@ -155,8 +155,8 @@ async function mahaTestOf(batch) {
   const hit = _pubCache.get(batch);
   if (hit && Date.now() - hit.at < 60e3) return hit.data;
   const now = _now();
-  const next = await WeeklyEvent.findOne({ batch, is_trial: { $ne: true }, status: { $ne: 'skipped' }, ends_at: { $gt: now } }).sort({ starts_at: 1 }).select('-questions').lean();
-  const last = await WeeklyEvent.findOne({ batch, is_trial: { $ne: true }, ends_at: { $lte: now } }).sort({ starts_at: -1 }).select('-questions').lean();
+  const next = await WeeklyEvent.findOne({ batch, kind: { $ne: 'daily' }, is_trial: { $ne: true }, status: { $ne: 'skipped' }, ends_at: { $gt: now } }).sort({ starts_at: 1 }).select('-questions').lean();
+  const last = await WeeklyEvent.findOne({ batch, kind: { $ne: 'daily' }, is_trial: { $ne: true }, ends_at: { $lte: now } }).sort({ starts_at: -1 }).select('-questions').lean();
   const regs = next ? await WeeklyEntry.countDocuments({ event_id: String(next._id) }) : 0;
   const qn = async ev => ev.question_count || (await WeeklyEvent.findById(ev._id, 'questions').lean())?.questions?.length || 0;
   const data = {
@@ -200,6 +200,8 @@ async function _saveConsent(req, me, show) {
 exports.register = asyncHandler(async (req, res) => {
   const me = _me(req);
   const ev = await _eventFor(req, me);
+  // practice papers need no registration: the class's paid students just start in the first minutes
+  if (ev.kind === 'daily') return res.status(400).json({ success: false, code: 'NO_REGISTER', message: 'रोजच्या Paper Practice ला register करायची गरज नाही — वेळ झाली की सुरू करा' });
   if (_now() >= ev.ends_at) throw new AppError('हा महा-Test संपला', 400);
   if (await _webBlocked(req, me)) return res.status(403).json({ success: false, code: 'APP_ONLY', message: APP_ONLY_MSG });
   // the name now always shows in the app's rank board (owner 2026-11-16); the answer is still noted once

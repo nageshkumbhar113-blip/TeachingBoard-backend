@@ -609,7 +609,7 @@ exports.adminAppStudentsBackfill = asyncHandler(async (_req, res) => {
 exports.adminMtList = asyncHandler(async (_req, res) => {
   const WeeklyEvent = require('../models/WeeklyEvent'), WeeklyEntry = require('../models/WeeklyEntry');
   const now = new Date();
-  const events = await WeeklyEvent.find({ is_trial: { $ne: true }, status: { $ne: 'skipped' }, ends_at: { $gt: now }, starts_at: { $lt: new Date(now.getTime() + 8 * 864e5) } })
+  const events = await WeeklyEvent.find({ kind: { $ne: 'daily' }, is_trial: { $ne: true }, status: { $ne: 'skipped' }, ends_at: { $gt: now }, starts_at: { $lt: new Date(now.getTime() + 8 * 864e5) } })
     .sort({ starts_at: 1 }).select('_id batch title starts_at ends_at').lean();
   const out = [];
   for (const ev of events) {
@@ -857,7 +857,7 @@ exports.adminLeads = asyncHandler(async (req, res) => {
     const mt = {};
     for (const b of [...new Set(data.map(l => l.batch).filter(Boolean))]) mt[b] = await WK.mahaTestOf(b);
     const ids = Object.values(mt).flatMap(m => [m.next?.event_id].filter(Boolean));
-    const lastIds = (await require('../models/WeeklyEvent').find({ batch: { $in: Object.keys(mt) }, is_trial: { $ne: true }, ends_at: { $lte: new Date() } }).sort({ starts_at: -1 }).limit(30).select('_id batch starts_at').lean());
+    const lastIds = (await require('../models/WeeklyEvent').find({ batch: { $in: Object.keys(mt) }, kind: { $ne: 'daily' }, is_trial: { $ne: true }, ends_at: { $lte: new Date() } }).sort({ starts_at: -1 }).limit(30).select('_id batch starts_at').lean());
     const lastOf = {}; for (const e of lastIds) if (!lastOf[e.batch]) lastOf[e.batch] = String(e._id);
     const entries = await WeeklyEntry.find({ event_id: { $in: [...ids, ...Object.values(lastOf)] }, student_code: { $in: data.map(l => `GUEST-${l.gid}`) } }, 'event_id student_code submitted_at score total rank').lean();
     const key = (ev, gid) => `${ev}|GUEST-${gid}`, E = new Map(entries.map(e => [`${e.event_id}|${e.student_code}`, e]));

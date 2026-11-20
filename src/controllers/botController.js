@@ -41,7 +41,7 @@ async function syncOf(gid) {
     || (acc && require('../utils/contentAccess').hasFullAccess(acc))) : false;
   // the class's next महा-Test and whether this child is registered
   const now = new Date();
-  const next = lead.batch ? await WeeklyEvent.findOne({ batch: lead.batch, is_trial: { $ne: true }, status: { $ne: 'skipped' }, ends_at: { $gt: now } }).sort({ starts_at: 1 }).select('_id starts_at').lean() : null;
+  const next = lead.batch ? await WeeklyEvent.findOne({ batch: lead.batch, kind: { $ne: 'daily' }, is_trial: { $ne: true }, status: { $ne: 'skipped' }, ends_at: { $gt: now } }).sort({ starts_at: 1 }).select('_id starts_at').lean() : null;
   const mtReg = next ? !!(await WeeklyEntry.exists({ event_id: String(next._id), student_code: lead.converted_code || code })) : false;
   return {
     name: lead.name || undefined,
@@ -220,7 +220,7 @@ const action = asyncHandler(async (req, res) => {
     return res.json({ success: true, data: await syncOf(gid) });
   }
   if (act === 'mt_register') {
-    const ev = lead.batch ? await WeeklyEvent.findOne({ batch: lead.batch, is_trial: { $ne: true }, status: { $ne: 'skipped' }, ends_at: { $gt: new Date() } }).sort({ starts_at: 1 }).lean() : null;
+    const ev = lead.batch ? await WeeklyEvent.findOne({ batch: lead.batch, kind: { $ne: 'daily' }, is_trial: { $ne: true }, status: { $ne: 'skipped' }, ends_at: { $gt: new Date() } }).sort({ starts_at: 1 }).lean() : null;
     if (!ev) return res.json({ success: true, skipped: 'no महा-Test' });
     const code = lead.converted_code || `GUEST-${gid}`;
     // registered from WhatsApp: the name stays hidden on the toppers list until they choose otherwise in the app

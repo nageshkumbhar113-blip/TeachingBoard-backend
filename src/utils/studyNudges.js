@@ -32,7 +32,7 @@ async function messageFor(s, now) {
   }
   // Saturday: tomorrow's महा-Test
   if (new Date(now.getTime() + IST).getUTCDay() === 6 && batch) {
-    const ev = await WeeklyEvent.findOne({ batch, is_trial: { $ne: true }, status: { $ne: 'skipped' }, starts_at: { $gt: now, $lt: new Date(now.getTime() + 36 * 3600e3) } }).sort({ starts_at: 1 }).lean();
+    const ev = await WeeklyEvent.findOne({ batch, kind: { $ne: 'daily' }, is_trial: { $ne: true }, status: { $ne: 'skipped' }, starts_at: { $gt: now, $lt: new Date(now.getTime() + 36 * 3600e3) } }).sort({ starts_at: 1 }).lean();
     if (ev && await WeeklyEntry.exists({ event_id: String(ev._id), student_code: code })) {
       return { title: '🏆 उद्या महा-Test', body: 'नोंदणी झाली आहे — आज थोडा सराव करा, उद्या वेळेवर या', data: { type: 'study_nudge', kind: 'maha' } };
     }
