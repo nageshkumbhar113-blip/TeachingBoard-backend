@@ -58,14 +58,15 @@ function _shuffle(arr) {
 function _norm(s) { return String(s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
 // "Same question" (also across tests): figure questions share one direction text, so pictures count.
 function _qkey(q) {
-  return _norm(q.question) + '|' + (q.image || '') + '|' + Object.values(q.option_images || {}).filter(Boolean).join(',');
+  return _norm(q.question) + '|' + (q.image || '') + '|' + Object.values(q.option_images || {}).filter(Boolean).join(',')
+    + '|' + Object.keys(q.options || {}).sort().map(k => _norm(q.options[k])).join('¦');
 }
 
 // How often each question of the class already came in its महा-Tests / practice papers (the
 // last 400 tests): a daily paper takes the least used ones first, so no question comes back
 // before every question of the bank has come once.
 async function usageMap(batch) {
-  const evs = await WeeklyEvent.find({ batch, is_trial: { $ne: true }, status: { $ne: 'skipped' } }, 'questions.question questions.image questions.option_images')
+  const evs = await WeeklyEvent.find({ batch, is_trial: { $ne: true }, status: { $ne: 'skipped' } }, 'questions.question questions.image questions.option_images questions.options')
     .sort({ starts_at: -1 }).limit(400).lean();
   const m = new Map();
   for (const e of evs) for (const q of e.questions || []) { const k = _qkey(q); m.set(k, (m.get(k) || 0) + 1); }
@@ -318,21 +319,21 @@ function _slotExtra(s, slot, slots) {
   }
   return { ends_at: endsAt, reveal_at: reveal, kind: 'daily', day_key: slot.day_key, day_final: slot.final, banner_until: bannerUntil };
 }
+const DAILY_AHEAD_MS = 36 * 3600 * 1000;
 async function _ensureDaily(s, now) {
-  const pending = await WeeklyEvent.exists({ schedule_id: String(s._id), is_trial: false, ends_at: { $gt: now } });
-  if (pending) return;
   // a paper that started a few minutes ago (server was busy / schedule just saved) still counts
   const late = Math.max(Number(s.join_minutes) || 0, 1) * 60000;
   const slots = dailySlots(s, new Date(now.getTime() - late));
-  let slot = null;
+  let haveNext = false;
   for (const x of slots) {
     if (x.start.getTime() <= now.getTime() - late) continue;
-    if (await WeeklyEvent.exists({ schedule_id: String(s._id), is_trial: false, starts_at: x.start })) continue;   // already made (and over)
-    slot = x; break;
+    // always the next paper; besides it, every paper of the next 36 hours
+    if (haveNext && x.start.getTime() > now.getTime() + DAILY_AHEAD_MS) break;
+    haveNext = true;
+    if (await WeeklyEvent.exists({ schedule_id: String(s._id), is_trial: false, starts_at: x.start })) continue;   // already made
+    const pi = s.papers.findIndex(p => p.name === x.paper);
+    await _generatePaperEvent(s, x.start, { paperIndex: pi, extra: _slotExtra(s, x, slots) });
   }
-  if (!slot) return;
-  const pi = s.papers.findIndex(p => p.name === slot.paper);
-  await _generatePaperEvent(s, slot.start, { paperIndex: pi, extra: _slotExtra(s, slot, slots) });
 }
 
 // ── महा-Test with every paper on one day (paper 1, gap, paper 2 …) ───────────

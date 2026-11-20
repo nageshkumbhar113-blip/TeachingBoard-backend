@@ -112,8 +112,11 @@ function _view(ev, entry, registered = 0, now = _now(), bannerUntil = null, app 
 }
 
 // GET /api/weekly/my — this week's test (and last week's, for its result).
+let _lastEnsure = 0;
 exports.my = asyncHandler(async (req, res) => {
   const me = _me(req);
+  // the server may have been asleep at the scheduler's tick: make the coming papers now (at most once a minute)
+  if (Date.now() - _lastEnsure > 60e3) { _lastEnsure = Date.now(); W.ensureUpcoming().catch(err => console.warn('weekly ensure (my) failed:', err.message)); }
   const since = new Date(Date.now() - 7 * 864e5);
   // newest 30 (a week of daily practice papers + the महा-Test), in time order; only the question count is needed
   const LIGHT = '-questions.question -questions.options -questions.answer -questions.explanation -questions.image -questions.option_images -questions.chapter';
