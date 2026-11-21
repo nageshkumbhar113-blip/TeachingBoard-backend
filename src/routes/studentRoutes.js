@@ -11,6 +11,7 @@ const {
   updateOwnDeviceToken,
 } = require('../controllers/studentController');
 const { getSyncState } = require('../controllers/syncStateController');
+const { getQbankIndex, getQbankChapter } = require('../controllers/qbankController');
 const { previewImport, runImport } = require('../controllers/studentImportController');
 
 const router = express.Router();
@@ -36,5 +37,8 @@ router.post('/:id/reset-device', requireAdmin, resetDevice);
 const selfRouter = express.Router();
 selfRouter.patch('/device-token', requireStudent, updateOwnDeviceToken);
 selfRouter.get('/sync-state', requireStudent, getSyncState);
+// the question bank one chapter at a time (controllers/qbankController.js)
+selfRouter.get('/qbank/index', requireStudent, getQbankIndex);
+selfRouter.get('/qbank/chapter', requireStudent, getQbankChapter);
 
 module.exports = { router, selfRouter };

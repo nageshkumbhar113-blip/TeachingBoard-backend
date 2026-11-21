@@ -27,6 +27,7 @@ const crypto = require('crypto');
 const asyncHandler = require('../utils/asyncHandler');
 const Quiz = require('../models/Quiz');
 const Question = require('../models/Question');
+const { getIndex: getQbankIndex } = require('./qbankController');
 const { hasFullAccess, isQuizLocked, isChapterFree, freeWindowOver } = require('../utils/contentAccess');
 
 const _memo = new Map(); // key -> { at, quizzes, questions }
@@ -102,11 +103,15 @@ exports.getSyncState = asyncHandler(async (req, res) => {
     }
   }
 
+  // the chapter-wise question bank (new apps): its index fingerprint (memoised in qbankController)
+  const qbank = batches.length ? ((await getQbankIndex(userDoc).catch(() => null))?.fp || '') : '0:';
+
   res.json({
     success: true,
     enabled: true,
     quizzes: fp.quizzes,
     questions: fp.questions,
+    qbank,
     access,
     ..._hints(),
   });
