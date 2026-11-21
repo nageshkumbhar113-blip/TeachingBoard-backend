@@ -383,8 +383,10 @@ function isCorrect(q, given) {
   if (!g) return false;
   if (q.type === 'fib') return _norm(g) === _norm(q.answer);
   const opts = q.options || {};
-  const answerText = opts[q.answer] ?? q.answer;
-  return g === q.answer || _norm(opts[g] ?? g) === _norm(answerText);
+  if (g === q.answer) return true;
+  // compare the option text only when there is text (picture options have empty text — never a match)
+  const gt = _norm(opts[g] ?? g), at = _norm(opts[q.answer] ?? q.answer);
+  return gt !== '' && gt === at;
 }
 
 // One subject: a mark a question, nothing off. Mixed paper: each question's marks, `negative`

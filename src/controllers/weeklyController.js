@@ -306,7 +306,7 @@ exports.result = asyncHandler(async (req, res) => {
       // महा-Test is free for everyone; the answer key + उकल: the family's first महा-Test, then paid students only
       review_locked: !open,
       first_free: first,
-      review: ev.questions.map(q => ({ q_id: q.q_id, type: q.type, question: q.question, options: q.options, answer: open ? q.answer : '', explanation: open ? q.explanation : '', image: q.image, subject: q.subject || '', marks: q.marks || 1, given: given.get(q.q_id) || '' })),
+      review: ev.questions.map(q => ({ q_id: q.q_id, type: q.type, question: q.question, options: q.options, answer: open ? q.answer : '', explanation: open ? q.explanation : '', image: q.image, option_images: q.option_images || {}, subject: q.subject || '', marks: q.marks || 1, given: given.get(q.q_id) || '' })),
       // a day of papers (practice / महा-Test on one day): my day total + the day's rank board (9.0.1+)
       kind: ev.kind || 'weekly', title: ev.title, day_final: !!ev.day_final, ...(ev.day_key ? await _dayBoard(ev, me, app) : {}),
     },
