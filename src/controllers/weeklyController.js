@@ -113,25 +113,41 @@ function _view(ev, entry, registered = 0, now = _now(), bannerUntil = null, app 
 
 // GET /api/weekly/my — this week's test (and last week's, for its result).
 let _lastEnsure = 0;
+// The class part of /weekly/my (its papers, trials and how many joined) is the same for every child of
+// the class, and the whole class opens the app at 6 pm: kept for MY_CLASS_MS (audit 2026-11-21). The child's
+// own marks, day totals and rank are read fresh every time. Cleared when the admin changes a schedule,
+// makes a trial or deletes a paper. Kill switch: WEEKLY_MY_CACHE_MS=0.
+const MY_CLASS_MS = Number(process.env.WEEKLY_MY_CACHE_MS ?? 30000);
+const _myClass = new Map();   // batches → { at, events, trials, countBy }
+const _clearMyClass = () => _myClass.clear();
+async function _classPart(batches, LIGHT) {
+  const key = [...batches].sort().join('|');
+  const hit = MY_CLASS_MS > 0 ? _myClass.get(key) : null;
+  if (hit && Date.now() - hit.at < MY_CLASS_MS) return hit;
+  const since = new Date(Date.now() - 7 * 864e5);
+  // newest 30 (a week of daily practice papers + the महा-Test), in time order; only the question count is needed
+  const events = (await WeeklyEvent.find({ batch: { $in: batches }, status: { $ne: 'skipped' }, ends_at: { $gt: since }, is_trial: { $ne: true } })
+    .select(LIGHT).sort({ starts_at: -1 }).limit(30).lean()).reverse();
+  // trial events (admin "try now") are shown too, so the admin can test on a phone
+  const trials = await WeeklyEvent.find({ batch: { $in: batches }, is_trial: true, ends_at: { $gt: new Date(Date.now() - 864e5) } }).select(LIGHT).lean();
+  const ids = [...events, ...trials].map(e => String(e._id));
+  const counts = await WeeklyEntry.aggregate([{ $match: { event_id: { $in: ids } } }, { $group: { _id: '$event_id', n: { $sum: 1 } } }]);
+  const out = { at: Date.now(), events, trials, countBy: new Map(counts.map(c => [c._id, c.n])) };
+  if (MY_CLASS_MS > 0) { _myClass.set(key, out); if (_myClass.size > 300) for (const [k, v] of _myClass) if (Date.now() - v.at > MY_CLASS_MS) _myClass.delete(k); }
+  return out;
+}
 exports.my = asyncHandler(async (req, res) => {
   const me = _me(req);
   // the server may have been asleep at the scheduler's tick: make the coming papers now (at most once a minute)
   if (Date.now() - _lastEnsure > 60e3) { _lastEnsure = Date.now(); W.ensureUpcoming().catch(err => console.warn('weekly ensure (my) failed:', err.message)); }
-  const since = new Date(Date.now() - 7 * 864e5);
-  // newest 30 (a week of daily practice papers + the महा-Test), in time order; only the question count is needed
   const LIGHT = '-questions.question -questions.options -questions.answer -questions.explanation -questions.image -questions.option_images -questions.chapter';
-  const events = (await WeeklyEvent.find({ batch: { $in: me.batches }, status: { $ne: 'skipped' }, ends_at: { $gt: since }, is_trial: { $ne: true } })
-    .select(LIGHT).sort({ starts_at: -1 }).limit(30).lean()).reverse();
-  // trial events (admin "try now") are shown too, so the admin can test on a phone
-  const trials = await WeeklyEvent.find({ batch: { $in: me.batches }, is_trial: true, ends_at: { $gt: new Date(Date.now() - 864e5) } }).select(LIGHT).lean();
+  const { events, trials, countBy } = await _classPart(me.batches, LIGHT);
   const all = [...events, ...trials];
   // this child's day totals (practice / महा-Test days)
   const dayRows = await PracticeDay.find({ student_code: me.code, day_key: { $in: [...new Set(all.map(e => e.day_key).filter(Boolean))] } }).lean();
   const dayOf = e => e.day_key ? dayRows.find(d => d.schedule_id === e.schedule_id && d.day_key === e.day_key) || null : null;
   const entries = await WeeklyEntry.find({ event_id: { $in: all.map(e => String(e._id)) }, student_code: me.code }).lean();
   const byEvent = new Map(entries.map(e => [e.event_id, e]));
-  const counts = await WeeklyEntry.aggregate([{ $match: { event_id: { $in: all.map(e => String(e._id)) } } }, { $group: { _id: '$event_id', n: { $sum: 1 } } }]);
-  const countBy = new Map(counts.map(c => [c._id, c.n]));
   // the toppers banner of a class stays until that class's next महा-Test starts
   const nextOf = e => all.filter(x => x.schedule_id === e.schedule_id && !x.is_trial && x.starts_at > e.starts_at)
     .sort((a, b) => a.starts_at - b.starts_at)[0]?.starts_at || null;
@@ -171,7 +187,7 @@ async function mahaTestOf(batch) {
   return data;
 }
 exports.mahaTestOf = mahaTestOf;
-exports.clearPublicCache = () => _pubCache.clear();
+exports.clearPublicCache = () => { _pubCache.clear(); _clearMyClass(); };
 exports.publicInfo = asyncHandler(async (req, res) => {
   const batch = String(req.query.batch || '').trim().slice(0, 120);
   if (!batch) throw new AppError('batch is required', 400);
@@ -492,6 +508,7 @@ exports.adminSaveSchedule = asyncHandler(async (req, res) => {
   if (!s) throw new AppError('Not found', 404);
   // timing / content changed → the not-yet-started event is made again with the new settings
   await W.remakeUpcoming(s._id);   // (in the same queue as the scheduler tick — never two tests at once)
+  _clearMyClass();   // Home cards show the change at once
   res.status(req.params.id ? 200 : 201).json({ success: true, data: s });
 });
 
@@ -502,6 +519,7 @@ exports.adminDeleteSchedule = asyncHandler(async (req, res) => {
   const gone = await WeeklyEvent.find({ schedule_id: String(s._id), $or: [{ starts_at: { $gt: new Date() } }, { is_trial: true }] }, '_id').lean();
   await WeeklyEntry.deleteMany({ event_id: { $in: gone.map(e => String(e._id)) } });
   await WeeklyEvent.deleteMany({ _id: { $in: gone.map(e => e._id) } });
+  _clearMyClass();   // Home cards show the change at once
   res.json({ success: true });
 });
 
@@ -512,6 +530,7 @@ exports.adminTrial = asyncHandler(async (req, res) => {
   // one trial at a time: pressing the button again returns the running one
   const running = await WeeklyEvent.findOne({ schedule_id: String(s._id), is_trial: true, ends_at: { $gt: new Date() } }).lean();
   if (running) {
+    _clearMyClass();   // Home cards show the change at once
     return res.json({ success: true, existing: true, data: { event_id: String(running._id), subject: running.subject, starts_at: running.starts_at, ends_at: running.ends_at, questions: running.questions.length, shortages: running.shortages || [] } });
   }
   const raw = Number(req.body?.start_in_minutes);
@@ -523,6 +542,7 @@ exports.adminTrial = asyncHandler(async (req, res) => {
   const ev = await W.generateEvent(trialSched, new Date(Date.now() + startIn * 60000), { trial: true });
   if (!ev) throw new AppError('या class ला विषय नाहीत', 400);
   if (ev.status === 'skipped') throw new AppError(ev.skip_reason, 400);
+  _clearMyClass();   // Home cards show the change at once
   res.status(201).json({ success: true, data: { event_id: String(ev._id), subject: ev.subject, starts_at: ev.starts_at, ends_at: ev.ends_at, questions: ev.questions.length, shortages: ev.shortages || [] } });
 });
 
@@ -549,6 +569,7 @@ exports.adminDeleteEvent = asyncHandler(async (req, res) => {
   const ev = await WeeklyEvent.findByIdAndDelete(req.params.id).catch(() => null);
   if (!ev) throw new AppError('Not found', 404);
   await WeeklyEntry.deleteMany({ event_id: String(ev._id) });
+  _clearMyClass();   // Home cards show the change at once
   res.json({ success: true });
 });
 
