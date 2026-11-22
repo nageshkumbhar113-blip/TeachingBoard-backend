@@ -45,9 +45,7 @@ const _hm = d => new Date(new Date(d).getTime() + 5.5 * 3600e3).toISOString().sl
 
 // Owner (2026-11-16): the rank board shows every child's name inside the app (no permission asked); on the website
 // (student-app on the web, the public महा-Test page) names stay hidden. The installed app's WebView sends its own origin.
-const APP_ORIGINS = new Set(['capacitor://localhost', 'https://localhost', 'http://localhost',
-  ...String(process.env.APP_ORIGINS || '').split(',').map(x => x.trim()).filter(Boolean)]);
-const _isApp = req => APP_ORIGINS.has(String(req.headers.origin || ''));
+const { isAppRequest: _isApp } = require('../utils/appOrigin');
 
 // The child's family: this account + the free-part visits / accounts made with the same parent's number — so
 // "the first महा-Test" is the family's first, wherever it was given.
@@ -224,7 +222,7 @@ exports.register = asyncHandler(async (req, res) => {
   if (!(await _consented(req, me))) await _saveConsent(req, me, true);
   await WeeklyEntry.updateOne(
     { event_id: String(ev._id), student_code: me.code },
-    { $setOnInsert: { name: me.name, is_guest: me.guest, registered_at: _now() } },
+    { $setOnInsert: { name: me.name, is_guest: me.guest, registered_at: _now(), via: _isApp(req) ? 'app' : 'web' } },
     { upsert: true }
   );
   _pubCache.delete(ev.batch);   // the public page counts this registration at once
@@ -257,7 +255,7 @@ exports.key = asyncHandler(async (req, res) => {
   }
   if (!entry?.started_at) {
     await WeeklyEntry.updateOne({ event_id: String(ev._id), student_code: me.code },
-      { $set: { started_at: now }, $setOnInsert: { name: me.name, is_guest: me.guest, registered_at: now } }, { upsert: true });
+      { $set: { started_at: now, via: _isApp(req) ? 'app' : 'web' }, $setOnInsert: { name: me.name, is_guest: me.guest, registered_at: now } }, { upsert: true });
   }
   res.json({ success: true, key: ev.key_b64 });
 });
@@ -290,7 +288,7 @@ exports.submit = asyncHandler(async (req, res) => {
   await WeeklyEntry.updateOne(
     { event_id: String(ev._id), student_code: me.code },
     { $set: { submitted_at: now, answers: g.answers, score: g.score, total: g.total, correct: g.correct, wrong: g.wrong, skipped: g.skipped, by_subject: g.by_subject,
-      time_taken: timeTaken, leave_count: Math.max(0, Number(req.body?.leave_count) || 0), name: me.name, is_guest: me.guest },
+      time_taken: timeTaken, leave_count: Math.max(0, Number(req.body?.leave_count) || 0), name: me.name, is_guest: me.guest, via: _isApp(req) ? 'app' : 'web' },
       $setOnInsert: { registered_at: now } },
     { upsert: true }
   );
@@ -610,10 +608,19 @@ exports.adminEventResults = asyncHandler(async (req, res) => {
   const gids = entries.filter(e => e.is_guest).map(e => String(e.student_code).replace(/^GUEST-/, ''));
   const codes = entries.filter(e => !e.is_guest).map(e => e.student_code);
   const [leads, users] = await Promise.all([
-    gids.length ? GuestLead.find({ gid: { $in: gids } }, 'gid parent_mobile').lean() : [],
-    codes.length ? User.find({ role: 'student', student_code: { $in: codes } }, 'student_code mobile').lean() : [],
+    gids.length ? GuestLead.find({ gid: { $in: gids } }, 'gid parent_mobile converted_code').lean() : [],
+    codes.length ? User.find({ role: 'student', student_code: { $in: codes } }, 'student_code mobile app_first_at app_last_day').lean() : [],
   ]);
   const mob = new Map([...leads.map(l => [`GUEST-${l.gid}`, l.parent_mobile]), ...users.map(u => [u.student_code, u.mobile])]);
-  entries.forEach(e => { e.mobile = mob.get(e.student_code) || ''; });
+  // 📲 does the child use the app (noted since 2026-11-22): own account, or the account a free visitor later made
+  const conv = new Map(leads.filter(l => l.converted_code).map(l => [`GUEST-${l.gid}`, l.converted_code]));
+  const convUsers = conv.size ? await User.find({ role: 'student', student_code: { $in: [...conv.values()] } }, 'student_code app_first_at app_last_day').lean() : [];
+  const appOf = new Map([...users, ...convUsers].map(u => [u.student_code, u]));
+  entries.forEach(e => {
+    e.mobile = mob.get(e.student_code) || '';
+    const u = appOf.get(e.student_code) || appOf.get(conv.get(e.student_code));
+    e.app_first_at = u?.app_first_at || null;
+    e.app_last_day = u?.app_last_day || '';
+  });
   res.json({ success: true, data: { event: { _id: ev._id, batch: ev.batch, subject: ev.subject, starts_at: ev.starts_at, ends_at: ev.ends_at, status: ev.status }, entries } });
 });

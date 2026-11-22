@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const { createToken } = require('../utils/token');
+const { isAppRequest } = require('../utils/appOrigin');
 const { normalizeExpiryDate } = require('../utils/accountStatus');
 const { hasFullAccess, freeUntil } = require('../utils/contentAccess');
 const { isExpiredDate: _isExpiredDate } = require('../utils/accountStatus');
@@ -299,6 +300,10 @@ exports.me = asyncHandler(async (req, res) => {
   if (userDoc.role === 'student' && req.user.role === 'student') {
     const day = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
     if (userDoc.last_seen_day !== day) User.updateOne({ user_id: userDoc.user_id }, { $set: { last_seen_day: day } }).catch(() => {});
+    // opened in the installed app: noted once a day (Admin › महा-Test list: 📲 App ✓ / 🌐 website only)
+    if (isAppRequest(req) && userDoc.app_last_day !== day) {
+      User.updateOne({ user_id: userDoc.user_id }, { $set: { app_last_day: day, ...(userDoc.app_first_at ? {} : { app_first_at: new Date() }) } }).catch(() => {});
+    }
   }
 
   // A "parent" session may be backed by a Student document (student's own

@@ -22,6 +22,7 @@ const weeklyEntrySchema = new mongoose.Schema(
     by_subject:    { type: [{ _id: false, subject: String, score: Number, total: Number, correct: Number, wrong: Number }], default: [] },
     time_taken:    { type: Number, default: 0 },      // seconds
     leave_count:   { type: Number, default: 0 },      // left the app during the test (reported)
+    via:           { type: String, default: '' },     // 'app' / 'web': where it was registered / started / submitted (last one wins)
     rank:          { type: Number, default: null },
     // Admin › CRM "🏆 महा-Test": when the team sent this family a reminder from its own WhatsApp / SMS
     team_reminders: { type: [Date], default: [] },

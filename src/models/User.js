@@ -142,6 +142,10 @@ const userSchema = new mongoose.Schema(
     parent_code:  { type: String, unique: true, sparse: true, trim: true, index: true },
     children:     { type: [String], default: [] }, // array of student_codes
 
+    // the student uses the installed app (noted by GET /auth/me from the app's WebView, since 2026-11-22)
+    app_first_at: { type: Date, default: null },
+    app_last_day: { type: String, default: '' },
+
     // Shared: FCM device token for push notifications
     device_token: { type: String, default: null, trim: true },
     // Student-specific: the phone a parent uses when logged into the Parent
