@@ -44,7 +44,11 @@ app.set('trust proxy', 1);
 
 // ── Security headers ─────────────────────────────────────────
 app.disable('x-powered-by');
-app.use((_req, res, next) => {
+app.use((req, res, next) => {
+  // HTTPS only from now on for this server (security audit 2026-11-22); not on local http
+  if (req.secure || String(req.headers['x-forwarded-proto'] || '').startsWith('https')) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');

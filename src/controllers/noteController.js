@@ -132,11 +132,11 @@ exports.listNotesStudent = asyncHandler(async (req, res) => {
   const assignedBatches = Array.isArray(req.userDoc?.assigned_batches)
     ? req.userDoc.assigned_batches.map(b => String(b || '').trim()).filter(Boolean)
     : [];
-  if (assignedBatches.length > 0) {
+  // no class assigned → no notes (security audit 2026-11-22: a client-chosen batch used to be listed)
+  if (!assignedBatches.length) return res.json({ success: true, notes: [] });
+  {
     // $in needs literal RegExp instances, not _iregex()'s {$regex:...} query-operator shape.
     filter.batch = { $in: assignedBatches.map(b => new RegExp('^' + b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i')) };
-  } else if (req.query.batch) {
-    filter.batch = _iregex(req.query.batch);
   }
 
   const notes = await Note.find(filter)
@@ -164,7 +164,8 @@ exports.viewNoteStudent = asyncHandler(async (req, res) => {
     ? req.userDoc.assigned_batches.map(b => String(b || '').trim()).filter(Boolean)
     : [];
   const noteBatchLower  = (note.batch || '').trim().toLowerCase();
-  if (assignedBatches.length > 0 && !assignedBatches.some(b => b.toLowerCase() === noteBatchLower))
+  // a student with no class used to pass this gate (security audit 2026-11-22)
+  if (!assignedBatches.some(b => b.toLowerCase() === noteBatchLower))
     throw new AppError('Access denied — this note is not for your batch', 403);
 
   if (!(await canAccessChapter(req.userDoc, note.batch, note.subject, note.chapter))) {

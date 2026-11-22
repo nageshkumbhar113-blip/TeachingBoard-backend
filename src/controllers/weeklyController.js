@@ -284,7 +284,13 @@ exports.submit = asyncHandler(async (req, res) => {
   }
   const g = W.grade(ev, Array.isArray(req.body?.answers) ? req.body.answers.slice(0, 200) : []);
   const maxSec = ev.duration_minutes * 60;
-  const timeTaken = Math.min(maxSec, Math.max(0, Math.round(Number(req.body?.time_taken) || maxSec)));
+  // The time decides the rank when marks are equal, so the server measures it: from the moment the
+  // paper was opened (the key was given) to now (security audit 2026-11-22 — a phone could send
+  // "1 second"). A phone's own figure is used only when it is LONGER (never to look faster).
+  const started = existing?.started_at ? new Date(existing.started_at).getTime() : 0;
+  const serverSec = started ? Math.round((now.getTime() - started) / 1000) : maxSec;
+  const phoneSec = Math.round(Number(req.body?.time_taken) || 0);
+  const timeTaken = Math.min(maxSec, Math.max(1, serverSec, phoneSec));
   await WeeklyEntry.updateOne(
     { event_id: String(ev._id), student_code: me.code },
     { $set: { submitted_at: now, answers: g.answers, score: g.score, total: g.total, correct: g.correct, wrong: g.wrong, skipped: g.skipped, by_subject: g.by_subject,
