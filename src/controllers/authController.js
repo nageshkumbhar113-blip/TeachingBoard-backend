@@ -2,6 +2,7 @@ const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const { createToken } = require('../utils/token');
 const { isAppRequest } = require('../utils/appOrigin');
+const ADMIN_SEC = require('../utils/adminSecurity');
 const { normalizeExpiryDate } = require('../utils/accountStatus');
 const { hasFullAccess, freeUntil } = require('../utils/contentAccess');
 const { isExpiredDate: _isExpiredDate } = require('../utils/accountStatus');
@@ -70,20 +71,33 @@ exports.login = asyncHandler(async (req, res) => {
       return res.status(400).json({ success: false, message: 'pin is required for admin login' });
     }
 
+    // wrong PINs / codes from ALL networks together: after 10 in 15 min, one try a minute (utils/adminSecurity.js)
+    const wait = ADMIN_SEC.blocked();
+    if (wait) { ADMIN_SEC.log(req, 'blocked'); return res.status(429).json({ success: false, code: 'ADMIN_SLOW', message: `खूप चुकीचे प्रयत्न — ${wait} सेकंदांनी पुन्हा करा` }); }
+    ADMIN_SEC.noteTry();
+
     const adminDoc = await User.findOne({ role: 'admin' });
     if (!adminDoc) {
       return res.status(503).json({ success: false, message: 'Admin account not initialised' });
     }
 
-    if (!adminDoc.verifyPin(pin)) {
+    let pinOk = false;
+    try { pinOk = adminDoc.verifyPin(pin); } catch { pinOk = false; }   // a PIN of another length: just wrong
+    if (!pinOk) {
+      ADMIN_SEC.fail(req, 'wrong_pin');
       return res.status(401).json({ success: false, message: 'Invalid admin PIN' });
     }
+
+    // the second step: a remembered device, or the Google Authenticator code (once the owner turned it on)
+    const step = await ADMIN_SEC.secondStep(req);
+    if (!step.ok) return res.status(401).json({ success: false, code: step.code, message: step.message });
 
     return res.json({
       success: true,
       message: 'Admin login successful',
       token: createToken({ id: adminDoc.user_id, name: adminDoc.name, role: 'admin' }),
       user: { id: adminDoc.user_id, name: adminDoc.name, role: 'admin' },
+      ...(step.device_key ? { device_key: step.device_key } : {}),
     });
   }
 
