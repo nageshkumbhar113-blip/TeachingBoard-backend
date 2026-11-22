@@ -616,11 +616,43 @@ exports.adminEventResults = asyncHandler(async (req, res) => {
   const conv = new Map(leads.filter(l => l.converted_code).map(l => [`GUEST-${l.gid}`, l.converted_code]));
   const convUsers = conv.size ? await User.find({ role: 'student', student_code: { $in: [...conv.values()] } }, 'student_code app_first_at app_last_day').lean() : [];
   const appOf = new Map([...users, ...convUsers].map(u => [u.student_code, u]));
+  // 🏆 how many महा-Tests each child has given up to this one (this one included when given) — for the
+  // team's message ("…चा हा तिसरा महा-Test"). Real महा-Tests only (no daily practice, no admin trials);
+  // a free visitor's later account counts with them.
+  const mtIds = (await WeeklyEvent.find({ kind: { $ne: 'daily' }, is_trial: { $ne: true }, starts_at: { $lte: ev.starts_at } }, '_id').lean()).map(x => String(x._id));
+  const allCodes = [...new Set([...entries.map(e => e.student_code), ...conv.values()])];
+  const given = mtIds.length && allCodes.length
+    ? await WeeklyEntry.aggregate([{ $match: { student_code: { $in: allCodes }, submitted_at: { $ne: null }, event_id: { $in: mtIds } } }, { $group: { _id: '$student_code', n: { $sum: 1 } } }])
+    : [];
+  const nOf = new Map(given.map(g => [g._id, g.n]));
   entries.forEach(e => {
     e.mobile = mob.get(e.student_code) || '';
     const u = appOf.get(e.student_code) || appOf.get(conv.get(e.student_code));
     e.app_first_at = u?.app_first_at || null;
     e.app_last_day = u?.app_last_day || '';
+    e.mt_given = (nOf.get(e.student_code) || 0) + (conv.has(e.student_code) ? nOf.get(conv.get(e.student_code)) || 0 : 0);
   });
-  res.json({ success: true, data: { event: { _id: ev._id, batch: ev.batch, subject: ev.subject, starts_at: ev.starts_at, ends_at: ev.ends_at, status: ev.status }, entries } });
+  res.json({ success: true, data: { event: { _id: ev._id, batch: ev.batch, subject: ev.subject, starts_at: ev.starts_at, ends_at: ev.ends_at, status: ev.status, kind: ev.kind || 'weekly', is_trial: !!ev.is_trial }, entries } });
+});
+
+
+// ── 📲 App link (Admin › महा-Test list) ──
+// The admin sends a family a link to the app; the link points here first, so the list can show
+// 'sent' (amber) and 'opened' (blue). Link previews made by WhatsApp / Facebook do not count as opened.
+const PLAY_STORE = process.env.PLAY_STORE_URL || 'https://play.google.com/store/apps/details?id=com.nkseduorbit.student';
+const _isPreviewBot = req => /WhatsApp|facebookexternalhit|Facebot|TelegramBot|Twitterbot|Slackbot|bot|crawler|spider|preview/i.test(String(req.headers['user-agent'] || ''));
+exports.adminAppLink = asyncHandler(async (req, res) => {
+  const { mongoose } = require('../config/db');
+  if (!mongoose.isValidObjectId(req.params.entryId)) throw new AppError('Not found', 404);
+  const entry = await WeeklyEntry.findByIdAndUpdate(req.params.entryId, { $set: { app_link_sent_at: _now() } }, { new: true, projection: 'app_link_sent_at app_link_opened_at' }).lean();
+  if (!entry) throw new AppError('Not found', 404);
+  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0];
+  res.json({ success: true, url: `${proto}://${req.get('host')}/api/weekly/app-link/${entry._id}`, sent_at: entry.app_link_sent_at, opened_at: entry.app_link_opened_at });
+});
+exports.appLinkOpen = asyncHandler(async (req, res) => {
+  const { mongoose } = require('../config/db');
+  if (mongoose.isValidObjectId(req.params.entryId) && !_isPreviewBot(req)) {
+    WeeklyEntry.updateOne({ _id: req.params.entryId, app_link_opened_at: null }, { $set: { app_link_opened_at: _now() } }).catch(() => {});
+  }
+  res.redirect(302, PLAY_STORE);
 });

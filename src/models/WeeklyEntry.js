@@ -23,6 +23,9 @@ const weeklyEntrySchema = new mongoose.Schema(
     time_taken:    { type: Number, default: 0 },      // seconds
     leave_count:   { type: Number, default: 0 },      // left the app during the test (reported)
     via:           { type: String, default: '' },     // 'app' / 'web': where it was registered / started / submitted (last one wins)
+    // Admin › महा-Test list: the '📲 App link' sent to the family on WhatsApp, and when they opened it
+    app_link_sent_at:   { type: Date, default: null },
+    app_link_opened_at: { type: Date, default: null },
     rank:          { type: Number, default: null },
     // Admin › CRM "🏆 महा-Test": when the team sent this family a reminder from its own WhatsApp / SMS
     team_reminders: { type: [Date], default: [] },

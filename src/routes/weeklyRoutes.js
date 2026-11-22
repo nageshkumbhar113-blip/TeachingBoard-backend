@@ -17,6 +17,9 @@ router.get('/admin/pool', requireAdmin, c.adminPool);
 router.get('/admin/events', requireAdmin, c.adminEvents);
 router.get('/admin/events/:id', requireAdmin, c.adminEventResults);
 router.delete('/admin/events/:id', requireAdmin, c.adminDeleteEvent);
+// 📲 App link for one family: the admin gets a tracked link to send; the family's tap is noted, then the Play Store opens
+router.post('/admin/entries/:entryId/app-link', requireAdmin, c.adminAppLink);
+router.get('/app-link/:entryId', c.appLinkOpen);
 
 router.get('/my', attachUserIfPresent, c.my);
 // Paper Pattern Practice: my days + streak; a teacher's students / a parent's children day by day
