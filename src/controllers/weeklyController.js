@@ -609,12 +609,14 @@ exports.adminEventResults = asyncHandler(async (req, res) => {
   const codes = entries.filter(e => !e.is_guest).map(e => e.student_code);
   const [leads, users] = await Promise.all([
     gids.length ? GuestLead.find({ gid: { $in: gids } }, 'gid parent_mobile converted_code').lean() : [],
-    codes.length ? User.find({ role: 'student', student_code: { $in: codes } }, 'student_code mobile app_first_at app_last_day').lean() : [],
+    codes.length ? User.find({ role: 'student', student_code: { $in: codes } }, 'student_code mobile app_first_at app_last_day role free_tier expiry_date').lean() : [],
   ]);
+  // the family's pay page (parent-pay.html?g=…) needs the free-part visit: a guest's own, or the visit an account was made from
+  const leadOfCode = codes.length ? new Map((await GuestLead.find({ converted_code: { $in: codes } }, 'gid converted_code').lean()).map(l => [l.converted_code, l.gid])) : new Map();
   const mob = new Map([...leads.map(l => [`GUEST-${l.gid}`, l.parent_mobile]), ...users.map(u => [u.student_code, u.mobile])]);
   // 📲 does the child use the app (noted since 2026-11-22): own account, or the account a free visitor later made
   const conv = new Map(leads.filter(l => l.converted_code).map(l => [`GUEST-${l.gid}`, l.converted_code]));
-  const convUsers = conv.size ? await User.find({ role: 'student', student_code: { $in: [...conv.values()] } }, 'student_code app_first_at app_last_day').lean() : [];
+  const convUsers = conv.size ? await User.find({ role: 'student', student_code: { $in: [...conv.values()] } }, 'student_code app_first_at app_last_day role free_tier expiry_date').lean() : [];
   const appOf = new Map([...users, ...convUsers].map(u => [u.student_code, u]));
   // 🏆 how many महा-Tests each child has given up to this one (this one included when given) — for the
   // team's message ("…चा हा तिसरा महा-Test"). Real महा-Tests only (no daily practice, no admin trials);
@@ -631,6 +633,9 @@ exports.adminEventResults = asyncHandler(async (req, res) => {
     e.app_first_at = u?.app_first_at || null;
     e.app_last_day = u?.app_last_day || '';
     e.mt_given = (nOf.get(e.student_code) || 0) + (conv.has(e.student_code) ? nOf.get(conv.get(e.student_code)) || 0 : 0);
+    // subscription: paid (full access) children get no pay line; the others a pay link when there is a visit
+    e.paid = !!u && hasFullAccess(u);
+    e.pay_gid = e.is_guest ? String(e.student_code).replace(/^GUEST-/, '') : (leadOfCode.get(e.student_code) || '');
   });
   res.json({ success: true, data: { event: { _id: ev._id, batch: ev.batch, subject: ev.subject, starts_at: ev.starts_at, ends_at: ev.ends_at, status: ev.status, kind: ev.kind || 'weekly', is_trial: !!ev.is_trial }, entries } });
 });
