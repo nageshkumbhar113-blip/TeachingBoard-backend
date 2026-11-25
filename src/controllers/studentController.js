@@ -257,6 +257,19 @@ exports.resetDevice = asyncHandler(async (req, res) => {
 exports.deleteStudent = asyncHandler(async (req, res) => {
   const student = await User.findOne({ user_id: req.params.id, role: 'student' });
   if (!student) throw new AppError('Student not found', 404);
+  // A student who has paid (Razorpay or a fee record) is never removed for good: the account
+  // is blocked instead, so the payment history stays and an admin can unblock it later.
+  const StudentSubscription = require('../models/StudentSubscription');
+  const FeeRecord = require('../models/FeeRecord');
+  const paid = await StudentSubscription.exists({ $or: [{ student_user_id: student.user_id }, { student_code: student.student_code }], payment_verified: true, is_trial: { $ne: true } })
+    || await FeeRecord.exists({ student_code: student.student_code, paid_amount: { $gt: 0 } });
+  if (paid) {
+    const was = student.status === 'blocked';
+    if (!was) { student.status = 'blocked'; await student.save(); invalidateUserCache('student', student.user_id); }
+    return res.json({ success: true, blocked: true, message: was
+      ? `💳 ${student.name} ने पैसे भरले आहेत — delete होत नाही. आधीच Block आहे.`
+      : `💳 ${student.name} ने पैसे भरले आहेत — delete केलं नाही, Block केलं. Status बदलून परत चालू करता येईल.` });
+  }
   await student.deleteOne();
   res.json({ success: true, message: 'Student deleted' });
 });

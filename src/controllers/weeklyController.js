@@ -569,7 +569,14 @@ exports.adminPreview = asyncHandler(async (req, res) => {
 });
 
 // DELETE /api/weekly/admin/events/:id — remove one test (e.g. trials) and its entries.
+// A real test (not an admin trial) that students have already submitted is kept: its results and ranks stay.
 exports.adminDeleteEvent = asyncHandler(async (req, res) => {
+  const found = await WeeklyEvent.findById(req.params.id, 'is_trial').lean().catch(() => null);
+  if (!found) throw new AppError('Not found', 404);
+  if (!found.is_trial) {
+    const given = await WeeklyEntry.countDocuments({ event_id: String(found._id), submitted_at: { $ne: null } });
+    if (given) throw new AppError(`या test चे ${given} results आहेत — तो काढता येत नाही (results आणि rank राहतील).`, 409);
+  }
   const ev = await WeeklyEvent.findByIdAndDelete(req.params.id).catch(() => null);
   if (!ev) throw new AppError('Not found', 404);
   await WeeklyEntry.deleteMany({ event_id: String(ev._id) });
