@@ -56,6 +56,8 @@ async function syncOf(gid) {
     // for the bot's first message: the subjects, and whether the course has previous years' papers
     subjects: (batch?.subjects || []).map(s => s.name),
     prevPapers: (batch?.subjects || []).some(s => /previous|paper|प्रश्नपत्रिका|मागील/i.test(s.name) || (s.chapters || []).some(c => /previous|paper|प्रश्नपत्रिका/i.test(c.name))),
+    // 🎯 the Test Series (name parents see + the facts lines) — utils/seriesInfo.js
+    series: lead.batch ? await require('../utils/seriesInfo').seriesInfo(lead.batch).then(s => (s ? { name: s.name, kind: s.kind, lines: s.lines, short: s.short, price: s.price } : null)).catch(() => null) : null,
     mtNext: next ? next.starts_at : null,
     mtReg,
     paid,

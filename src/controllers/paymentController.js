@@ -126,8 +126,11 @@ async function activateStudentForBatch(student, batchName, newExpiry) {
   // the WhatsApp bot: this family paid — offers and pay reminders stop, the login message goes out
   const WABOT = require('../utils/waBot');
   if (WABOT.on() && student.student_code) {
-    require('../models/GuestLead').findOne({ converted_code: student.student_code }, 'gid').lean()
-      .then(l => { if (l) WABOT.notify(l.gid, 'paid', { code: student.student_code }); })
+    // with what was paid (the newest verified payment): the parent's message shows the amount, the plan and till when
+    Promise.all([
+      require('../models/GuestLead').findOne({ converted_code: student.student_code }, 'gid').lean(),
+      StudentSubscription.findOne({ student_code: student.student_code, payment_verified: true, is_trial: false }, 'amount period batch expiry_date razorpay_payment_id').sort({ created_at: -1 }).lean(),
+    ]).then(([l, sub]) => { if (l) WABOT.notify(l.gid, 'paid', { code: student.student_code, amount: sub?.amount || 0, period: sub?.period || '', till: sub?.expiry_date || student.expiry_date || null, pay_id: sub?.razorpay_payment_id || '', series: require('../utils/seriesInfo').cleanName(batchName) }); })
       .catch(err => console.warn('[wa bot] paid', err.message));
   }
 }

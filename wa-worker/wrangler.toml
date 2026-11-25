@@ -31,4 +31,4 @@ database_name = "nks-wa"
 database_id = "022b3e1d-b548-47fe-b275-b099e779aa0e"
 
 [triggers]
-crons = ["*/10 * * * *"]
+crons = ["*/5 * * * *"]   # every 5 min: a busy evening is spread over more runs (request limit per run)

@@ -4,6 +4,8 @@ const W = createRequire(import.meta.url)('../src/waFlow.js');
 let bad = 0;
 const ok = (c, name, got) => { console.log(`${c ? 'PASS' : 'FAIL'} ${name}${c ? '' : '  ' + String(got).slice(0, 300)}`); if (!c) bad++; };
 const texts = out => out.filter(x => x.to === 'wa').map(x => x.text);
+// 2026-11-25: pay / app go as link buttons (WhatsApp cta_url), not as links in the text
+const urls = out => out.filter(x => x.to === 'wa').flatMap(x => (x.buttons || []).filter(b => b.url).map(b => b.url));
 const now = new Date('2026-11-10T13:00:00Z');   // a Tuesday, 6:30 pm IST
 
 // 1) the parent typed the child's name on the website: LINK <gid> <name> → the link at once, no question
@@ -28,13 +30,13 @@ W.event(lead, 'test_done', { n: 1, score: 7, total: 10 }, now);
 out = W.inbound(lead, 'TEST BBBB111111', now);
 t = texts(out);
 ok(out.some(x => x.to === 'do' && x.action === 'lead'), 'TEST first contact: the number becomes a lead');
-ok(/पूर्ण result/.test(t[0]) && /7\/10/.test(t[0]), 'TEST first contact: the result first', t[0]);
+ok(/7\/10/.test(t[0]) && /Test Series/.test(t[0]) && /खालचं बटण दाबा आणि pay करा/.test(t[0]) && out.find(x => x.to === 'wa').buttons[0].url.includes('parent-pay.html?g=BBBB111111'), 'TEST first contact: the result first, with the 💳 Pay button', t[0]);
 ok(t.some(x => /app download केल्यावरच/.test(x)) && !t.some(x => /रोज 1 free test WhatsApp वर पाठवू/.test(x)), 'TEST first contact: the app next (not "daily test on WhatsApp?")');
 ok(!t.some(x => /आजची demo test \(/.test(x)), 'TEST first contact: no second test the same day');
 
 // 4) one test a day wherever it was taken: a website test today → TEST says "today's is done"
-t = texts(W.inbound(lead, 'TEST', now));
-ok(/Demo test झाली/.test(t[0]) && /play.google.com/.test(t[0]), 'TEST after the website demo → the app or the course', t[0]);
+out = W.inbound(lead, 'TEST', now); t = texts(out);
+ok(/Demo test झाली/.test(t[0]) && urls(out).some(u => /play.google.com.*referrer=guest%3DBBBB111111/.test(u)) && urls(out).some(u => /parent-pay/.test(u)), 'TEST after the website demo → 📲 App button (with the child) + 💳 Pay button', t.join(' | ') + JSON.stringify(urls(out)));
 
 // 5) the next day TEST gives the next link
 const tomorrow = new Date(now.getTime() + 24 * 3600e3);
@@ -48,9 +50,9 @@ W.event(lead, 'sync', { prices: { monthly: 200, yearly: 1500 } }, now);
 W.event(lead, 'test_done', { n: 1, score: 8, total: 10 }, now);
 out = W.inbound(lead, 'RESULT DDDD111111', now);
 let r = out.find(x => x.to === 'wa');
-ok(r.text.includes('पूर्ण 8th NMMS course') && r.text.includes('सगळे 284 tests') && r.text.includes('parent-pay.html?g=DDDD111111') && r.text.length < 400, 'result: short — the course, 284 tests and the pay link', r.text);
+ok(r.text.includes('पूर्ण *8वी NMMS Test Series*') && !r.text.includes('http') && r.text.length < 400, 'result: short — the Test Series, no raw link', r.text);
 ok(/Monthly ₹200 → ₹100/.test(r.text) && /50% सूट/.test(r.text), 'unlock line: offer price while the offer runs', r.text);
-ok(JSON.stringify(r.buttons.map(b => b.id)) === '["pay","ask","call_me"]', 'result buttons: Unlock / प्रश्न / Call', JSON.stringify(r.buttons));
+ok(r.buttons.length === 1 && r.buttons[0].url.includes('parent-pay.html?g=DDDD111111') && /50% सूट — Pay करा/.test(r.buttons[0].label), 'result button: 💳 50% सूट — Pay करा (link button)', JSON.stringify(r.buttons));
 const later = new Date(now.getTime() + 30 * 3600e3);
 W.inbound(lead, 'hi', later);
 out = W.event(lead, 'test_done', { n: 2, score: 9, total: 10 }, later);
@@ -127,7 +129,7 @@ W.event(lead, 'sync', { acct: { code: 'STU123', pin: '5307' }, prices: { monthly
 ok(lead.crm === 'form' && lead.acct.code === 'STU123', 'number from the website: form list, the account kept');
 W.event(lead, 'test_done', { n: 1, score: 6, total: 10 }, now);
 t = texts(W.inbound(lead, 'RESULT JJJJ111111', now));
-ok(t[1] && t[1].includes('STU123') && t[1].includes('5307') && t[1].includes('play.google.com'), 'RESULT answer: then the app with the code, PIN and link', t[1]);
+ok(t[1] && t[1].includes('STU123') && t[1].includes('5307') && /Digital Teacher/.test(t[1]), 'RESULT answer: then the app with the code, PIN and the app features', t[1]);
 const d1 = new Date(now.getTime() + 24 * 3600e3), d2 = new Date(now.getTime() + 48 * 3600e3), d3 = new Date(now.getTime() + 72 * 3600e3);
 t = texts(W.inbound(lead, 'TEST', d1));
 ok(/Demo test झाली/.test(t[0]) && t[0].includes('STU123'), 'after the demo: app (code + PIN) or the course', t[0]);
@@ -138,10 +140,10 @@ W.event(lead, 'test_done', { n: 3, score: 7, total: 10 }, d2);
 const d3b = new Date(d3.getTime() + 3600e3);
 out = W.inbound(lead, 'TEST', d3b);
 t = texts(out);
-ok(t.length >= 1 && /Demo test झाली/.test(t[0]) && t[0].includes('STU123') && t[0].includes('parent-pay.html') && !/free=1&g=/.test(t[0]), 'the next day again: app or the course (once a day)', t[0]);
-ok(out.find(x => x.to === 'wa').buttons.map(b => b.id).join() === 'app,pay,call_me', 'buttons: App · Course · Call');
+ok(t.length === 2 && /Demo test झाली/.test(t[0]) && t[0].includes('STU123') && !/free=1&g=/.test(t.join()), 'the next day again: app or the Test Series (once a day)', t.join(' | '));
+ok(urls(out).length === 2 && urls(out)[0].includes('play.google.com') && urls(out)[1].includes('parent-pay.html'), 'buttons: 📲 App Download · 💳 Pay', JSON.stringify(urls(out)));
 t = texts(W.inbound(lead, 'app', d3b));
-ok(/Code: \*STU123\*/.test(t[0]), 'the App button: login with code + PIN', t[0]);
+ok(/Code: \*STU123\*/.test(t[0]) && /Login/.test(t[0]), 'the App button: login with code + PIN', t[0]);
 // a lead already talking on WhatsApp is not pulled back to the form list (backfill / a second number)
 W.event(lead, 'form_number', { backfill: true }, d3b);
 ok(lead.crm !== 'form', 'backfill never pulls a lead talking on WhatsApp back to the form list', lead.via + ' ' + lead.crm);
@@ -157,14 +159,14 @@ lead.mobile = '9822200041'; lead.ctwaUntil = new Date(thuAd.getTime() + 72 * 360
 W.event(lead, 'sync', { cls: '', courses: ['8th NMMS EXAM 26-27 BATCH', '10th'], mtNext: '2026-11-15T04:30:00Z', freeTotal: 18 }, thuAd);
 out = W.welcome(lead, 'Hello! Can I get more info on this?', thuAd);
 let wm = out.find(x => x.to === 'wa');
-ok(wm && /कोणत्या class/.test(wm.text) && wm.buttons.length === 2 && wm.buttons[0].id === 'cls:0', 'ad, no class known: the class is asked (list)', wm && wm.text);
+ok(wm && /कोणती Test Series/.test(wm.text) && wm.buttons.length === 2 && wm.buttons[0].id === 'cls:0' && wm.buttons[0].label === '8वी NMMS', 'ad, no class known: the Test Series is asked (clean names)', wm && JSON.stringify(wm.buttons));
 out = W.inbound(lead, 'cls:0', new Date(thuAd.getTime() + 60e3));
 t = texts(out);
 ok(lead.cls === '8th NMMS EXAM 26-27 BATCH' && out.some(x => x.to === 'do' && x.action === 'batch' && x.data.batch === lead.cls) && t.some(x => /free=1&g=CTWA111111/.test(x)) && !t.some(x => /नाव लिहा/.test(x)) && !lead.awaiting, 'class chosen → Render told, the test link at once (no name asked)', t.join(' | '));
 ok(t.some(x => /forward/.test(x)) && t.some(x => /महा-Test/.test(x) && /नोंदणी करू/.test(x)), 'forward note + the महा-Test registration asked at once', t.join(' | '));
 // the child types the name on the website → Render: the name and the free account
 out = W.event(lead, 'sync', { name: 'Atharv', acct: { code: 'ATH201', pin: '4826' } }, new Date(thuAd.getTime() + 180e3));
-ok(texts(out).some(x => x.includes('ATH201') && x.includes('4826') && x.includes('play.google.com')), 'the free account arrives → one message with Code + PIN', texts(out).join(' | '));
+ok(texts(out).some(x => x.includes('ATH201') && x.includes('4826')), 'the free account arrives → one message with Code + PIN', texts(out).join(' | '));
 ok(texts(W.event(lead, 'sync', { acct: { code: 'ATH201', pin: '4826' } }, new Date(thuAd.getTime() + 200e3))).length === 0, 'the account message only once');
 // still open after 24 h (ad window 72 h), the reminders inside it
 const fri = new Date('2026-11-13T13:31:00Z');   // Friday 7:01 pm IST, 31 h after the message
@@ -172,13 +174,13 @@ ok(W.isOpen(lead, fri), 'window still open after 31 h (ad: 72 h)');
 out = W.tick(lead, fri);
 ok(texts(out).some(x => /demo test दिली का/.test(x) && x.includes('g=CTWA111111')), 'next evening: "did the child take the test?"', texts(out).join(' | '));
 let ev7 = out.find(x => /demo test दिली का/.test(x.text || ''));
-ok(/50% सूट/.test(ev7.text) && ev7.text.includes('parent-pay.html?g=CTWA111111') && ev7.buttons.map(x => x.id).join() === 'got,pay,call_me', 'it also says: test → 50 % off → course, with the pay link and 💳 button', ev7.text);
+ok(/50% सूट/.test(ev7.text) && /Test Series/.test(ev7.text) && !/parent-pay/.test(ev7.text) && ev7.buttons.map(x => x.id).join() === 'got,info,fee', 'it also says: test → 50 % off → the Test Series, with ℹ️ / 💳 फी buttons', ev7.text + JSON.stringify(ev7.buttons));
 ok(ev7.text.length < 600, 'the message stays short', ev7.text.length);
 out = W.tick(lead, new Date('2026-11-14T15:01:00Z'));   // Saturday 8:31 pm
 ok(texts(out).some(x => /उद्या .*महा-Test/.test(x)), 'Saturday evening: the महा-Test question (inside the 72 h)', texts(out).join(' | '));
 out = W.tick(lead, new Date('2026-11-15T03:31:00Z'));   // Sunday 9:01 am, window ends at noon
-let endMsg = out.find(x => /course घ्यायचा आहे का/.test(x.text || ''));
-ok(endMsg && endMsg.text.includes('parent-pay.html?g=CTWA111111') && endMsg.buttons.map(x => x.id).join() === 'keep,pay,call_me', 'near the end of the 72 h: "take the course?" + link, keep the reminders', texts(out).join(' | '));
+let endMsg = out.find(x => /Test Series घ्यायची आहे का/.test(x.text || ''));
+ok(endMsg && endMsg.buttons.map(x => x.id).join() === 'keep,info,fee', 'near the end of the 72 h: "take the Test Series?", keep the reminders', texts(out).join(' | '));
 out = W.tick(lead, new Date('2026-11-15T04:01:00Z'));   // 9:31 am
 ok(texts(out).some(x => /महा-Test/.test(x)), 'Sunday 9:31: the महा-Test reminder still free', texts(out).join(' | '));
 ok(!W.isOpen(lead, new Date('2026-11-15T07:00:00Z')), 'after 72 h the window is closed');
@@ -188,12 +190,12 @@ ok(/आठवण इथेच येईल/.test(t[0]) && W.isOpen(lead, new Dat
 lead = W.createLead({ gid: 'HIHI111111' }, thuAd); lead.mobile = '9822200042';
 W.event(lead, 'sync', { cls: '10th', courses: ['10th'] }, thuAd);
 t = texts(W.welcome(lead, 'hi', thuAd));
-ok(t.some(x => /10th — demo test/.test(x) && /g=HIHI111111/.test(x)) && !lead.awaiting && !W.isOpen(lead, new Date(thuAd.getTime() + 25 * 3600e3)), 'a new number ("hi"), class known: the link at once; 24 h window', t.join(' | '));
+ok(t.some(x => /10वी Test Series — demo test/.test(x) && /g=HIHI111111/.test(x)) && !lead.awaiting && !W.isOpen(lead, new Date(thuAd.getTime() + 25 * 3600e3)), 'a new number ("hi"), class known: the link at once; 24 h window', t.join(' | '));
 ok(W.tick(lead, new Date(thuAd.getTime() + 31 * 3600e3)).length === 0, 'not from an ad: no reminders of its own');
 lead = W.createLead({ gid: 'ADAD111111' }, thuAd); lead.mobile = '9822200043'; lead.ctwaUntil = new Date(thuAd.getTime() + 72 * 3600e3).toISOString();
 W.event(lead, 'sync', { cls: '8th NMMS', courses: ['8th NMMS', '10th'] }, thuAd);
 t = texts(W.welcome(lead, 'Hello! Can I get more info on this?', thuAd));
-ok(/स्वागत/.test(t[0]) && t.some(x => /8th NMMS — demo test/.test(x) && /g=ADAD111111/.test(x)) && !t.some(x => /class साठी\?|नाव लिहा/.test(x)), 'ad with its class: the class test link straight away, no question', t.join(' | '));
+ok(/स्वागत/.test(t[0]) && t.some(x => /8वी NMMS Test Series — demo test/.test(x) && /g=ADAD111111/.test(x)) && !t.some(x => /class साठी\?|नाव लिहा/.test(x)), 'ad with its class: the Test Series test link straight away, no question', t.join(' | '));
 t = texts(W.tick(lead, new Date('2026-11-13T13:31:00Z')));
 ok(t.some(x => /पाल्याने demo test दिली का/.test(x)), 'no name yet: "पाल्याने free test दिली का?"', t.join(' | '));
 
@@ -203,7 +205,7 @@ W.event(lead, 'sync', { prices: { monthly: 149, yearly: 499 }, mtNext: '2026-11-
 let o2 = W.inbound(lead, '📝 Free test द्यायची आहे', thuAd);
 ok(texts(o2).some(x => /आजची demo test/.test(x) && /g=ICEB111111/.test(x)), 'icebreaker "Free test द्यायची आहे" = TEST', texts(o2).join(' | '));
 o2 = W.inbound(lead, '/fee', thuAd);
-ok(texts(o2).some(x => /₹149/.test(x) && /parent-pay\.html\?g=ICEB111111/.test(x) && /50% सूट/.test(x)), '/fee: price, "test → 50 %", pay link', texts(o2).join(' | '));
+ok(texts(o2).some(x => /₹149/.test(x) && /50% सूट/.test(x)) && urls(o2).some(u => /parent-pay\.html\?g=ICEB111111/.test(u)), '/fee: price, "test → 50 %", the 💳 Pay button', texts(o2).join(' | '));
 ok(texts(W.inbound(lead, '💳 फी किती आहे?', thuAd)).some(x => /₹149/.test(x)), 'icebreaker "फी किती आहे?" = /fee');
 o2 = W.inbound(lead, '🏆 महा-Test नोंदणी', thuAd);
 ok(o2.some(x => x.to === 'do' && x.action === 'mt_register') && lead.mtReg, 'icebreaker / /mahatest: registered', texts(o2).join(' | '));

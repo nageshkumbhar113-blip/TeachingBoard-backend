@@ -347,6 +347,8 @@ exports.publicSummary = asyncHandler(async (req, res) => {
       paid,
       offer: _offerView(lead),
       prices: { monthly: batch?.monthly_price || 0, yearly: batch?.yearly_price || 0 },
+      // 🎯 the Test Series in parents' words (utils/seriesInfo.js — the same lines the bot and the app show)
+      series: await require('../utils/seriesInfo').seriesInfo(lead.batch).then(s => (s ? { name: s.name, kind: s.kind, lines: s.lines } : null)).catch(() => null),
       // Real social proof for the pay page: registered students, rounded down.
       students_count: students,
     },

@@ -32,6 +32,17 @@ const cut = (s, n) => { const a = [...String(s || '')]; return a.length <= n ? a
 export function bodiesFor(to, text, buttons) {
   const base = { messaging_product: 'whatsapp', recipient_type: 'individual', to };
   const out = [];
+  // a link button ({ url, label }): WhatsApp "cta_url" — one per message, label ≤ 20; reply buttons with it go
+  // in a second short message ("किंवा 👇")
+  const link = (buttons || []).find(b => b && b.url && b.label);
+  if (link) {
+    const reply = (buttons || []).filter(b => b && b.id && b.label && !b.url);
+    let body = String(text || '');
+    if (chars(body) > 1024) { out.push(...bodiesFor(to, body, [])); body = '👇'; }
+    out.push({ ...base, type: 'interactive', interactive: { type: 'cta_url', body: { text: body }, action: { name: 'cta_url', parameters: { display_text: cut(link.label, 20), url: link.url } } } });
+    if (reply.length) out.push(...bodiesFor(to, 'किंवा 👇', reply));
+    return out;
+  }
   buttons = (buttons || []).filter(b => b && b.id && b.label).slice(0, 10);
   if (!buttons.length) {
     // a very long text goes in 4096-character parts

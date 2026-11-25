@@ -2,7 +2,8 @@
 // (save the parent's number, register a महा-Test, send a push) goes through the `jobs` table and is
 // retried by the cron with growing gaps. Reading a lead is best-effort with a short timeout.
 
-import { nowMs } from './store.js';
+import { nowMs, addMsg } from './store.js';
+import { post } from './meta.js';
 
 async function call(env, path, init = {}, ms = 8000) {
   const ctl = new AbortController();
@@ -57,12 +58,20 @@ export async function runJobs(env, limit = 10) {
   let done = 0;
   for (const j of results || []) {
     try {
+      if (j.action === 'wa_send') {
+        // a WhatsApp message that hit the invocation's request limit: send it now (it is still the same free window)
+        const b = JSON.parse(j.body);
+        const id = await post(env, b.body);
+        await addMsg(env, { gid: j.gid, mobile: b.mobile, dir: 'out', kind: 'service', body: b.body.type === 'text' ? b.body.text.body : JSON.stringify(b.body.interactive), wa_id: id, status: 'sent' });
+        await env.DB.prepare('DELETE FROM jobs WHERE id = ?').bind(j.id).run();
+        done++; continue;
+      }
       await call(env, '/api/guest/bot/action', { method: 'POST', body: JSON.stringify({ gid: j.gid, action: j.action, ...JSON.parse(j.body) }) });
       await env.DB.prepare('DELETE FROM jobs WHERE id = ?').bind(j.id).run();
       done++;
     } catch (e) {
       const tries = j.tries + 1;
-      if (tries >= 12) await env.DB.prepare('DELETE FROM jobs WHERE id = ?').bind(j.id).run();
+      if (tries >= (j.action === 'wa_send' ? 3 : 12)) await env.DB.prepare('DELETE FROM jobs WHERE id = ?').bind(j.id).run();
       else await env.DB.prepare('UPDATE jobs SET tries = ?, next_at = ?, last_error = ? WHERE id = ?').bind(tries, nowMs() + 60e3 * 2 ** (tries - 1), String(e.message).slice(0, 200), j.id).run();
     }
   }

@@ -47,6 +47,14 @@ function configure(env) {
 }
 const keyOk = (env, req) => !!env.SHARED_SECRET && sameHex(req.headers.get('X-Bot-Key') || '', env.SHARED_SECRET);
 
+// Cloudflare free plan: at most 50 outside requests (fetch) in one invocation. Every fetch is counted, so the
+// cron stops taking more families before the limit (the rest wait for the next run) — evening reminders were
+// lost to "Too many subrequests" (audit 2026-11-25). A message that still hits the limit waits in `jobs`.
+let SUB = 0;
+const _fetch = globalThis.fetch.bind(globalThis);
+globalThis.fetch = (...a) => { SUB++; return _fetch(...a); };
+const SUB_BUDGET = 38;   // the cron's own share; the rest stays free for the jobs and the keep-awake ping
+
 // ── one lead, changed by one thing at a time ──
 async function withLead(env, gid, mobile, fn, opts = {}) {
   const now = new Date();
@@ -96,8 +104,18 @@ async function deliver(env, lead, outs) {
     const to = '91' + mobile;
     try {
       if (o.kind === 'service') {
-        for (const b of bodiesFor(to, o.text, o.buttons)) {
-          const id = await post(env, b);
+        const bodies = bodiesFor(to, o.text, o.buttons);
+        for (let i = 0; i < bodies.length; i++) {
+          const b = bodies[i];
+          let id;
+          try { id = await post(env, b); }
+          catch (e) {
+            if (!/subrequest/i.test(String(e.message))) throw e;
+            // over the invocation's limit: this part and the rest go out with the next cron run (still inside the window)
+            for (const rest of bodies.slice(i)) await queue(env, gid, 'wa_send', { mobile, body: rest });
+            await S.addMsg(env, { gid, mobile, dir: 'log', kind: 'SEND_LATER', body: 'Cloudflare ची एका वेळची मर्यादा → message पुढच्या फेरीत (काही मिनिटांत) जाईल.' });
+            break;
+          }
           await S.addMsg(env, { gid, mobile, dir: 'out', kind: 'service', body: b.type === 'text' ? b.text.body : JSON.stringify(b.interactive), wa_id: id, status: 'sent' });
         }
       } else {
@@ -160,8 +178,11 @@ async function onMessage(env, m) {
   } else {
     await withLead(env, gid, mobile, async (lead, now) => {
       await S.addMsg(env, { gid, mobile, dir: 'in', body: text || `[${m.type}]`, wa_id: m.id });
-      // a photo / voice note: the window opens anyway; tell them what works
-      return aiTry(env, lead, WA.inbound(lead, text || '?', now), now);
+      // a photo / voice note: "[image]" etc. — a screenshot after a payment is read as "I paid"
+      const said = text || `[${m.type}]`;
+      // "I paid": ask Render now (the payment may be minutes old), not the 6-hour old facts
+      if (WA.paidClaim(said) && !lead.paid) { const info = await leadInfo(env, gid); if (info) { WA.event(lead, 'sync', info, now); lead.syncedAt = now.toISOString(); } }
+      return aiTry(env, lead, WA.inbound(lead, said, now), now);
     });
   }
   // what the message asked Render to do (the child's name → the free account, the class…): now, not at the next cron
@@ -197,7 +218,7 @@ async function newFamily(env, m, mobile, text) {
   await withLead(env, gid, mobile, async (l, t) => {
     await S.addMsg(env, { gid, mobile, dir: 'in', body: text || `[${m.type}]`, wa_id: m.id });
     if (ref && !l.ctwaUntil) l.ctwaUntil = new Date(t.getTime() + WA.CONFIG.ctwaHours * 3600e3).toISOString();
-    return WA.inbound(l, text || '?', t);
+    return WA.inbound(l, text || `[${m.type}]`, t);
   });
 }
 
@@ -206,10 +227,13 @@ async function tickOne(env, gid) {
   return withLead(env, gid, null, (lead, now) => WA.tick(lead, now));
 }
 async function runTick(env) {
+  SUB = 0;
   await S.kvSet(env, 'last_tick', Date.now());
   const { results } = await env.DB.prepare('SELECT gid FROM leads WHERE next_due IS NOT NULL AND next_due <= ? ORDER BY next_due LIMIT 40').bind(Date.now()).all();
-  let n = 0;
+  let n = 0, left = 0;
   for (const r of results || []) {
+    // one family uses at most ~6 requests (facts from Render + its messages): stop early, the rest stay due
+    if (!env.SELF && SUB > SUB_BUDGET - 6) { left++; continue; }
     try {
       // a separate invocation per lead (own CPU budget on the free plan) when the self binding exists
       if (env.SELF) await env.SELF.fetch(`https://self/tick-one?gid=${r.gid}`, { method: 'POST', headers: { 'X-Bot-Key': env.SHARED_SECRET } });
@@ -217,7 +241,8 @@ async function runTick(env) {
       n++;
     } catch (e) { await S.addMsg(env, { gid: r.gid, dir: 'log', kind: 'TICK_ERROR', body: String(e.message).slice(0, 300) }); }
   }
-  const jobs = await runJobs(env);
+  const jobs = await runJobs(env, Math.max(0, Math.min(10, 46 - SUB)));
+  if (left) await S.kvSet(env, 'tick_left', `${new Date().toISOString()} ${left}`);
   // keep the tables small: delivered-ids older than 7 days, chat older than 120 days
   if (Math.random() < 0.05) {
     await env.DB.prepare('DELETE FROM seen WHERE at < ?').bind(Date.now() - 7 * 864e5).run();

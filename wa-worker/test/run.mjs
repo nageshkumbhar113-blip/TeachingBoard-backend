@@ -43,6 +43,7 @@ const render = http.createServer(async (req, res) => {
 }).listen(RENDER);
 
 const textOf = b => b.type === 'text' ? b.text.body : b.type === 'interactive' ? b.interactive.body.text : b.type === 'template' ? 'TEMPLATE:' + b.template.name : '';
+const ctaUrl = b => b && b.type === 'interactive' && b.interactive.type === 'cta_url' ? b.interactive.action.parameters.url : '';
 const signed = async (payload) => {
   const raw = JSON.stringify(payload);
   const sig = 'sha256=' + crypto.createHmac('sha256', APP_SECRET).update(raw).digest('hex');
@@ -98,9 +99,9 @@ try {
   ok(sent.length === 2, 'two answers: result + the app', sent.length);
   ok(/Rahul चा result/.test(textOf(sent[0])) && /16\/20/.test(textOf(sent[0])), 'result names the child (from Render) with the score', textOf(sent[0]));
   ok(sent[0].to === '919811100001', 'sent to the parent\'s number');
-  ok(sent[0].interactive?.type === 'button' && sent[0].interactive.action.buttons.length === 3, 'result: 3 reply buttons (Unlock / प्रश्न / Call)', JSON.stringify(sent[0].interactive?.type));
+  ok(/parent-pay\.html/.test(ctaUrl(sent[0])) && /Pay करा/.test(sent[0].interactive.action.parameters.display_text), 'result: the 💳 Pay link button (cta_url)', JSON.stringify(sent[0].interactive));
   ok(JSON.stringify(sent).includes('Monthly ₹200 → ₹100') && JSON.stringify(sent).includes('parent-pay.html?g=AAAA111111'), 'first answer: the unlock line with the offer price and the pay link (prices from Render)');
-  ok(/app मध्ये/.test(textOf(sent[1])) && /play\.google\.com/.test(textOf(sent[1])), 'then the app on its own (not "daily test on WhatsApp?")', textOf(sent[1]));
+  ok(/app मध्ये/.test(textOf(sent[1])) && /play\.google\.com/.test(ctaUrl(sent[1])), 'then the app on its own, with the 📲 App Download button', textOf(sent[1]));
 
   // 3) the same message again (Meta retry) → nothing new
   await signed(first);
@@ -109,20 +110,20 @@ try {
 
   // 4) the parent picks 7 pm (a list reply), then asks for a test twice
   await signed(msg('919811100001', 'daily:19', 'button')); await waitSent(3);
-  ok(/रोज 7 वाजता Rahul/.test(textOf(sent[2])), 'daily time saved', textOf(sent[2]));
+  ok(/app मध्ये/.test(textOf(sent[2])) && !/रोज 7 वाजता/.test(textOf(sent[2])), 'an old daily-time button: no WhatsApp promise, the app', textOf(sent[2]));
   // the Worker runs on the real clock: on a Sunday (IST) TEST answers with the महा-Test instead of a daily test
   const sunday = new Date(Date.now() + 5.5 * 3600e3).getUTCDay() === 0;
   await signed(msg('919811100001', 'TEST')); await waitSent(4);
   // one demo on WhatsApp (owner 2026-11-14): after it, TEST → the app (Code + PIN) or the course, any day
-  ok(sunday || /Demo test झाली/.test(textOf(sent[3])) && /play\.google\.com/.test(textOf(sent[3])), 'TEST after the demo → the app or the course', textOf(sent[3]));
-  ok(sent[3].interactive?.type === 'button', '≤3 short buttons → reply buttons');
+  ok(sunday || /Demo test झाली/.test(textOf(sent[3])) && /play\.google\.com/.test(ctaUrl(sent[3])), 'TEST after the demo → the app (📲 button)', textOf(sent[3]));
+  ok(sunday || sent[3].interactive?.type === 'cta_url', 'the app goes as a link button');
   const nT = sent.length;
   await signed(msg('919811100001', 'TEST')); await sleep(2500);
   ok(sent.length === nT, 'second TEST within 6 h → no new answer (owner: the bot answers less)', sent.length - nT);
 
   // 5) the price question uses Render's real prices
   await signed(msg('919811100001', 'ask:fee', 'button')); await waitSent(nT + 1);
-  ok(/Monthly ₹200 · Yearly ₹1,500/.test(textOf(sent[nT])), 'fee answer from the class prices', textOf(sent[nT]));
+  ok(/Monthly ₹200/.test(textOf(sent[nT])) && /Yearly ₹1,500/.test(textOf(sent[nT])), 'fee answer from the class prices', textOf(sent[nT]));
 
   // 6) jobs to Render: save the number (+ Meta Lead) — run by the tick
   r = await tick();
@@ -138,7 +139,7 @@ try {
   const n0 = sent.length;
   await signed(msg('919811100001', 'next', 'button')); await waitSent(n0 + 2);
   const nx = sent.slice(n0).map(textOf);
-  ok(nx.some(x => /उद्या पुढची पाठवतो/.test(x)) && nx.some(x => /ओळखीच्या विद्यार्थ्यांना/.test(x)), 'tomorrow + the courses/share message', nx.join(' | '));
+  ok(nx.some(x => /app मध्ये\* आहेत/.test(x)) && !nx.some(x => /उद्या पुढची पाठवतो/.test(x)) && nx.some(x => /ओळखीच्या विद्यार्थ्यांना/.test(x)), '"next": the app (no "उद्या पाठवतो") + the share message', nx.join(' | '));
 
   // 8) an unknown number without a code → a free welcome
   const before = sent.length;

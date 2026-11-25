@@ -51,6 +51,9 @@ const batchSchema = new mongoose.Schema(
     card_color: { type: Number, default: -1, min: -1, max: 7 },
     // what the course card shows: 'card' = the card drawn by the app (default), 'image' = the uploaded cover picture
     card_mode: { type: String, enum: ['card', 'image'], default: 'card' },
+    // the name parents see in WhatsApp / the pay page ("8वी NMMS" → "8वी NMMS Test Series"); '' = made from the name
+    // (utils/seriesInfo.js cleanName). The batch's own name stays the key everywhere.
+    public_name: { type: String, default: '', trim: true, maxlength: 60 },
 
     // Pricing
     pricing_type: { type: String, enum: ['free', 'paid'], default: 'paid' },

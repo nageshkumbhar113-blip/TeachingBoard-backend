@@ -56,23 +56,25 @@ export function facts(lead, now, WA, classes) {
   const mt = lead.mtNext ? WA.whenText(new Date(lead.mtNext), now) : '';
   return [
     `संस्था: NKs EduOrbit — विद्यार्थ्यांसाठी online tests / सराव app (Maharashtra State Board).`,
-    `या पालकाच्या पाल्याचा class: ${lead.cls || 'अजून माहीत नाही'}. नाव: ${lead.name && lead.name !== 'तुमचा पाल्य' ? lead.name : 'माहीत नाही'}.`,
-    `WhatsApp वर 1 demo test (login नाही, 10 मिनिटं)${WA.ruleText(lead) ? ' — ती सोडवली की course वर ' + (lead.offerCfg?.p1 || WA.CONFIG.offerPercent) + '% सूट' : ''}. App मध्ये ${Math.max(0, (lead.freeTotal || 0) - (lead.testsDone || 0)) || 'काही'} tests अजून मोफत — पण फक्त app download केल्यावरच सोडवता येतात. पाल्याने आतापर्यंत दिलेल्या tests: ${lead.testsDone || 0}.`,
-    lead.totalTests ? `पूर्ण course मध्ये एकूण ${lead.totalTests} tests.` : '',
-    `पूर्ण course मध्ये: सगळ्या chapters चे tests, प्रत्येक प्रश्नाचं स्पष्टीकरण, notes, Exercise आणि सराव, दर रविवारी महा-Test, पालकांना progress report. Internet नसतानाही app चालतं.`,
-    price ? `फी: ${price}. Monthly = 30 दिवस, Yearly = या शैक्षणिक वर्षाच्या 30 एप्रिलपर्यंत (दोन्ही 30 एप्रिलला संपतात). Payment UPI / Card / Net banking ने pay link वरून; pay केलं की लगेच app मध्ये course उघडतो.` : 'फी: pay page वर.',
+    `या पालकाच्या पाल्याची Test Series: ${lead.cls ? WA.TS(lead) : 'अजून माहीत नाही'}. नाव: ${lead.name && lead.name !== 'तुमचा पाल्य' ? lead.name : 'माहीत नाही'}.`,
+    `WhatsApp वर 1 demo test (login नाही, 10 मिनिटं)${WA.ruleText(lead) ? ' — ती सोडवली की Test Series वर ' + (lead.offerCfg?.p1 || WA.CONFIG.offerPercent) + '% सूट' : ''}. App मध्ये ${Math.max(0, (lead.freeTotal || 0) - (lead.testsDone || 0)) || 'काही'} tests अजून मोफत — पण फक्त app download केल्यावरच सोडवता येतात. पाल्याने आतापर्यंत दिलेल्या tests: ${lead.testsDone || 0}.`,
+    lead.totalTests ? `पूर्ण Test Series मध्ये एकूण ${lead.totalTests} tests.` : '',
+    lead.series && lead.series.lines && lead.series.lines.length ? `पूर्ण ${WA.TS(lead)} मध्ये:\n${lead.series.lines.join('\n')}` : (lead.kind === 'regular' ? 'पूर्ण Test Series मध्ये: सगळ्या धड्यांच्या Notes, स्वाध्याय उत्तरं, सराव tests, महा-Test. Internet नसतानाही app चालतं.' : 'पूर्ण Test Series मध्ये: सगळे tests, प्रत्येक प्रश्नाचं स्पष्टीकरण, महा-Test. (Notes नाहीत.) Internet नसतानाही app चालतं.'),
+    'App मधल्या सोयी: Digital Teacher (रोज काय अभ्यास करायचा ते सांगतो), Me → Analytics (कमकुवत chapters, progress), Notifications (test, महा-Test, result ची आठवण), internet नसतानाही अभ्यास.',
+    price ? `फी: ${price}. Monthly = 30 दिवस, Yearly = या शैक्षणिक वर्षाच्या 30 एप्रिलपर्यंत (दोन्ही 30 एप्रिलला संपतात). Payment UPI / Card / Net banking ने pay link वरून; pay केलं की लगेच app मध्ये पूर्ण Test Series उघडते.` : 'फी: pay page वर.',
     o ? `आत्ता पहिल्या payment वर ${o.pct}% सूट — ${WA.whenText(o.end, now)} पर्यंत.` : (lead.testsDone || !WA.ruleText(lead) ? 'सध्या सूट चालू नाही.' : WA.ruleText(lead, { bold: false })),
     `WhatsApp वर फक्त 1 demo test; रोज WhatsApp वर tests पाठवत नाही. पुढचे सगळे tests आणि रोजची आठवण app मध्ये.`,
     `App: ${C.play} — Login → Student Code + PIN (हे आधी WhatsApp वर पाठवलेले असतात). PIN विसरला तर App › Login › "📲 WhatsApp ने login".`,
     mt ? `महा-Test: ${mt} — सगळ्या विद्यार्थ्यांमध्ये क्रमांक, मोफत, नोंदणी इथे "महा-Test नोंदणी" बटणाने.` : 'महा-Test: दर रविवारी.',
-    `Links: free test ${L.child(lead.gid)} · course / pay ${L.pay(lead.gid)}`,
+    `Links: free test ${L.child(lead.gid)} · Test Series / pay ${L.pay(lead.gid)}`,
     team ? `Team चा नंबर (call / WhatsApp): ${team}.` : '',
     ...(() => {
       const mine = classes.find(c => c.name === lead.cls), others = classes.filter(c => c !== mine);
       return [
-        mine ? `या पाल्याचा पूर्ण course (विषय आणि chapters):\n${classText(mine, true)}` : '',
-        others.length ? `इतर उपलब्ध classes:\n${others.map(c => '- ' + classText(c, false)).join('\n')}` : '',
-        classes.length ? 'यापेक्षा वेगळे classes / standards सध्या नाहीत.' : '',
+        mine ? `या पाल्याच्या Test Series चे विषय आणि chapters:\n${classText(mine, true)}` : '',
+        // other standards: only when the parent asks about another one (SYSTEM rule)
+        others.length ? `इतर Test Series (फक्त पालकांनी दुसऱ्या इयत्तेबद्दल / Test Series बद्दल विचारलं तरच सांग):\n${others.map(c => '- ' + WA.cleanName(c.name) + ' Test Series: ' + classText(c, false)).join('\n')}` : '',
+        classes.length ? 'यापेक्षा वेगळ्या Test Series / इयत्ता सध्या नाहीत.' : '',
       ];
     })(),
   ].filter(Boolean).join('\n');
@@ -81,6 +83,9 @@ export function facts(lead, now, WA, classes) {
 const SYSTEM = `तू NKs EduOrbit चा WhatsApp सहाय्यक आहेस. पालकांच्या प्रश्नांना उत्तर देतोस.
 नियम:
 - उत्तर फक्त खालच्या FACTS मधूनच. FACTS मध्ये नसलेलं काहीही (किंमत, सूट, तारीख, वेळ, नंबर, link, विषय, वचन) कधीही स्वतः बनवू नको.
+- पालकांशी बोलताना "class" / "course" नाही — "Test Series" म्हण (उदा. "8वी NMMS Test Series").
+- फक्त या पालकाच्या Test Series बद्दल बोल. दुसऱ्या इयत्तेची / Test Series ची माहिती फक्त पालकांनी स्वतः ती विचारली तरच दे.
+- स्पर्धा परीक्षेच्या (NMMS, शिष्यवृत्ती, नवोदय…) Test Series मध्ये Notes नाहीत — Notes चं वचन देऊ नको.
 - सोपी मराठी (देवनागरी), 1 ते 3 छोटी वाक्यं, 60 शब्दांपेक्षा कमी, आदराने. पालक English / Hinglish मध्ये लिहिले तरी उत्तर मराठीत.
 - Link फक्त FACTS मधली आणि गरज असेल तेव्हाच.
 - अंदाज करू नको: उत्तर FACTS मध्ये स्पष्ट लिहिलेलं नसेल तर ('बहुधा', 'साधारण', स्वतःच्या समजुतीने काहीही नाही) handoff.
