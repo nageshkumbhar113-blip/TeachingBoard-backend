@@ -12,6 +12,8 @@ const teamMemberSchema = new mongoose.Schema(
     last_login_at: { type: Date, default: null },
     // a PIN change / switching off logs every phone out (tokens issued before this are refused)
     tokens_valid_after: { type: Date, default: null },
+    // 🔔 this member's phone (NKs Team app): the "🆕 new family" push. Cleared on logout / when another member logs in on it
+    device_token: { type: String, default: null },
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }, versionKey: false }
 );

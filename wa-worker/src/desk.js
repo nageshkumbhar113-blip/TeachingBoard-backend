@@ -163,9 +163,34 @@ async function newAlert(env, R, now) {
   const since = now.getTime() - 6 * H;
   const { results } = await env.DB.prepare("SELECT gid, name, cls, mobile, created_at, data FROM leads WHERE mobile IS NOT NULL AND created_at >= ? AND (crm IS NULL OR crm NOT IN ('paid', 'closed', 'teacher')) ORDER BY created_at DESC LIMIT 30").bind(since).all();
   return (results || []).map(r => ({ r, d: JSON.parse(r.data) }))
-    .filter(({ d }) => !d.paid && !d.tdemo && !d.lastTeam && !d.teamSentAt && !d.imported && !d.backfilled)
-    .map(({ r, d }) => ({ gid: r.gid, name: r.name || d.name || '', cls: sName(d, r.cls), from: d.ctwaUntil ? 'WhatsApp ad' : d.via === 'form' ? 'Website नंबर' : d.source || d.via || '',
+    .filter(({ d }) => freshFamily(d))
+    .map(({ r, d }) => ({ gid: r.gid, name: r.name || d.name || '', cls: sName(d, r.cls), from: fromOf(d),
       created_at: r.created_at, left_min: Math.round((r.created_at + R.newMin * 60e3 - now.getTime()) / 60e3) }));
+}
+const freshFamily = d => !d.paid && !d.tdemo && !d.lastTeam && !d.teamSentAt && !d.imported && !d.backfilled;
+const fromOf = d => d.ctwaUntil ? 'WhatsApp ad' : d.via === 'form' ? 'Website नंबर' : d.source || d.via || '';
+
+// 🔔 a new family → a push on the team's phones (owner 2026-11-26): checked every 5-minute tick, Render sends it
+// (FCM, to every active member who logged in on the NKs Team app). Only in the call hours: the night's families
+// come in one push when the hours start. kv 'desk_push_at' = the newest family already told.
+export async function teamNewPush(env, kvGet, kvSet, queue, now = new Date()) {
+  const t = now.getTime(), R = await rules(env, kvGet), h = istHour(t);
+  const last = Number(await kvGet(env, 'desk_push_at')) || 0;
+  if (!last) { await kvSet(env, 'desk_push_at', t); return 0; }   // the first run: from now on (not the old families)
+  if (h < R.hours[0] || h >= R.hours[1]) return 0;
+  const { results } = await env.DB.prepare("SELECT gid, name, cls, created_at, data FROM leads WHERE mobile IS NOT NULL AND created_at > ? AND (crm IS NULL OR crm NOT IN ('paid', 'closed', 'teacher')) ORDER BY created_at LIMIT 30")
+    .bind(Math.max(last, t - 14 * H)).all();
+  const rows = results || [];
+  if (!rows.length) return 0;
+  await kvSet(env, 'desk_push_at', rows[rows.length - 1].created_at);
+  const fresh = rows.map(r => ({ r, d: JSON.parse(r.data) })).filter(({ d }) => freshFamily(d) && !d.lastAttempt);   // already being called: no push
+  if (!fresh.length) return 0;
+  const one = fresh.length === 1 ? fresh[0] : null;
+  const who = ({ r, d }) => (r.name || d.name || 'नाव नाही') + (sName(d, r.cls) ? ' · ' + sName(d, r.cls) : '');
+  const title = (one ? '🆕 नवीन पालक' : `🆕 ${fresh.length} नवीन पालक`) + ` — ${R.newMin} मिनिटांत call करा`;
+  const text = one ? who(one) + (fromOf(one.d) ? ' · ' + fromOf(one.d) : '') : fresh.slice(0, 5).map(who).join(', ') + (fresh.length > 5 ? ' …' : '');
+  await queue(env, fresh[0].r.gid, 'team_push', { title, text, one: one ? one.r.gid : '', n: fresh.length, at: t });
+  return fresh.length;
 }
 // ⏰ the callbacks of today (a time was chosen)
 async function callbacks(env, now, whoId) {

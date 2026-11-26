@@ -97,7 +97,7 @@ async function sendToMany(deviceTokens, title, body, data = {}) {
     apns: { payload: { aps: { sound: 'default' } } },
   };
 
-  await messaging.sendEachForMulticast(message);
+  return messaging.sendEachForMulticast(message);   // { responses: [{ success, error }] } — callers may drop dead tokens
 }
 
 module.exports = { sendToUser, sendToMany };

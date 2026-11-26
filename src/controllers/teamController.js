@@ -47,6 +47,16 @@ exports.me = asyncHandler(async (req, res) => {
   res.json({ success: true, data: { id: req.staff.id, name: req.staff.name } });
 });
 
+// PATCH /api/team/device-token { token } — this phone gets the 🆕 new-family push ('' = logged out on it)
+exports.deviceToken = asyncHandler(async (req, res) => {
+  if (!req.staff) return res.json({ success: true, skipped: 'admin' });
+  const t = String(req.body?.token || '').trim().slice(0, 400) || null;
+  // one phone = one member: another member who used this phone before stops getting its pushes
+  if (t) await TeamMember.updateMany({ device_token: t, member_id: { $ne: req.staff.id } }, { $set: { device_token: null } });
+  await TeamMember.updateOne({ member_id: req.staff.id }, { $set: { device_token: t } });
+  res.json({ success: true });
+});
+
 // ── Admin › Settings › 👥 Team ──
 exports.list = asyncHandler(async (_req, res) => {
   res.json({ success: true, data: (await TeamMember.find().sort({ created_at: 1 }).lean()).map(view) });

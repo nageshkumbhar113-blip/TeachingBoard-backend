@@ -10,7 +10,7 @@ import WA from './waFlow.js';
 import { validSignature, bodiesFor, templateBody, post, inboundText, hmacHex, sameHex } from './meta.js';
 import * as S from './store.js';
 import { leadInfo, queue, runJobs, waLogin, newLead, ping, appUsage } from './render.js';
-import { deskRoute, deskAdmin, creditPaid } from './desk.js';
+import { deskRoute, deskAdmin, creditPaid, teamNewPush } from './desk.js';
 import { aiAnswer, classList, geminiModels } from './ai.js';
 
 // 🤖 the rules sent a parent's own question to the team (askTeam → .qa outputs): with AI_ON = "1" Gemini may answer it
@@ -242,6 +242,7 @@ async function runTick(env) {
       n++;
     } catch (e) { await S.addMsg(env, { gid: r.gid, dir: 'log', kind: 'TICK_ERROR', body: String(e.message).slice(0, 300) }); }
   }
+  await teamNewPush(env, S.kvGet, S.kvSet, queue).catch(e => S.addMsg(env, { gid: null, dir: 'log', kind: 'TEAM_PUSH_ERROR', body: String(e.message).slice(0, 300) }).catch(() => {}));   // 🔔 a new family → the team's phones
   const jobs = await runJobs(env, Math.max(0, Math.min(10, 46 - SUB)));
   if (left) await S.kvSet(env, 'tick_left', `${new Date().toISOString()} ${left}`);
   // keep the tables small: delivered-ids older than 7 days, chat older than 120 days

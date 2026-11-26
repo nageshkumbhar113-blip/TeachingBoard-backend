@@ -12,7 +12,7 @@ const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const AppError = require('../utils/AppError');
 const BOT = require('../utils/waBot');
-const { sendToUser } = require('../utils/fcm');
+const { sendToUser, sendToMany } = require('../utils/fcm');
 
 const GID = /^[0-9A-F]{10}$/;
 function requireBotKey(req, _res, next) {
@@ -201,6 +201,21 @@ const action = asyncHandler(async (req, res) => {
     // made later from the bot's job queue (Render was asleep): the bot gets the facts (class, courses…) now
     if (req.body?.queued) BOT.notify(data.gid, 'sync', {}, { sync: data });
     return res.json({ success: true, data });
+  }
+  if (act === 'team_push') {
+    // 🆕 a new family (wa-worker desk.js teamNewPush): a push on every active team member's phone. Late (Render was
+    // asleep for hours) → not sent: the 15-minute call is long gone, the home screen shows them anyway
+    if (Date.now() - Number(req.body?.at || 0) > 2 * 3600e3) return res.json({ success: true, skipped: 'old' });
+    const TeamMember = require('../models/TeamMember');
+    const ms = await TeamMember.find({ active: { $ne: false }, device_token: { $nin: [null, ''] } }, 'member_id device_token').lean();
+    const tokens = [...new Set(ms.map(m => m.device_token))];
+    if (!tokens.length) return res.json({ success: true, data: { sent: 0 } });
+    const r = await sendToMany(tokens, String(req.body?.title || '🆕 नवीन पालक').slice(0, 80), String(req.body?.text || '').slice(0, 180),
+      { kind: 'team_new', gid: String(req.body?.one || '') }).catch(err => { console.warn('[team push]', err.message); return null; });
+    // a phone that uninstalled the app: its token is dead — forget it
+    const dead = (r?.responses || []).map((x, i) => (!x.success && /not-registered|invalid-registration/.test(x.error?.code || '')) ? tokens[i] : null).filter(Boolean);
+    if (dead.length) await TeamMember.updateMany({ device_token: { $in: dead } }, { $set: { device_token: null } });
+    return res.json({ success: true, data: { sent: tokens.length - dead.length } });
   }
   const lead = await GuestLead.findOne({ gid });
   if (!lead) return res.json({ success: true, skipped: 'no lead' });   // nothing to do; don't make the Worker retry

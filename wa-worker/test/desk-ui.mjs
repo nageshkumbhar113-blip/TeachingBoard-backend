@@ -96,17 +96,21 @@ try {
   await ev(G[0], 'pay_seen', { checkout: true });
   browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 400, height: 860 } });
-  const offers = [];
+  const offers = [], pushTokens = [];
   // the team app's Render calls (login, bot token, offers) — answered here; nothing reaches the real server
   await ctx.route('http://fake-render/**', async route => {
     const u = new URL(route.request().url()), j = o => route.fulfill({ contentType: 'application/json', body: JSON.stringify(o) });
     if (u.pathname === '/api/guest/admin/bot-token') return j({ success: true, data: { ready: true, url: W, token: staffTok('m1', 'प्रिया') } });
+    if (u.pathname === '/api/team/device-token') { pushTokens.push(JSON.parse(route.request().postData() || '{}')); return j({ success: true }); }
     if (u.pathname === '/api/guest/offer-config') return j({ success: true, data: { team_on: true, team_percents: [20, 30, 50], team_hours: 3 } });
     if (u.pathname === '/api/guest/admin/team-offer') { const b = JSON.parse(route.request().postData() || '{}'); offers.push(b); return j({ success: true, data: { expires_at: new Date(Date.now() + 3 * 3600e3).toISOString(), hours: 3, pay_url: 'https://nkseduorbit.in/p/' + b.gid } }); }
     return j({ success: true, data: [] });
   });
   await ctx.addInitScript(() => {
     localStorage.setItem('teachingboard_api_url', 'http://fake-render/api');
+    // the app's push plugin (Capacitor), faked: the listeners are kept so the test can fire them
+    const L = {}; window.__push = L;
+    window.Capacitor = { isNativePlatform: () => true, Plugins: { PushNotifications: { addListener: (n, f) => { L[n] = f; }, requestPermissions: async () => ({ receive: 'granted' }), register: async () => { setTimeout(() => L.registration && L.registration({ value: 'fcm-tok-1' }), 50); } } } };
     localStorage.setItem('nks_team_token', 'team-test');
     localStorage.setItem('nks_team_me', JSON.stringify({ id: 'm1', name: 'प्रिया' }));
     // a tel: / wa.me link must not leave the page in the test
@@ -163,6 +167,13 @@ try {
   const a = await crm('desk/admin');
   ok(a.data.approvals.some(x => x.pct === 50 && x.by === 'प्रिया'), 'the Admin sees the 50% request', JSON.stringify(a.data.approvals));
   ok(a.data.team.some(p => p.name === 'प्रिया' && p.calls === 1 && p.paying === 1), 'the Admin table: प्रिया — 1 call, 1 will pay', JSON.stringify(a.data.team));
+  // 🔔 the new-family push
+  ok(pushTokens.length === 1 && pushTokens[0].token === 'fcm-tok-1', '🔔 the phone token is sent once (the home screen opened twice)', JSON.stringify(pushTokens));
+  await page.evaluate(() => window.__push.pushNotificationReceived({ title: '🆕 नवीन पालक — 15 मिनिटांत call करा', data: { kind: 'team_new' } }));
+  ok(/नवीन पालक/.test(await page.locator('.toast').last().innerText()), '🔔 a push while the app is open: a toast');
+  await page.evaluate(g => window.__push.notificationActionPerformed({ notification: { data: { kind: 'team_new', gid: g } } }), G[2]);
+  await page.waitForFunction(() => /आर्या/.test(document.querySelector('#main')?.innerText || '') && document.querySelector('.dk-facts'), null, { timeout: 15000 }).catch(() => {});
+  ok(/आर्या/.test(await page.locator('#main').innerText()), '🔔 tapping the push opens that family card', (await page.locator('#main').innerText()).slice(0, 200));
   ok(!errs.length, 'no page errors', errs.join(' | '));
   try { await browser?.close(); } catch {} statics.close();
 } catch (e) { console.log('CRASH', e && e.stack); fails++;

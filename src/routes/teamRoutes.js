@@ -11,6 +11,7 @@ const byIp = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 60, message: 'à¤
 
 router.post('/login', byIp, byNumber, c.login);
 router.get('/me', c.requireAdminOrStaff, c.me);
+router.patch('/device-token', c.requireAdminOrStaff, c.deviceToken);   // ðŸ”” the new-family push
 router.get('/admin/members', requireAdmin, c.list);
 router.post('/admin/members', requireAdmin, c.create);
 router.patch('/admin/members/:id', requireAdmin, c.update);
