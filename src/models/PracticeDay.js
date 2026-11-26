@@ -30,5 +30,6 @@ const practiceDaySchema = new mongoose.Schema(
 
 practiceDaySchema.index({ schedule_id: 1, day_key: 1, student_code: 1 }, { unique: true });
 practiceDaySchema.index({ schedule_id: 1, day_key: 1, score: -1 });
+practiceDaySchema.index({ student_code: 1, day_key: -1 });   // a child's days (Home card, 45-day report) without reading every day of the year (Admin audit 2026-11-27)
 
 module.exports = mongoose.models.PracticeDay || mongoose.model('PracticeDay', practiceDaySchema);

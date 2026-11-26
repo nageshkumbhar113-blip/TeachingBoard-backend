@@ -35,5 +35,6 @@ const weeklyEntrySchema = new mongoose.Schema(
 
 weeklyEntrySchema.index({ event_id: 1, student_code: 1 }, { unique: true });
 weeklyEntrySchema.index({ event_id: 1, score: -1, time_taken: 1 });
+weeklyEntrySchema.index({ student_code: 1, submitted_at: -1 });   // a child's own महा-Tests (Me › history, team counts) — was a full read (Admin audit 2026-11-27)
 
 module.exports = mongoose.models.WeeklyEntry || mongoose.model('WeeklyEntry', weeklyEntrySchema);
