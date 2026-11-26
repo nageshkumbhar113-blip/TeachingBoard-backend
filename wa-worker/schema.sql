@@ -79,3 +79,11 @@ CREATE TABLE IF NOT EXISTS acts (
 );
 CREATE INDEX IF NOT EXISTS acts_at ON acts(at);
 CREATE INDEX IF NOT EXISTS acts_by ON acts(by_id, at);
+
+-- index audit 2026-11-27: the team home (every minute) and the cron (every 5 min) read the newest / latest-changed
+-- leads in order and stop at the LIMIT instead of reading and sorting the whole table; a lead's history and the
+-- Admin desk's "why closed" counts without reading every act
+CREATE INDEX IF NOT EXISTS leads_created ON leads(created_at);
+CREATE INDEX IF NOT EXISTS leads_updated ON leads(updated_at);
+CREATE INDEX IF NOT EXISTS acts_gid      ON acts(gid, at);
+CREATE INDEX IF NOT EXISTS acts_action   ON acts(action, detail);
