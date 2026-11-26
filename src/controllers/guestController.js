@@ -1015,6 +1015,12 @@ exports.adminMetaUpload = asyncHandler(async (req, res) => {
   } catch (err) { throw new AppError(err.message, err.status || 400); }
 });
 
+// GET /api/guest/admin/meta/adsets — 🎯 every live ad set: area, ages, who (teachers' interests / job titles)
+exports.adminMetaAdsets = asyncHandler(async (_req, res) => {
+  if (!META.configured().ok) throw new AppError('Meta जोडलेलं नाही', 400);
+  try { res.json({ success: true, data: await META.adsetsTargeting() }); } catch (err) { throw new AppError(err.message, err.status || 400); }
+});
+
 // GET /api/guest/admin/meta/videos — 📚 the videos the admin uploaded straight into Meta (Ads Manager › Media library)
 exports.adminMetaVideos = asyncHandler(async (_req, res) => {
   if (!META.configured().ok) throw new AppError('Meta जोडलेलं नाही', 400);

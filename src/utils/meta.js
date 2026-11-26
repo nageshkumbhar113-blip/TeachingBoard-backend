@@ -172,6 +172,40 @@ async function _geoOf(geo) {
   if (!found.length) throw Object.assign(new Error('Meta मध्ये या गटातली एकही शहरं सापडली नाहीत — "संपूर्ण महाराष्ट्र" निवडा'), { status: 400 });
   return { geo: { cities: [...new Map(found.map(c => [c.key, { key: c.key, radius: GEO_KM, distance_unit: 'kilometer' }])).values()], location_types: ['home', 'recent'] }, missed };
 }
+// 👩‍🏫 teacher ads (owner 2026-11-26: "are teachers targeted?"): people Meta knows as teachers — interests (teacher /
+// teaching / tutor / education), job titles (teacher, tutor, lecturer…) and the education industry, any of them (OR).
+// Looked up in Meta's own lists once (ids change between accounts); none found → age + area only, and a note says so.
+let _tSpec;
+async function _teacherSpec() {
+  if (_tSpec !== undefined) return _tSpec;
+  const pick = async (params, rx, n) => ((await graph('search', params).catch(() => null))?.data || []).filter(x => rx.test(x.name || '')).slice(0, n).map(x => ({ id: String(x.id), name: x.name }));
+  const uniq = a => [...new Map(a.map(x => [x.id, x])).values()];
+  const interests = [], work = [];
+  for (const q of ['Teacher', 'Teaching', 'Tutor', 'Education']) interests.push(...await pick({ type: 'adinterest', q, limit: 10 }, /teach|tutor|education/i, 3));
+  for (const q of ['Teacher', 'Tutor', 'Lecturer', 'Professor']) work.push(...await pick({ type: 'adworkposition', q, limit: 10 }, /teacher|tutor|lecturer|professor|principal|शिक्षक/i, 4));
+  const industries = await pick({ type: 'adTargetingCategory', class: 'industries' }, /education/i, 2);
+  const spec = {};
+  if (interests.length) spec.interests = uniq(interests).slice(0, 10);
+  if (work.length) spec.work_positions = uniq(work).slice(0, 12);
+  if (industries.length) spec.industries = uniq(industries);
+  _tSpec = Object.keys(spec).length ? spec : null;
+  return _tSpec;
+}
+// 🎯 Admin › Ads › "Ad sets — कोणाला दाखवतात": every live ad set's area, ages and who (read only)
+async function adsetsTargeting() {
+  const rows = await graphAll(`${env().account}/adsets`, { fields: 'id,name,effective_status,daily_budget,optimization_goal,destination_type,targeting,campaign{name}', limit: '200' });
+  return rows.filter(r => !GONE.includes(r.effective_status)).map(r => {
+    const t = r.targeting || {}, g = t.geo_locations || {};
+    const fs2 = (t.flexible_spec || []).flatMap(x => [...(x.interests || []), ...(x.work_positions || []), ...(x.industries || []), ...(x.behaviors || [])].map(y => y.name));
+    return {
+      id: r.id, name: r.name, status: r.effective_status, campaign: r.campaign?.name || '', budget: r.daily_budget ? Math.round(Number(r.daily_budget) / 100) : null,
+      goal: r.optimization_goal || '', dest: r.destination_type || '',
+      area: g.regions?.length ? g.regions.map(x => x.name || 'region').join(', ') : g.cities?.length ? `${g.cities.length} शहरं + ${g.cities[0].radius || ''} km` : g.countries?.length ? g.countries.join(', ') : '—',
+      ages: `${t.age_min || '?'}–${t.age_max || '?'}`, who: fs2.length ? fs2.slice(0, 12) : [],
+      advantage: t.targeting_automation?.advantage_audience === 1,
+    };
+  });
+}
 const GONE = ['DELETED', 'ARCHIVED'];
 async function _findByName(edge, name, fields = 'id,name,status') {
   const r = await graph(`${env().account}/${edge}`, { fields, filtering: [{ field: 'name', operator: 'EQUAL', value: name }], limit: 5 });
@@ -256,8 +290,10 @@ async function createAd(o) {
   }
   async function makeAdset() {
     const place = await _geoOf(o.geo);
+    const tspec = o.audience === 'school' ? await _teacherSpec() : null;
+    if (o.audience === 'school') note = (note ? note + ' · ' : '') + (tspec ? `👩‍🏫 शिक्षक targeting: ${[...(tspec.interests || []), ...(tspec.work_positions || []), ...(tspec.industries || [])].length} (interests / job titles / education)` : 'Meta मध्ये शिक्षक targeting सापडलं नाही — फक्त वय + भाग');
     if (place.missed.length) note = (note ? note + ' · ' : '') + `Meta मध्ये ही शहरं सापडली नाहीत (बाकीची घेतली): ${place.missed.join(', ')}`;
-    return post(`${e.account}/adsets`, {
+    const params = spec => ({
       name: adsetName, campaign_id: campaign.id, status: 'PAUSED',
       daily_budget: Math.max(100, Math.round(Number(o.daily_budget) || 0)) * 100,   // paise
       billing_event: 'IMPRESSIONS', bid_strategy: 'LOWEST_COST_WITHOUT_CAP', destination_type: toWa ? 'WHATSAPP' : 'WEBSITE',
@@ -268,9 +304,19 @@ async function createAd(o) {
         geo_locations: place.geo,
         // the admin's ages (Admin › Ads), else the audience's
         age_min: o.age_min || A.age_min, age_max: o.age_max || A.age_max,
+        ...(spec ? { flexible_spec: [spec] } : {}),
         targeting_automation: { advantage_audience: 0 },
       },
     });
+    if (!tspec) return post(`${e.account}/adsets`, params(null));
+    // Meta may refuse an option it has retired (job titles…): interests + education only, then age + area only
+    try { return await post(`${e.account}/adsets`, params(tspec)); }
+    catch (err) {
+      const lite = tspec.interests || tspec.industries ? { ...(tspec.interests ? { interests: tspec.interests } : {}), ...(tspec.industries ? { industries: tspec.industries } : {}) } : null;
+      if (lite) { try { const r = await post(`${e.account}/adsets`, params(lite)); note += ' · (job titles Meta ने घेतले नाहीत)'; return r; } catch { /* below */ } }
+      note += ` · ⚠️ शिक्षक targeting Meta ने घेतलं नाही (${String(err.message).slice(0, 80)}) — फक्त वय + भाग`;
+      return post(`${e.account}/adsets`, params(null));
+    }
   }
   const ready = await _videoReady(o.video_id);
   if (!ready) return { pending: true, campaign_id: campaign.id, adset_id: adset.id, note };
@@ -481,4 +527,4 @@ async function retarget(adsetId, geo) {
   return { name: s.name, towns: place.geo.cities.length, missed: place.missed };
 }
 
-module.exports = { configured, account, insights, retarget, deleteObject, graph, uploadVideo, uploadImage, listVideos, createAd, adsState, setAdStatus, raiseBudget, setBudget, replaceVideo, sendEvent, fbcOf, isStudentAd, datasetReady, _resetCache: () => { _cache = null; _region = null; } };
+module.exports = { configured, account, insights, retarget, deleteObject, graph, uploadVideo, uploadImage, listVideos, adsetsTargeting, createAd, adsState, setAdStatus, raiseBudget, setBudget, replaceVideo, sendEvent, fbcOf, isStudentAd, datasetReady, _resetCache: () => { _cache = null; _region = null; } };
