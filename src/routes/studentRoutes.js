@@ -29,6 +29,9 @@ router.post('/', requireAdmin, createStudent);
 // Admin › Students › 📥 Import (many students at once; preview first, nothing saved)
 router.post('/import/preview', requireAdmin, previewImport);
 router.post('/import', requireAdmin, runImport);
+// one student by hand: the plan's price (nothing saved) / 🔁 a new plan or renewal (owner 2026-11-26)
+router.post('/plan/preview', requireAdmin, require('../controllers/studentImportController').previewOne);
+router.post('/:id/plan', requireAdmin, require('../controllers/studentImportController').renewOne);
 router.patch('/:id', requireAdmin, updateStudent);
 router.delete('/:id', requireAdmin, deleteStudent);
 router.post('/:id/reset-device', requireAdmin, resetDevice);

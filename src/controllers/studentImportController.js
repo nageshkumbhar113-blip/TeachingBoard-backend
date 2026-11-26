@@ -352,7 +352,20 @@ exports.runImport = asyncHandler(async (req, res) => {
     }
   }
 
-  // Teachers: join students, Paper Builder unlimited till the students' expiry, rules required
+  const teachers = await joinTeachers(byTeacher);
+
+  const summary = {
+    ...plan.summary,
+    created: results.filter(r => r.status === 'created').length,
+    updated: results.filter(r => r.status === 'updated').length,
+    failed: results.filter(r => r.status === 'error').length,
+  };
+  res.json({ success: true, data: { import_id: importId, rows: results, summary, teachers, rules: plan.rules } });
+});
+
+// Teachers: join students, Paper Builder unlimited till the students' expiry, rules required
+// byTeacher: code → { codes:Set, batches:Map(batch → latest expiry day) }
+async function joinTeachers(byTeacher) {
   const teachers = [];
   for (const [code, info] of byTeacher) {
     const teacher = await User.findOne({ role: 'teacher', teacher_code: code });
@@ -383,14 +396,103 @@ exports.runImport = asyncHandler(async (req, res) => {
       whatsapp_text: text, pushed: !!teacher.device_token,
     });
   }
+  return teachers;
+}
 
-  const summary = {
-    ...plan.summary,
-    created: results.filter(r => r.status === 'created').length,
-    updated: results.filter(r => r.status === 'updated').length,
-    failed: results.filter(r => r.status === 'error').length,
-  };
-  res.json({ success: true, data: { import_id: importId, rows: results, summary, teachers, rules: plan.rules } });
+// ── one student made / renewed by hand (Admin › Students › Student Access, owner 2026-11-26): the same money
+// rules as the import — plan (monthly 30 days / yearly till 30 April / own date), the courses' price minus the
+// admin's discount % (or the amount typed), a paid offline subscription per course, the teacher's commission,
+// and the teacher gets the student. Nothing written here.
+async function planOne(b, now = new Date()) {
+  const plan = PLANS.includes(b.plan) ? b.plan : null;
+  if (!plan) throw new AppError('Plan निवडा', 400);
+  const names = splitCourses(b.courses);
+  if (!names.length) throw new AppError('Course निवडा', 400);
+  const batches = await Batch.find({}, 'name monthly_price yearly_price').lean();
+  const byName = new Map(batches.map(x => [x.name.trim().toLowerCase(), x]));
+  const courses = [];
+  for (const n of names) {
+    const x = byName.get(n.toLowerCase());
+    if (!x) throw new AppError(`Course सापडला नाही: ${n}`, 400);
+    if (!courses.some(c => c.name === x.name)) courses.push(x);
+  }
+  const day = parseDay(b.expiry);
+  if (day === null) throw new AppError('Expiry तारीख चुकीची', 400);
+  const expiry = day || (plan === 'custom' ? '' : planExpiryDay(plan, now));
+  if (!expiry) throw new AppError('Expiry तारीख निवडा', 400);
+  if (expiry < istDay(now)) throw new AppError('Expiry तारीख आधीच गेली', 400);
+  const disc = b.discount_percent === '' || b.discount_percent == null ? 0 : Number(b.discount_percent);
+  if (!Number.isFinite(disc) || disc < 0 || disc > 100) throw new AppError('सूट 0–100 %', 400);
+  const listPrices = courses.map(x => Number(plan === 'monthly' ? x.monthly_price : x.yearly_price) || 0);
+  const listTotal = round2(listPrices.reduce((a, c) => a + c, 0));
+  let amount = round2(listTotal * (1 - disc / 100));
+  if (b.amount !== '' && b.amount != null) {
+    const a = Number(b.amount);
+    if (!Number.isFinite(a) || a < 0) throw new AppError('रक्कम चुकीची', 400);
+    amount = round2(a);
+  }
+  const tCode = String(b.teacher_code || '').trim().toUpperCase();
+  let teacher = null;
+  if (tCode) {
+    teacher = await User.findOne({ role: 'teacher', teacher_code: tCode }, 'name teacher_code status').lean();
+    if (!teacher) throw new AppError(`Teacher code सापडला नाही: ${tCode}`, 400);
+    if ((teacher.status || 'active') !== 'active') throw new AppError(`Teacher ${tCode} active नाही`, 400);
+  }
+  return { plan, expiry, courses: courses.map(x => x.name), list_prices: listPrices, list_total: listTotal, discount_percent: disc,
+    amount, amounts: splitAmount(amount, listPrices), teacher_code: tCode, teacher_name: teacher?.name || '' };
+}
+// write it: the student's courses / expiry, one paid subscription per course (the same key twice → once), commission
+async function saveOne(student, p, key, adminId, now = new Date()) {
+  const batches = new Set([...(student.assigned_batches || []), ...p.courses]);
+  student.assigned_batches = [...batches];
+  if (!student.expiry_date || dayStart(p.expiry) > student.expiry_date) student.expiry_date = dayStart(p.expiry);
+  if (!student.referred_by_teacher && p.teacher_code) student.referred_by_teacher = p.teacher_code;
+  if (student.status === 'pending') { student.status = 'active'; student.approved_at = now; student.approved_by = adminId; }
+  student.free_tier = false;
+  await student.save();
+  invalidateUserCache('student', student.user_id);
+  let firstSubId = '', isNew = false;
+  for (let k = 0; k < p.courses.length; k += 1) {
+    const id = `single:${key}:${student.student_code}:${p.courses[k]}`;
+    const r = await StudentSubscription.findOneAndUpdate(
+      { razorpay_payment_id: id },
+      { $setOnInsert: {
+        student_user_id: student.user_id, student_code: student.student_code, batch: p.courses[k],
+        period: p.plan === 'monthly' ? 'monthly' : 'yearly', amount: p.amounts[k] || 0, list_price: p.list_prices[k] || 0,
+        razorpay_payment_id: id, payment_verified: true, status: 'active', is_trial: false, start_date: now, expiry_date: dayEndIst(p.expiry),
+        discount_applied_percent: p.discount_percent, discount_source: p.discount_percent ? 'admin_single' : '', source: 'admin_bulk', import_id: 'single:' + key,
+      } },
+      { upsert: true, new: true, includeResultMetadata: true }
+    );
+    if (!r.lastErrorObject?.updatedExisting) isNew = true;
+    if (!firstSubId) firstSubId = String(r.value._id);
+  }
+  if (isNew && p.amount > 0) {
+    await recordCommissionForPayment(
+      { _id: firstSubId, amount: p.amount, is_trial: false, razorpay_payment_id: `single:${key}:${student.student_code}` },
+      student.toObject ? student.toObject() : student
+    );
+  }
+  const teachers = p.teacher_code
+    ? await joinTeachers(new Map([[p.teacher_code, { codes: new Set([student.student_code]), batches: new Map(p.courses.map(c => [c, p.expiry])) }]]))
+    : [];
+  return { plan: p, teachers, recorded: isNew };
+}
+exports.planOne = planOne;
+exports.saveOne = saveOne;
+
+// POST /api/students/plan/preview { courses, plan, expiry?, discount_percent?, amount?, teacher_code? } — the price, nothing saved
+exports.previewOne = asyncHandler(async (req, res) => {
+  res.json({ success: true, data: await planOne(req.body || {}) });
+});
+// POST /api/students/:id/plan { …the same, key } — 🔁 a new plan / renewal for a student already here
+exports.renewOne = asyncHandler(async (req, res) => {
+  const key = String(req.body?.key || '').trim();
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(key)) throw new AppError('key is required', 400);
+  const student = await User.findOne({ user_id: req.params.id, role: 'student' });
+  if (!student) throw new AppError('Student not found', 404);
+  const p = await planOne(req.body || {});
+  res.json({ success: true, data: await saveOne(student, p, key, String(req.user?.id || '').trim()) });
 });
 
 module.exports._internal = { planImport, splitAmount, parseDay, planExpiryDay };

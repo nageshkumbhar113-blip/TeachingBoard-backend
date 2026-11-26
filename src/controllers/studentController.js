@@ -43,6 +43,7 @@ function serializeStudent(student) {
     status: student.status || 'active',
     assigned_batches: normalizeBatches(student.assigned_batches),
     expiry_date: normalizeExpiryDate(student.expiry_date),
+    referred_by_teacher: student.referred_by_teacher || '',
     approved_at: student.approved_at || null,
     approved_by: student.approved_by || '',
     last_login_at: student.last_login_at || null,
@@ -86,6 +87,13 @@ exports.createStudent = asyncHandler(async (req, res) => {
   const existing = await User.findOne({ student_code: studentCode, role: 'student' });
   if (existing) throw new AppError('Student code already exists', 409);
 
+  // 💳 a paid plan taken offline (cash / UPI) — checked before the account is made (studentImportController.planOne)
+  const op = req.body.offline_plan && typeof req.body.offline_plan === 'object' ? req.body.offline_plan : null;
+  const SI = op ? require('./studentImportController') : null;
+  const opKey = op ? String(op.key || '').trim() : '';
+  if (op && !/^[A-Za-z0-9_-]{8,64}$/.test(opKey)) throw new AppError('offline_plan.key is required', 400);
+  const planned = op ? await SI.planOne({ ...op, courses: normalizeBatches(req.body.assigned_batches) }) : null;
+
   const student = await User.create({
     user_id: `student-${randomUUID()}`,
     name,
@@ -101,7 +109,8 @@ exports.createStudent = asyncHandler(async (req, res) => {
     request_source: String(req.body.request_source || 'admin').trim() === 'self' ? 'self' : 'admin',
   });
 
-  res.status(201).json({ success: true, data: serializeStudent(student) });
+  const paid = planned ? await SI.saveOne(student, planned, opKey, String(req.user?.id || '').trim()) : null;
+  res.status(201).json({ success: true, data: serializeStudent(student), ...(paid ? { plan: paid } : {}) });
 });
 
 exports.updateStudent = asyncHandler(async (req, res) => {
