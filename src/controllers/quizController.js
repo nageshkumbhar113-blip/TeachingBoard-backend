@@ -152,6 +152,34 @@ exports.getQuizzes = asyncHandler(async (req, res) => {
     filter.batch = { $in: allowedBatches };
   }
 
+  // ?batch=<class> (index audit 2026-11-27): one class only (Teacher › competitive paper used to download every
+  // published test and keep one class). Never widens what this login may see.
+  const oneBatch = String(req.query.batch || '').trim();
+  if (oneBatch) {
+    if (allowedBatches && !allowedBatches.includes(oneBatch)) return res.json({ success: true, count: 0, data: [] });
+    filter.batch = oneBatch;
+  }
+
+  // Tests "only what changed" (owner 2026-11-27, new apps): ?versions=1 → { quiz_id: "updated|version|L/U" } for every
+  // test this login gets (a few KB, no questions); the app then asks ?ids=a,b,c for just the new / changed / newly
+  // locked or unlocked ones (the same items as the full list). Old apps never send these and get the full list.
+  if (req.query.versions === '1') {
+    const rows = await Quiz.find(filter)
+      .select('quiz_id updated_at version batch subject chapter paper_mode sections.source_batch sections.subject sections.chapter status')
+      .lean();
+    const versions = {};
+    for (const q of rows) {
+      const locked = await isQuizLocked(req.userDoc, q);
+      versions[q.quiz_id] = `${q.updated_at ? new Date(q.updated_at).getTime() : 0}|${q.version || 0}|${locked ? 'L' : 'U'}`;
+    }
+    return res.json({ success: true, count: rows.length, versions });
+  }
+  if (req.query.ids !== undefined) {
+    const ids = String(req.query.ids || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 100);
+    if (!ids.length) return res.json({ success: true, count: 0, data: [] });
+    filter.quiz_id = { $in: ids };
+  }
+
   // Server memory (Admin audit 2026-11-27): the whole list used to be loaded at once — 445 tests with every question
   // ≈ 20 MB of JSON and +110–160 MB of server memory per call (Render restarted at 512 MB). Now the tests are read one
   // at a time from the database and written out as they come: the same JSON (same items, same order, same fields —
