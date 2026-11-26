@@ -234,6 +234,7 @@ conceptSchema.index(
   { language_override: 'textSearchLanguage' }
 );
 conceptSchema.index({ status: 1, chapterId: 1 });
+conceptSchema.index({ status: 1, chapterId: 1, order: 1 });   // student full sync sorted chapterId → order from the index (index audit 2026-11-27)
 conceptSchema.index({ examTags: 1 });
 
 module.exports = mongoose.models.Concept || mongoose.model('Concept', conceptSchema);

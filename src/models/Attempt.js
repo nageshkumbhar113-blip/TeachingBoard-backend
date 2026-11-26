@@ -107,4 +107,9 @@ const attemptSchema = new mongoose.Schema(
   }
 );
 
+// a child's attempts newest first (app sync /attempts/my, bot first/last test, parent & teacher history and
+// analytics, daily nudges): read in order from the index instead of all of the child's attempts sorted in memory
+// (index audit 2026-11-27)
+attemptSchema.index({ student_code: 1, submitted_at: -1 });
+
 module.exports = mongoose.models.Attempt || mongoose.model("Attempt", attemptSchema);

@@ -170,6 +170,7 @@ const userSchema = new mongoose.Schema(
 // Admin student/teacher lists filter by role then sort by created_at —
 // compound index covers both the filter and the sort in one pass.
 userSchema.index({ role: 1, created_at: -1 });
+userSchema.index({ role: 1, assigned_batches: 1 });   // a class's students (class push, practice-paper reminder, teacher videos) (index audit 2026-11-27)
 userSchema.index({ role: 1, mobile: 1 });   // by mobile: teacher login / demo, bot, import matching (Admin audit 2026-11-27)
 
 userSchema.statics.hashPin = function(pin) {

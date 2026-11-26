@@ -265,6 +265,7 @@ const practicePaperSchema = new mongoose.Schema(
 practicePaperSchema.index({ chapterId: 1, paperNumber: 1 });
 practicePaperSchema.index({ batchId: 1, status: 1 });
 practicePaperSchema.index({ status: 1, createdAt: -1 });
+practicePaperSchema.index({ status: 1, created_at: -1 });   // the field is created_at — the createdAt one above is never used (index audit 2026-11-27)
 practicePaperSchema.index({ 'questions.questionId': 1 });
 
 module.exports = mongoose.models.PracticePaper || mongoose.model('PracticePaper', practicePaperSchema);

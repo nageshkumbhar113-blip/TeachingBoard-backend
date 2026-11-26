@@ -238,6 +238,9 @@ slsQuestionSchema.index({ batchId: 1, status: 1 });
 slsQuestionSchema.index({ questionType: 1, boardFrequency: 1 });
 slsQuestionSchema.index({ usageCount: 1, marks: 1 });
 slsQuestionSchema.index({ status: 1, chapterId: 1 });
+// student full sync / exercise questions: sorted chapterId → exerciseNo → created_at straight from the index (an
+// in-memory sort of the whole bank can hit the free tier's sort limit) (index audit 2026-11-27)
+slsQuestionSchema.index({ status: 1, chapterId: 1, exerciseNo: 1, created_at: 1 });
 // Paper Builder's exact query shape (chapter + marks value + published-only),
 // sorted least-used-first — covers filter and sort in one index.
 slsQuestionSchema.index({ chapterId: 1, marks: 1, status: 1, usageCount: 1 });

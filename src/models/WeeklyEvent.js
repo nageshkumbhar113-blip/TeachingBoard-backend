@@ -75,5 +75,8 @@ const weeklyEventSchema = new mongoose.Schema(
 
 // never two real tests of one schedule at the same start time (built when the data has none)
 weeklyEventSchema.index({ schedule_id: 1, starts_at: 1 }, { unique: true, partialFilterExpression: { is_trial: false } });
+// a class's papers in time order (Home /weekly/my, the bot on every message, Admin, usage, nudges): no more
+// "every paper of the class, with its questions, sorted in memory" (index audit 2026-11-27)
+weeklyEventSchema.index({ batch: 1, starts_at: -1 });
 
 module.exports = mongoose.models.WeeklyEvent || mongoose.model('WeeklyEvent', weeklyEventSchema);
