@@ -39,6 +39,23 @@ const atIST = (t, h, m = 0, addDays = 0) => { const d = new Date(t + IST); d.set
 const endOfDay = (t = Date.now()) => atIST(t, 23, 59, 0) + 59999;
 const ms = x => Date.parse(x || '') || 0;
 
+// The team home (every member's phone, every minute) used to read the whole leads table about 4 times on each
+// refresh (the families to call, callbacks, questions, teachers, the totals — `data LIKE` scans that no index
+// helps). These shared parts are now kept for a few minutes (index audit 2026-11-27); any team / Admin change
+// (a POST to /crm/…) clears them, so the member who acted sees it at once. New families (the red alert) and the
+// member's own day list / counts are still read fresh every time. Kill switch: env DESK_MEMO_SEC = 0.
+const _memo = new Map();   // key → { at, p }
+export const deskMemoClear = () => _memo.clear();
+function memo(env, key, sec, fn) {
+  const ttl = (env.DESK_MEMO_SEC != null && env.DESK_MEMO_SEC !== '' ? Number(env.DESK_MEMO_SEC) : sec) * 1000;
+  const hit = _memo.get(key);
+  if (ttl > 0 && hit && Date.now() - hit.at < ttl) return hit.p;
+  const p = Promise.resolve().then(fn);
+  _memo.set(key, { at: Date.now(), p });
+  p.catch(() => _memo.delete(key));   // a failed read is not kept
+  return p;
+}
+
 let _ready = false;
 async function ensure(env) {
   if (_ready) return;
@@ -117,7 +134,7 @@ async function candidates(env, ctx, now) {
 async function dayList(env, ctx, who, now) {
   await ensure(env);
   const day = istDay(now.getTime());
-  const { R, rows } = await candidates(env, ctx, now);
+  const { R, rows } = await memo(env, 'cand', 120, () => candidates(env, ctx, now));   // shared by every member
   const { results: mine } = await env.DB.prepare('SELECT * FROM desk_day WHERE day = ? AND by_id = ? ORDER BY n').bind(day, who.id).all();
   const { results: taken } = await env.DB.prepare('SELECT gid, by_id FROM desk_day WHERE day = ?').bind(day).all();
   const takenBy = new Map((taken || []).map(x => [x.gid, x.by_id]));
@@ -195,7 +212,7 @@ export async function teamNewPush(env, kvGet, kvSet, queue, now = new Date()) {
 // ⏰ the callbacks of today (a time was chosen)
 async function callbacks(env, now, whoId) {
   const from = atIST(now.getTime(), 0), to = endOfDay(now.getTime());
-  const { results } = await env.DB.prepare("SELECT gid, name, cls, data FROM leads WHERE data LIKE '%\"timed\":true%' AND (crm IS NULL OR crm NOT IN ('paid', 'closed')) LIMIT 500").all();
+  const { results } = await memo(env, 'cb', 120, () => env.DB.prepare("SELECT gid, name, cls, data FROM leads WHERE data LIKE '%\"timed\":true%' AND (crm IS NULL OR crm NOT IN ('paid', 'closed')) LIMIT 500").all());
   return (results || []).map(r => ({ r, d: JSON.parse(r.data) }))
     .filter(({ d }) => d.next && d.next.timed && d.next.at >= from && d.next.at <= to && (!d.owner || d.owner.id === whoId) && !(ms(d.lastTeam && d.lastTeam.at) > (Number(d.next.setAt) || 0)))
     .map(({ r, d }) => ({ gid: r.gid, name: r.name || d.name || '', cls: sName(d, r.cls), at: d.next.at, why: d.next.why || '' }))
@@ -233,11 +250,11 @@ export async function deskRoute(env, req, url, who, ctx) {
 
   if (seg === 'home' && req.method === 'GET') {
     const [list, alert, cbs, q, teachers, mine] = await Promise.all([
-      dayList(env, ctx, who, now), newAlert(env, R, now), callbacks(env, now, who.id), ctx.questions(env), ctx.teacherList ? ctx.teacherList(env) : [],
+      dayList(env, ctx, who, now), newAlert(env, R, now), callbacks(env, now, who.id), memo(env, 'q', 180, () => ctx.questions(env)), ctx.teacherList ? memo(env, 't', 180, () => ctx.teacherList(env)) : [],
       env.DB.prepare('SELECT action, COUNT(*) AS n FROM acts WHERE by_id = ? AND at >= ? GROUP BY action').bind(who.id, atIST(now.getTime(), 0)).all(),
     ]);
     const c = {}; for (const r of mine.results || []) c[r.action] = r.n;
-    const tot = await env.DB.prepare("SELECT COUNT(*) AS all_n, SUM(CASE WHEN data LIKE '%\"lastTeam\":{%' OR data LIKE '%\"teamSentAt\"%' THEN 1 ELSE 0 END) AS touched, SUM(CASE WHEN crm = 'paid' THEN 1 ELSE 0 END) AS paid, SUM(CASE WHEN crm = 'closed' THEN 1 ELSE 0 END) AS closed FROM leads WHERE mobile IS NOT NULL AND data NOT LIKE '%\"tdemo\":{%'").first();
+    const tot = await memo(env, 'tot', 300, () => env.DB.prepare("SELECT COUNT(*) AS all_n, SUM(CASE WHEN data LIKE '%\"lastTeam\":{%' OR data LIKE '%\"teamSentAt\"%' THEN 1 ELSE 0 END) AS touched, SUM(CASE WHEN crm = 'paid' THEN 1 ELSE 0 END) AS paid, SUM(CASE WHEN crm = 'closed' THEN 1 ELSE 0 END) AS closed FROM leads WHERE mobile IS NOT NULL AND data NOT LIKE '%\"tdemo\":{%'").first());
     const done = list.filter(x => x.status === 'done').length, next = list.find(x => x.status !== 'done' && !x.lock) || null;
     return json({ success: true, data: { me: who, rules: { newMin: R.newMin, staffDisc: R.staffDisc, reasons: R.reasons, hours: R.hours }, alert, callbacks: cbs,
       day: { total: list.length, done, next, items: list }, q: q.length, teachers: teachers.length,

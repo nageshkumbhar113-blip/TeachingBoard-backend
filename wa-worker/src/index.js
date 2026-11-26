@@ -10,7 +10,7 @@ import WA from './waFlow.js';
 import { validSignature, bodiesFor, templateBody, post, inboundText, hmacHex, sameHex } from './meta.js';
 import * as S from './store.js';
 import { leadInfo, queue, runJobs, waLogin, newLead, ping, appUsage } from './render.js';
-import { deskRoute, deskAdmin, creditPaid, teamNewPush } from './desk.js';
+import { deskRoute, deskAdmin, creditPaid, teamNewPush, deskMemoClear } from './desk.js';
 import { aiAnswer, aiAnswerTeacher, classList, geminiModels } from './ai.js';
 
 // 🤖 the rules sent a parent's own question to the team (askTeam → .qa outputs): with AI_ON = "1" Gemini may answer it
@@ -481,6 +481,7 @@ async function teacherFwd(env) {
   return (results || []).map(r => { const d = JSON.parse(r.data); return { gid: r.gid, name: r.name || d.name || '', cls: r.cls || '', mobile: r.mobile, fwd: d.teacherFwd || null, demo: d.teacherDemoAt || null }; });
 }
 async function crm(env, req, url, who) {
+  if (req.method !== 'GET') deskMemoClear();   // a team / Admin change: the team home's kept lists are read again
   // 📞 the call desk (src/desk.js)
   if (url.pathname.startsWith('/crm/desk/')) {
     const ctx = { S, WA, json, withLead, act, appUsage, questions, teacherFwd, teacherList };
@@ -916,7 +917,8 @@ export default {
       if (url.pathname.startsWith('/crm/')) {
         const who = await adminOk(env, req);
         if (!who) return json({ success: false, message: 'Admin login हवा' }, 401);
-        return await crm(env, req, url, who);
+        try { return await crm(env, req, url, who); }
+        finally { if (req.method !== 'GET') deskMemoClear(); }   // and once more after the change is saved
       }
       return json({ success: false, message: 'Not found' }, 404);
     } catch (e) {
