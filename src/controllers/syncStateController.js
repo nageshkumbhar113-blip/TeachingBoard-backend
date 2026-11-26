@@ -116,3 +116,31 @@ exports.getSyncState = asyncHandler(async (req, res) => {
     ..._hints(),
   });
 });
+
+// GET /api/admin/sync-state — the Admin's own "has anything changed?" (Admin audit 2026-11-27). The Admin used to
+// download every test (~20 MB), 1,000 questions and the lessons every 5 minutes and every time its browser tab was
+// opened again; now it asks this first (~200 bytes) and downloads only the part whose fingerprint changed.
+// Fingerprints: tests — quiz_id + updated_at + version + status + batch/subject/chapter (all statuses: the Admin
+// sees drafts too); questions — q_id + updated_at; lessons — lesson_id + updated_at. Memoised 30 s.
+// Kill switch: SYNC_STATE_DISABLED=1 → { enabled:false } (the Admin then downloads everything as before).
+let _adminMemo = null;
+exports.getAdminSyncState = asyncHandler(async (_req, res) => {
+  if (process.env.SYNC_STATE_DISABLED === '1') return res.json({ success: true, enabled: false });
+  if (!_adminMemo || Date.now() - _adminMemo.at > MEMO_MS) {
+    const Lesson = require('../models/Lesson');
+    const [qz, qs, ls] = await Promise.all([
+      Quiz.find({}).select('quiz_id updated_at version status batch subject chapter').lean(),
+      Question.find({}).select('q_id updated_at').lean(),
+      Lesson.find({}).select('lesson_id updated_at').lean(),
+    ]);
+    const fp = (rows, line) => { const parts = rows.map(line).sort(); return `${parts.length}:${_hash(parts)}`; };
+    _adminMemo = { at: Date.now(), body: {
+      success: true, enabled: true,
+      quizzes: fp(qz, q => `${q.quiz_id}|${_ts(q.updated_at)}|${q.version}|${q.status}|${q.batch}|${q.subject}|${q.chapter}`),
+      questions: fp(qs, q => `${q.q_id}|${_ts(q.updated_at)}`),
+      lessons: fp(ls, l => `${l.lesson_id}|${_ts(l.updated_at)}`),
+      fullEverySec: _num(process.env.ADMIN_SYNC_FULL_SEC, 3 * 3600),
+    } };
+  }
+  res.json(_adminMemo.body);
+});

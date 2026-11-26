@@ -165,6 +165,7 @@ app.use("/api/teacher",   teacherDashRoutes);
 app.use("/api/parents",      parentAdminRoutes);
 app.use("/api/parent",       parentDashRoutes);
 app.use("/api/app-version",  appVersionRoutes);
+app.get("/api/admin/sync-state", require("./middleware/auth").requireAdmin, require("./controllers/syncStateController").getAdminSyncState);   // 🔄 Admin: download only what changed (audit 2026-11-27)
 app.use("/api/admin/import",     require("./routes/importRoutes"));
 app.use("/api/admin/security",   require("./routes/adminSecurityRoutes"));
 app.use("/api/admin/words",      adminWordRouter);

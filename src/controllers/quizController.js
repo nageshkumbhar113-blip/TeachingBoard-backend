@@ -152,25 +152,48 @@ exports.getQuizzes = asyncHandler(async (req, res) => {
     filter.batch = { $in: allowedBatches };
   }
 
-  const quizzes = await Quiz.find(filter).sort({ updated_at: -1 });
-
-  const data = [];
-  for (const quiz of quizzes) {
-    data.push(
-      (await isQuizLocked(req.userDoc, quiz))
-        ? serializeLockedQuiz(quiz)
-        : serializeQuiz(quiz, {
-            // Student clients cache full quizzes for offline play and local scoring.
-            includeAnswers: true
-          })
-    );
+  // Server memory (Admin audit 2026-11-27): the whole list used to be loaded at once — 445 tests with every question
+  // ≈ 20 MB of JSON and +110–160 MB of server memory per call (Render restarted at 512 MB). Now the tests are read one
+  // at a time from the database and written out as they come: the same JSON (same items, same order, same fields —
+  // only "count" now comes after "data"), with the memory of one test instead of all of them.
+  // Kill switch: QUIZ_LIST_STREAM=0 → the old way.
+  if (process.env.QUIZ_LIST_STREAM === '0') {
+    const quizzes = await Quiz.find(filter).sort({ updated_at: -1 });
+    const data = [];
+    for (const quiz of quizzes) {
+      data.push(
+        (await isQuizLocked(req.userDoc, quiz))
+          ? serializeLockedQuiz(quiz)
+          : serializeQuiz(quiz, {
+              // Student clients cache full quizzes for offline play and local scoring.
+              includeAnswers: true
+            })
+      );
+    }
+    return res.json({ success: true, count: data.length, data });
   }
 
-  res.json({
-    success: true,
-    count: data.length,
-    data
-  });
+  const cursor = Quiz.find(filter).sort({ updated_at: -1 }).cursor({ batchSize: 20 });
+  let n = 0, started = false;
+  try {
+    for await (const quiz of cursor) {
+      const item = (await isQuizLocked(req.userDoc, quiz))
+        ? serializeLockedQuiz(quiz)
+        : serializeQuiz(quiz, { includeAnswers: true });   // students cache full quizzes for offline play and scoring
+      if (!started) { res.status(200).type('application/json'); res.write('{"success":true,"data":['); started = true; }
+      else res.write(',');
+      // a slow phone: wait until the network has taken what was written (memory stays small)
+      if (!res.write(JSON.stringify(item))) await new Promise(r => { res.once('drain', r); res.once('close', r); });
+      n++;
+      if (res.destroyed || res.writableEnded) { await cursor.close().catch(() => {}); return; }   // the phone went away
+    }
+  } catch (err) {
+    await cursor.close().catch(() => {});
+    if (!started) throw err;              // nothing sent yet: the usual error answer
+    return res.destroy(err);              // half-sent: cut it (the app retries; never a broken "success")
+  }
+  if (!started) { res.status(200).type('application/json'); res.write('{"success":true,"data":['); }
+  res.end(`],"count":${n}}`);
 });
 
 exports.getQuizById = asyncHandler(async (req, res) => {
