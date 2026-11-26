@@ -67,6 +67,10 @@ const weeklyScheduleSchema = new mongoose.Schema(
       default: [],
     },
     join_minutes:     { type: Number, min: 0, max: 180, default: 0 },   // 0 = any time in the window
+    // 'HH:MM' (IST, owner 2026-11-27): the paper stays open from its time till then, the same day — each child starts
+    // when they like and gets the full duration_minutes (the app already ends at min(start + duration, ends_at));
+    // the result / day rank come after it closes. '' = as before: one fixed end for everyone (time + duration).
+    open_until:       { type: String, default: '', match: /^$|^([01]\d|2[0-3]):[0-5]\d$/ },
     start_date:       { type: String, default: '', match: /^$|^\d{4}-\d{2}-\d{2}$/ }, // IST dates, '' = no limit
     end_date:         { type: String, default: '', match: /^$|^\d{4}-\d{2}-\d{2}$/ },
     skip_dates:       { type: [String], default: [] },                    // holidays 'YYYY-MM-DD'

@@ -450,7 +450,7 @@ exports.toppersPrivacy = asyncHandler(async (req, res) => {
 // ── Admin ────────────────────────────────────────────────────────────────────
 
 const _ALLOWED = ['batch', 'title', 'enabled', 'day_of_week', 'start_time', 'result_time', 'window_minutes', 'duration_minutes', 'question_count', 'question_types', 'question_source', 'subjects', 'open_to', 'mode', 'papers',
-  'kind', 'slots', 'join_minutes', 'start_date', 'end_date', 'skip_dates', 'papers_same_day', 'gap_minutes', 'banner_top'];
+  'kind', 'slots', 'join_minutes', 'open_until', 'start_date', 'end_date', 'skip_dates', 'papers_same_day', 'gap_minutes', 'banner_top'];
 const _DATE = /^\d{4}-\d{2}-\d{2}$/;
 const _HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 function _pick(body) {
@@ -485,6 +485,7 @@ function _pick(body) {
     if (out.slots !== undefined && !out.slots.length) throw new AppError('किमान एका पेपरची वेळ आणि दिवस द्या', 400);
     if (out.papers && out.slots && out.slots.some(x => !out.papers.some(p => p.name === x.paper))) throw new AppError('वेळापत्रकातील पेपरचं नाव पेपरमध्ये नाही', 400);
   }
+  if (out.open_until !== undefined) { out.open_until = String(out.open_until || '').trim(); if (out.open_until && !/^([01]\d|2[0-3]):[0-5]\d$/.test(out.open_until)) throw new AppError('"कधीपर्यंत" वेळ 22:00 अशी द्या', 400); }
   if (out.join_minutes !== undefined) out.join_minutes = Math.min(180, Math.max(0, Math.round(Number(out.join_minutes) || 0)));
   if (out.gap_minutes !== undefined) out.gap_minutes = Math.min(240, Math.max(0, Math.round(Number(out.gap_minutes) || 0)));
   if (out.banner_top !== undefined) out.banner_top = Math.min(10, Math.max(3, Math.round(Number(out.banner_top) || 10)));

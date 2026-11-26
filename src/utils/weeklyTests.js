@@ -309,13 +309,18 @@ function dailySlots(s, from = new Date(), days = 15) {
 }
 // the event fields of one practice slot: fixed end for everyone, result a little later, the day,
 // and — for the day's last paper — the banner stays till the next day's result
+// open all day (s.open_until, owner 2026-11-27): the end is that time of the paper's day, never before time + duration
+function _slotEnd(s, slot) {
+  const fixed = slot.start.getTime() + s.duration_minutes * 60000;
+  return new Date(s.open_until ? Math.max(fixed, _atIst(slot.day_key, s.open_until).getTime()) : fixed);
+}
 function _slotExtra(s, slot, slots) {
-  const endsAt = new Date(slot.start.getTime() + s.duration_minutes * 60000);
+  const endsAt = _slotEnd(s, slot);
   const reveal = new Date(endsAt.getTime() + RESULT_DELAY_MS);
   let bannerUntil = null;
   if (slot.final) {
     const next = slots.find(y => y.final && y.start > slot.start);
-    bannerUntil = next ? new Date(next.start.getTime() + s.duration_minutes * 60000 + RESULT_DELAY_MS) : new Date(reveal.getTime() + 2 * 864e5);
+    bannerUntil = next ? new Date(_slotEnd(s, next).getTime() + RESULT_DELAY_MS) : new Date(reveal.getTime() + 2 * 864e5);
   }
   return { ends_at: endsAt, reveal_at: reveal, kind: 'daily', day_key: slot.day_key, day_final: slot.final, banner_until: bannerUntil };
 }
@@ -326,7 +331,7 @@ async function _ensureDaily(s, now) {
   const slots = dailySlots(s, new Date(now.getTime() - late));
   let haveNext = false;
   for (const x of slots) {
-    if (x.start.getTime() <= now.getTime() - late) continue;
+    if (x.start.getTime() <= now.getTime() - late && !(s.open_until && _slotEnd(s, x) > now)) continue;   // open all day: still makeable till it closes
     // always the next paper; besides it, every paper of the next 36 hours
     if (haveNext && x.start.getTime() > now.getTime() + DAILY_AHEAD_MS) break;
     haveNext = true;
