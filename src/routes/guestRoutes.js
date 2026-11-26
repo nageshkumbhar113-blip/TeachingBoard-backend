@@ -51,6 +51,7 @@ router.get('/admin/ad-content', requireAdmin, c.adminAdContent);
 router.get('/admin/meta', requireAdmin, c.adminMeta);
 router.post('/admin/meta/upload', requireAdmin, c.adminMetaUpload);
 router.post('/admin/meta/ad', requireAdmin, c.adminMetaCreateAd);
+router.get('/admin/meta/videos', requireAdmin, c.adminMetaVideos);   // 📚 videos uploaded straight into Meta
 router.post('/admin/meta/action', requireAdmin, c.adminMetaAction);
 router.get('/admin/google', requireAdmin, c.adminGoogle);
 router.post('/admin/google/action', requireAdmin, c.adminGoogleAction);

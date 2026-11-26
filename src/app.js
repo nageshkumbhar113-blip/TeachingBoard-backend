@@ -91,7 +91,7 @@ app.use(cors({
 
 // ── Body parsing ────────────────────────────────────────────
 // Admin › Ads › "Meta वर पाठवा": the ad's video / thumbnail bytes, passed straight on to Meta
-app.use('/api/guest/admin/meta/upload', require('./middleware/auth').requireAdmin, express.raw({ type: () => true, limit: '100mb' }));   // admin first, then the bytes
+app.use('/api/guest/admin/meta/upload', require('./middleware/auth').requireAdmin, express.raw({ type: () => true, limit: '40mb' }));   // admin first, then the bytes — only the studio's own ≈20 s videos now (a ready-made MP4 goes straight into Meta: 100 MB here ran the server out of memory, 2026-11-26)
 // Higher limit for PDF note uploads only (base64 of 10MB PDF ≈ 13.5MB JSON)
 app.use('/api/admin/notes/upload', express.json({ limit: '15mb' }));
 // Capture the raw body so the Razorpay webhook can verify its signature.

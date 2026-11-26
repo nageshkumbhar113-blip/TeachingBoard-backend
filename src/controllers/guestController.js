@@ -1015,6 +1015,12 @@ exports.adminMetaUpload = asyncHandler(async (req, res) => {
   } catch (err) { throw new AppError(err.message, err.status || 400); }
 });
 
+// GET /api/guest/admin/meta/videos — 📚 the videos the admin uploaded straight into Meta (Ads Manager › Media library)
+exports.adminMetaVideos = asyncHandler(async (_req, res) => {
+  if (!META.configured().ok) throw new AppError('Meta जोडलेलं नाही', 400);
+  try { res.json({ success: true, data: await META.listVideos() }); } catch (err) { throw new AppError(err.message, err.status || 400); }
+});
+
 // POST /api/guest/admin/meta/action { action: 'pause' | 'resume', ad_id } | { action: 'budget', adset_id }
 // — the leaderboard's buttons. Budget: +20% at most per press; never pauses the last running ad of an ad set.
 exports.adminMetaAction = asyncHandler(async (req, res) => {
@@ -1149,11 +1155,11 @@ exports.adminMetaCreateAd = asyncHandler(async (req, res) => {
   const link = String(b.link || '');
   if (!name || !adset) throw new AppError('Ad name missing', 400);
   if (!/^https:\/\/(nkseduorbit\.in|www\.nkseduorbit\.in|teachingboard-frontend\.vercel\.app)\//.test(link)) throw new AppError('Link must be the app link', 400);   // new domain + the old address
-  if (!/^\d+$/.test(String(b.video_id || '')) || !b.image_hash) throw new AppError('Video / thumbnail missing', 400);
+  if (!/^\d+$/.test(String(b.video_id || ''))) throw new AppError('Video missing', 400);   // no thumbnail: Meta's own picture of the video
   try {
     const out = await META.createAd({
       name, adset, audience: String(b.audience || ''), daily_budget: Number(b.daily_budget) || 0,
-      video_id: String(b.video_id), image_hash: String(b.image_hash),
+      video_id: String(b.video_id), image_hash: b.image_hash ? String(b.image_hash) : '',
       message: String(b.message || '').slice(0, 2000), headline: String(b.headline || '').slice(0, 120),
       cta: b.cta === 'SIGN_UP' ? 'SIGN_UP' : 'LEARN_MORE', link, dest: toWa ? 'wa' : 'web',
       geo: ['gata', 'marathwada', 'nashik', 'kolhapur'].includes(b.geo) ? b.geo : 'all',

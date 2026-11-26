@@ -188,6 +188,25 @@ async function uploadImage(buf) {
   if (!img?.hash) throw Object.assign(new Error('Meta: thumbnail upload failed'), { status: 400 });
   return { image_hash: img.hash };
 }
+// 📚 the ad account's own videos — uploaded by the admin straight into Meta (Ads Manager › Media library), so the
+// bytes never pass through this server (owner 2026-11-26, after a memory restart): newest first
+async function listVideos() {
+  const r = await graph(`${env().account}/advideos`, { fields: 'id,title,length,picture,created_time,status', limit: 40 });
+  return (r.data || []).map(v => ({ id: String(v.id), title: String(v.title || ''), length: Math.round(Number(v.length) || 0), picture: v.picture || '',
+    created_time: v.created_time || '', ready: (v.status?.video_status || 'ready') === 'ready' }));
+}
+// the still picture Meta made for a video (the ad's thumbnail when none was uploaded)
+async function _thumbUrl(videoId) {
+  const r = await graph(`${videoId}/thumbnails`, { fields: 'uri,is_preferred' }).catch(() => null);
+  const t = (r?.data || []).find(x => x.is_preferred) || (r?.data || [])[0];
+  return t?.uri || '';
+}
+async function _withThumb(o) {
+  if (o.image_hash || o.image_url) return o;
+  const image_url = await _thumbUrl(o.video_id);
+  if (!image_url) throw Object.assign(new Error('Meta ने अजून या video चं चित्र बनवलं नाही — 2 मिनिटांनी पुन्हा दाबा'), { status: 400, code: 'pending' });
+  return { ...o, image_url };
+}
 async function _videoReady(id, waitMs = 120000) {
   const t0 = Date.now();
   for (;;) {
@@ -255,7 +274,7 @@ async function createAd(o) {
   }
   const ready = await _videoReady(o.video_id);
   if (!ready) return { pending: true, campaign_id: campaign.id, adset_id: adset.id, note };
-  const creative = await _creative(o);
+  const creative = await _creative(await _withThumb(o));
   if (creative.prefillNote) note = (note ? note + ' · ' : '') + creative.prefillNote;
   const ad = await post(`${e.account}/ads`, { name: o.name, adset_id: adset.id, creative: { creative_id: creative.id }, status: 'PAUSED' });
   // 💬 owner (2026-11-12): a WhatsApp ad must open ONLY the bot's number — read back what Meta saved and say so
@@ -300,7 +319,7 @@ function _creative1(o) {
       page_id: e.page,
       ...(process.env.META_IG_ACTOR_ID ? { instagram_user_id: process.env.META_IG_ACTOR_ID } : {}),
       video_data: {
-        video_id: o.video_id, image_hash: o.image_hash, message: o.message, title: o.headline,
+        video_id: o.video_id, ...(o.image_hash ? { image_hash: o.image_hash } : { image_url: o.image_url }), message: o.message, title: o.headline,
         call_to_action: o.dest === 'wa'
           ? { type: 'WHATSAPP_MESSAGE', value: { app_destination: 'WHATSAPP' } }
           : { type: o.cta === 'SIGN_UP' ? 'SIGN_UP' : 'LEARN_MORE', value: { link: o.link } },
@@ -317,7 +336,7 @@ async function replaceVideo(o) {
   const ad = await graph(String(o.ad_id), { fields: 'id,name,account_id' });
   if (`act_${ad.account_id}` !== env().account) throw Object.assign(new Error('Not this ad account'), { status: 400 });
   if (!(await _videoReady(o.video_id, 90000))) throw Object.assign(new Error('Meta अजून नवीन video तयार करत आहे — 2 मिनिटांनी पुन्हा "Video बदला" दाबा (video पुन्हा बनणार नाही)'), { status: 400, code: 'pending' });
-  const creative = await _creative({ ...o, name: ad.name, dest: /-wa$/.test(ad.name) ? 'wa' : o.dest });
+  const creative = await _creative(await _withThumb({ ...o, name: ad.name, dest: /-wa$/.test(ad.name) ? 'wa' : o.dest }));
   await post(String(o.ad_id), { creative: { creative_id: creative.id } });
   _cache = null;
   return { name: ad.name, ad_id: ad.id, creative_id: creative.id };
@@ -461,4 +480,4 @@ async function retarget(adsetId, geo) {
   return { name: s.name, towns: place.geo.cities.length, missed: place.missed };
 }
 
-module.exports = { configured, account, insights, retarget, deleteObject, graph, uploadVideo, uploadImage, createAd, adsState, setAdStatus, raiseBudget, setBudget, replaceVideo, sendEvent, fbcOf, isStudentAd, datasetReady, _resetCache: () => { _cache = null; _region = null; } };
+module.exports = { configured, account, insights, retarget, deleteObject, graph, uploadVideo, uploadImage, listVideos, createAd, adsState, setAdStatus, raiseBudget, setBudget, replaceVideo, sendEvent, fbcOf, isStudentAd, datasetReady, _resetCache: () => { _cache = null; _region = null; } };
