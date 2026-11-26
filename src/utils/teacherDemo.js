@@ -18,17 +18,26 @@ const { isWeakPin } = require('./pin');
 const { uniqueStudentCode } = require('./studentCode');
 const { invalidateUserCache } = require('../middleware/auth');
 
-const DEMO_HOURS = 48;
+const DEMO_HOURS = 72;   // owner 2026-11-26: the demo student 3 days (was 48 h)
 const IST_MS = 5.5 * 3600e3;
 
 const cfgSchema = new mongoose.Schema({
   key: { type: String, default: 'main', unique: true },
   on: { type: Boolean, default: true },
   hours: { type: Number, default: DEMO_HOURS, min: 1, max: 240 },
+  v72: { type: Boolean, default: false },   // the old default 48 h moved to 72 once
   course: { type: String, default: '' },   // the ad's course; '' = the first active NMMS course
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }, versionKey: false });
 const DemoConfig = mongoose.models.TeacherDemoConfig || mongoose.model('TeacherDemoConfig', cfgSchema);
-async function config() { return (await DemoConfig.findOne({ key: 'main' }).lean()) || { on: true, hours: DEMO_HOURS, course: '' }; }
+async function config() {
+  const c = await DemoConfig.findOne({ key: 'main' }).lean();
+  if (c && !c.v72) {   // saved with the old 48 h default: 3 days now (owner 2026-11-26); an Admin's own value stays
+    const hours = c.hours === 48 ? DEMO_HOURS : c.hours;
+    await DemoConfig.updateOne({ _id: c._id }, { $set: { hours, v72: true } }).catch(() => {});
+    return { ...c, hours, v72: true };
+  }
+  return c || { on: true, hours: DEMO_HOURS, course: '' };
+}
 
 function randomPin() { let p; do { p = String(randomInt(0, 10000)).padStart(4, '0'); } while (isWeakPin(p)); return p; }
 // 30 April (end of day, IST) of the current school year
@@ -79,8 +88,11 @@ async function book(body, ip = '') {
   // a number already known: never a new code
   const old = await User.findOne({ role: 'teacher', mobile });
   if (old && old.status !== 'pending') {
-    if (old.demo_gid) notify(old.demo_gid, { again: true });
-    return { exists: true, teacher_code: old.teacher_code, name: old.name };
+    const gid0 = /^[0-9A-F]{10}$/.test(String(body.gid || '')) ? String(body.gid) : '';
+    if (gid0 && old.demo_gid !== gid0) await User.updateOne({ _id: old._id }, { $set: { demo_gid: gid0 } });   // the app's news now go to this chat
+    else if (old.demo_gid && !gid0) notify(old.demo_gid, { again: true });
+    const ds = await User.findOne({ role: 'student', demo_of_teacher: old.teacher_code }, 'student_code').lean();
+    return { exists: true, teacher_code: old.teacher_code, name: old.name, student_code: ds?.student_code || '' };
   }
 
   const course = await courseFor(String(body.course || '').trim());
@@ -127,7 +139,9 @@ async function book(body, ip = '') {
   invalidateUserCache('teacher', teacher.user_id);
 
   // the bot (CRM "Teacher (Ad)" + the 48-hour journey)
-  const gid = await botLead({ name, mobile, school, ad, course, teacher_code: teacher.teacher_code, teacher_pin: tPin, student_code: student.student_code, student_pin: sPin, until: until.toISOString(), ip });
+  // the bot asked for it (WhatsApp, Teacher Guide): its own chat; else (the /book-demo page) a new bot lead
+  const gid = /^[0-9A-F]{10}$/.test(String(body.gid || '')) ? String(body.gid)
+    : await botLead({ name, mobile, school, ad, course, teacher_code: teacher.teacher_code, teacher_pin: tPin, student_code: student.student_code, student_pin: sPin, until: until.toISOString(), ip });
   if (gid && teacher.demo_gid !== gid) { teacher.demo_gid = gid; await User.updateOne({ _id: teacher._id }, { $set: { demo_gid: gid } }); }
   return {
     exists: false, gid, course, until,

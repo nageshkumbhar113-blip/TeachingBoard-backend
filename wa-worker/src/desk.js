@@ -241,6 +241,7 @@ export async function deskRoute(env, req, url, who, ctx) {
     const done = list.filter(x => x.status === 'done').length, next = list.find(x => x.status !== 'done' && !x.lock) || null;
     return json({ success: true, data: { me: who, rules: { newMin: R.newMin, staffDisc: R.staffDisc, reasons: R.reasons, hours: R.hours }, alert, callbacks: cbs,
       day: { total: list.length, done, next, items: list }, q: q.length, teachers: teachers.length,
+      tStuck: teachers.filter(t => t.stuck || t.call_now).slice(0, 10).map(t => ({ gid: t.gid, name: t.name, stage: t.stage, why: t.call_why || '' })),
       today: { calls: c.attempt || 0, talk: c.talk || 0, paying: c.paying || 0, paid: c.paid || 0, wa: (c.wa || 0) + (c.reply || 0) },
       totals: { all: tot.all_n || 0, touched: tot.touched || 0, left: Math.max(0, (tot.all_n || 0) - (tot.touched || 0) - (tot.paid || 0) - (tot.closed || 0)), paid: tot.paid || 0, closed: tot.closed || 0 } } });
   }
@@ -266,7 +267,7 @@ export async function deskRoute(env, req, url, who, ctx) {
     } });
   }
   if (req.method !== 'POST') return json({ success: false, message: 'Not found' }, 404);
-  if (['attempt', 'unlock', 'outcome', 'skip', 'teacher', 'disc'].includes(seg)) {
+  if (['attempt', 'unlock', 'outcome', 'skip', 'teacher', 'disc', 'tstep'].includes(seg)) {
     if (!/^[0-9A-F]{10}$/.test(gid) || !(await S.getLead(env, gid))) return json({ success: false, message: 'Lead नाही' }, 404);
   }
   // 📞 / 💬 tapped: the attempt is written at once and the family is locked to this member
@@ -277,6 +278,12 @@ export async function deskRoute(env, req, url, who, ctx) {
     const via = body.via === 'wa' ? 'wa' : 'call';
     await wl(gid, (lead, t) => { lead.attempts = (lead.attempts || 0) + 1; lead.lastAttempt = { by: who.name, byId: who.id, at: t.toISOString(), via }; if (!lead.owner) lead.owner = { id: who.id, name: who.name }; return []; });
     await act(env, who, gid, via === 'wa' ? 'wa' : 'attempt', via === 'wa' ? 'WhatsApp उघडलं' : 'Call');
+    return json({ success: true });
+  }
+  // 👩‍🏫 Teacher Guide: the team did the step with the teacher on a call → the bot sends the next one
+  if (seg === 'tstep') {
+    await wl(gid, (lead, t) => WA.teacherTeamStep(lead, t));
+    await act(env, who, gid, 'talk', 'शिक्षक: step पूर्ण करून दिली');
     return json({ success: true });
   }
   if (seg === 'unlock') { const l = await lockOf(env, ctx, gid); if (l && (l.id === who.id || isAdmin)) await S.kvSet(env, 'desk_lock:' + gid, 'null'); return json({ success: true }); }

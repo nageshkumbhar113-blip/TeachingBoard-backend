@@ -18,7 +18,7 @@ router.post('/book', bookLimiter, asyncHandler(async (req, res) => {
 router.get('/admin/config', requireAdmin, asyncHandler(async (_req, res) => res.json({ success: true, data: await D.config() })));
 router.put('/admin/config', requireAdmin, asyncHandler(async (req, res) => {
   const b = req.body || {};
-  const set = { on: b.on !== false, hours: Math.max(1, Math.min(240, Number(b.hours) || 48)), course: String(b.course || '').trim().slice(0, 120) };
+  const set = { on: b.on !== false, hours: Math.max(1, Math.min(240, Number(b.hours) || 72)), course: String(b.course || '').trim().slice(0, 120) };
   await D.DemoConfig.updateOne({ key: 'main' }, { $set: set }, { upsert: true });
   res.json({ success: true, data: await D.config() });
 }));

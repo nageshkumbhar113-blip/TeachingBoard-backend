@@ -151,7 +151,9 @@ async function _newLead(gid, b) {
     if (!lead.steps.includes('lead')) lead.steps.push('lead');
     await lead.save();
   }
-  return { gid: lead.gid, ...(await syncOf(lead.gid)), mobile };
+  // 👩‍🏫 our teacher ads are named "t-…": the bot starts the teacher's flow, not the parent's
+  const teacherAd = /^t-/.test(String(lead.ref || ''));
+  return { gid: lead.gid, ...(await syncOf(lead.gid)), mobile, ...(teacherAd ? { teacher: true } : {}) };
 }
 
 // POST /api/guest/bot/usage { gids: [...] } — how much each family's child uses the app: the last day seen
@@ -201,6 +203,18 @@ const action = asyncHandler(async (req, res) => {
     // made later from the bot's job queue (Render was asleep): the bot gets the facts (class, courses…) now
     if (req.body?.queued) BOT.notify(data.gid, 'sync', {}, { sync: data });
     return res.json({ success: true, data });
+  }
+  if (act === 'teacher_account') {
+    // 👩‍🏫 Teacher Guide (owner 2026-11-26): a teacher on WhatsApp → a real teacher account (on until the Admin switches it
+    // off) + a demo student for 3 days (utils/teacherDemo.js). The codes go back to the bot as a 'tdemo' event.
+    const D = require('../utils/teacherDemo');
+    const b = req.body || {};
+    try {
+      const r = await D.book({ name: b.name, mobile: b.mobile, school: b.school || b.name, course: b.course, ad: b.ad, gid });
+      BOT.notify(gid, 'tdemo', { account: r.exists ? { exists: true, tCode: r.teacher_code, sCode: r.student_code || '' }
+        : { tCode: r.teacher.code, tPin: r.teacher.pin || '', sCode: r.student.code, sPin: r.student.pin || '', course: r.course, until: r.until } });
+    } catch (err) { BOT.notify(gid, 'tdemo', { accountError: err.message || 'Account बनलं नाही' }); }
+    return res.json({ success: true });
   }
   if (act === 'team_push') {
     // 🆕 a new family (wa-worker desk.js teamNewPush): a push on every active team member's phone. Late (Render was

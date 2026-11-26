@@ -1151,7 +1151,8 @@ exports.adminMetaCreateAd = asyncHandler(async (req, res) => {
   // a click-to-WhatsApp ad has its own name (…-wa): the website ad of the same video can run beside it
   const name = (s => toWa && s && !s.endsWith('-wa') ? s + '-wa' : s)(_clean(b.name, 57).toLowerCase().replace(/[^a-z0-9-]/g, ''));
   const adset = _clean(b.adset, 80).toLowerCase().replace(/[^a-z0-9-]/g, '');
-  if (toWa && !(String(b.audience || '') === 'parent' || /^parent/.test(String(b.audience || '')))) throw new AppError('WhatsApp ad फक्त पालकांसाठी', 400);
+  // parents' ads, and (owner 2026-11-26) the teachers' ads — a teacher's number straight into the bot's Teacher Guide
+  if (toWa && !(/^parent/.test(String(b.audience || '')) || String(b.audience || '') === 'school')) throw new AppError('WhatsApp ad फक्त पालक / शिक्षकांसाठी', 400);
   const link = String(b.link || '');
   if (!name || !adset) throw new AppError('Ad name missing', 400);
   if (!/^https:\/\/(nkseduorbit\.in|www\.nkseduorbit\.in|teachingboard-frontend\.vercel\.app)\//.test(link)) throw new AppError('Link must be the app link', 400);   // new domain + the old address

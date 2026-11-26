@@ -374,6 +374,9 @@
   // a button's own id coming back is never a name
   const BUTTON_IDS = ['fee', 'keep', 'call_me', 'got', 'mt_reg', 'mt_want', 'ask', 'ok', 'more', 'next', 'app', 'pay', 'share_done', 'rules', 'info'];
   const clsButtons = lead => (lead.courses || []).slice(0, 10).map((c, i) => ({ id: 'cls:' + i, label: cleanName(c) }));
+  const TEACHER_BTN = { id: 'teacher', label: '👩‍🏫 मी शिक्षक / Tuition' };
+  // "मी शिक्षक आहे", "sir mi teacher ahe", "tuition ghetat" — a teacher, not a parent
+  const TEACHER_RX = /(मी|mi|me|i\s*am|i'm)\s*(एक\s*)?(शिक्षक|शिक्षिका|teacher|tuition|ट्युशन|क्लास\s*चालक)|^(शिक्षक|teacher|tuition)(\s*(आहे|ahe|aahe))?$|tuition\s*(ghet|chalav|घेतो|घेते|चालवतो)|(माझा|माझे|maza|maze|majha)\s*(tuition|ट्युशन|classes|क्लासेस)/i;
   function askName(lead, now, out, hello) {
     lead.awaiting = 'name';
     out.push(wa(lead, now, `${hello ? 'नमस्कार 🙏 NKs EduOrbit मध्ये स्वागत!\n' : ''}${lead.cls ? TS(lead) + ' ची ' : ''}free test (10 मिनिटं, login नाही) 📝\nResult, क्रमांक आणि कुठे सराव हवा ते इथेच पाठवतो.\n\n✍️ पाल्याचं (मुलाचं / मुलीचं) नाव लिहा 👇`));
@@ -396,13 +399,21 @@
       out.push(wa(lead, now, `🏆 ${whenText(new Date(lead.mtNext), now)} ला ${SN(lead)} चा महा-Test — सगळ्यांमध्ये क्रमांक कळेल. नोंदणी करू? (मोफत)`, [{ id: 'mt_reg', label: '🏆 हो, नोंदणी करा' }]));
     out.push(log('CRM', `Class माहीत (${lead.cls}) → test ची link लगेच, काही विचारलं नाही. नाव मूल website वर लिहील; मग app account (Code + PIN) इथे.`));
   }
+  // 👩‍🏫 the first message from a teacher ad (index.js newFamily): straight into the teacher's flow
+  function teacherWelcome(lead, raw, now) {
+    const out = [];
+    lead.lastInboundAt = now.toISOString(); lead.unanswered = 0; lead.via = 'wa'; lead.welcomed = true;
+    out.push(log('CRM', '👩‍🏫 Teacher ad मधून पहिला message → शिक्षकाचा flow.'));
+    teacherStart(lead, now, out, 'teacher ad');
+    return out;
+  }
   function welcome(lead, raw, now) {
     const out = [];
     lead.lastInboundAt = now.toISOString(); lead.unanswered = 0; lead.via = 'wa'; lead.welcomed = true;
     out.push(log('CRM', lead.ctwaUntil ? `💬 WhatsApp ad मधून पहिला message → नंबर आपोआप, lead. ${CONFIG.ctwaHours} तास bot मोफत लिहू शकतो.` : 'नवीन नंबरवरून पहिला message → lead. 24 तास bot मोफत लिहू शकतो.'));
     if (!lead.cls && (lead.courses || []).length) {
       lead.awaiting = 'cls';
-      out.push(wa(lead, now, 'नमस्कार 🙏 NKs EduOrbit मध्ये स्वागत!\nपाल्याची free test (10 मिनिटं, login नाही) 📝\nकोणती Test Series? 👇', clsButtons(lead)));
+      out.push(wa(lead, now, 'नमस्कार 🙏 NKs EduOrbit मध्ये स्वागत!\nपाल्याची free test (10 मिनिटं, login नाही) 📝\nकोणती Test Series? 👇\n(शिक्षक आहात? खालच्या यादीत "👩‍🏫 मी शिक्षक")', [...clsButtons(lead).slice(0, 9), TEACHER_BTN]));
       return out;
     }
     if (lead.cls) linkFirst(lead, now, out, true);
@@ -447,6 +458,9 @@
   // answer, and after CONFIG.dailyReplies answered messages in a day the team takes over (one "team will call")
   function inbound(lead, raw, now) {
     if (lead.tdemo) return teacherInbound(lead, raw, now);
+    if (!lead.paid && !lead.testsDone && (String(raw || '').trim() === 'teacher' || TEACHER_RX.test(String(raw || '')))) {
+      const out = []; lead.lastInboundAt = now.toISOString(); lead.unanswered = 0; teacherStart(lead, now, out, String(raw).trim() === 'teacher' ? 'बटण' : 'मेसेज'); return out;
+    }
     const t = String(raw || '').trim().toLowerCase(), day = dayKey(now);
     if (/^(stop|start)$/.test(t)) return inbound0(lead, raw, now);
     if (lead.rDay !== day) { lead.rDay = day; lead.rN = 0; lead.rCapped = false; }
@@ -611,17 +625,7 @@
   function event(lead, type, data, now) {
     const out = [];
     data = data || {};
-    if (type === 'tdemo') {
-      const d = lead.tdemo || (lead.tdemo = {});
-      const seen = k => { if (!d[k]) { d[k] = now.toISOString(); out.push(log('TDEMO', TDEMO_DID[k] || k)); } };
-      if (data.tLogin) seen('tLogin');
-      if (data.sLogin) seen('sLogin');
-      if (data.paper) { d.papers = (d.papers || 0) + 1; seen('paperAt'); }
-      if (data.sTest) { d.sTests = (d.sTests || 0) + 1; seen('sTestAt'); }
-      if (data.order) { d.orders = (d.orders || 0) + 1; d.added = (d.added || 0) + (Number(data.added) || 0); d.paidRs = (d.paidRs || 0) + (Number(data.order) || 0); seen('orderAt'); lead.crm = 'hot'; }
-      if (data.again) out.push(log('TDEMO', 'हाच नंबर पुन्हा demo बुक करायला आला (नवीन code नाही) → call करा.'));
-      return out;
-    }
+    if (type === 'tdemo') return teacherEvent(lead, data, now);   // 👩‍🏫 Teacher Guide
     if (type === 'test_done') {
       // data.n = the server's own count of this child's tests (the event may arrive after a sync that already counted it)
       const first = !lead.firstTestAt || data.n === 1;
@@ -756,63 +760,211 @@
     return out;
   }
 
-  // ── 🎯 a teacher's demo (booked from an ad): codes, then the 48-hour journey (owner 2026-11-20) ──
-  // Only inside the free WhatsApp window (the teacher wrote to the bot); a closed window → the CRM call list.
-  // Each message only when that thing is not done yet (the app tells the bot: login, paper, the demo
-  // student's test, students added). No "free", no prices: the सूट is the team's (8390484545).
-  const TDEMO_DID = { tLogin: '✅ शिक्षक login झाला', sLogin: '✅ school demo विद्यार्थी login झाला', paperAt: '📄 पहिला पेपर बनवला', sTestAt: '📝 demo विद्यार्थ्याने test दिला', orderAt: '💳 विद्यार्थ्यांची पहिली order' };
+  // ── 👩‍🏫 Teacher Guide (owner 2026-11-26): a teacher on WhatsApp (a teacher ad, "मी शिक्षक", or the /book-demo page)
+  // gets a real teacher account (on until the Admin switches it off) and a real student account for 3 days, then the
+  // app shown in 7 small steps, one at a time, each with its page on nkseduorbit.in/teacher-guide and ✅ / ❓ buttons.
+  // The app tells the bot what the teacher did (login, paper, the demo student's test, students added) and the bot
+  // moves on by itself. Stuck → one reminder, then the team calls (Call desk + a push on the team's phones).
+  // No reply limits for teachers. Words: only "सूट" (never a percent, commission, earnings or "free"); the सूट's
+  // details on the team's number.
   const TEAM_NO = '8390484545';
+  const TDEMO_DID = { tLogin: '✅ शिक्षक login झाला', sLogin: '✅ demo विद्यार्थी login झाला', paperAt: '📄 पहिला पेपर बनवला', sTestAt: '📝 demo विद्यार्थ्याने test दिला', orderAt: '💳 विद्यार्थ्यांची पहिली order' };
+  const guide = id => `${CONFIG.site}/teacher-guide#${id}`;
+  const pinOf = p => (p ? `*${p}*` : 'तुमचाच');
+  const TSTEPS = [
+    { id: 'login', did: 'tLogin', title: 'Login', text: d => `*Step 1/7 · Login 🔑*\nApp उघडा → 👩‍🏫 *Teacher* निवडा → Code *${d.tCode}* · PIN ${pinOf(d.tPin)} → Login.` },
+    { id: 'paper', did: 'paperAt', title: 'पेपर', text: () => '*Step 2/7 · 1 मिनिटात पेपर 📄*\nवरचं ▾ menu → 📄 *Paper* → वर्ग, विषय आणि धडे निवडा → *पेपर बनवा* → PDF आणि Answer key.' },
+    { id: 'students', title: 'विद्यार्थी', text: d => `*Step 3/7 · तुमचे विद्यार्थी 👨‍🎓*\n▾ → 👨‍🎓 *Students* — तुमचा demo विद्यार्थी *${d.sCode || ''}* इथे दिसतो.\nतुमच्या वर्गाची link / QR: ▾ → 📤 *Share* → मुलं थेट तुमच्याशी जोडली जातात.` },
+    { id: 'student', did: 'sTestAt', title: 'विद्यार्थी test', text: d => `*Step 4/7 · विद्यार्थी बनून पाहा 🎓*\nवरती तुमचं नाव (Profile) → ↔ *Switch Account* → 🎓 *Student* → Code *${d.sCode || ''}* · PIN ${pinOf(d.sPin)} → कोणताही एक धडा → *Test* द्या.` },
+    { id: 'analytics', title: 'Analytics', text: () => '*Step 5/7 · गुण तुमच्या phone वर 📊*\nपरत ↔ Switch Account → 👩‍🏫 Teacher → ▾ → 📊 *Analytics* → त्या विद्यार्थ्याचे गुण आणि कमी पडलेले धडे.\nतुमच्या प्रत्येक विद्यार्थ्याचं असंच दिसेल.' },
+    { id: 'tour', title: 'Videos · Notify · Fee', text: () => '*Step 6/7 · आणखी काही ✨*\n🎬 *Videos* — तुमचे YouTube videos फक्त तुमच्या विद्यार्थ्यांना\n🔔 *Notify* — पालकांना एका क्लिकमध्ये सूचना\n💰 *Fee* — फी ची नोंद\n📚 *Books* — पुस्तकं' },
+    { id: 'offer', did: 'orderAt', title: 'खास सूट', text: () => `*Step 7/7 · शिक्षकांसाठी खास सूट 🎁*\nतुमच्या विद्यार्थ्यांची accounts ▾ → ➕ *Students बनवा* मधून घ्या — शिक्षकांसाठी *खास सूट*.\nसूट ची माहिती आणि मदत: 📞 *${TEAM_NO}*` },
+  ];
+  const STEP_BTNS = [{ id: 'ts:done', label: '✅ झालं' }, { id: 'ts:help', label: '❓ अडचण' }];
+  const CALL_BTN = { id: 'ts:call', label: '📞 Team ने call करावा' };
+  const tsay = (lead, now, out, text, buttons) => { if (isOpen(lead, now)) out.push(wa(lead, now, text, buttons)); else out.push(log('₹ नाही', 'खिडकी बंद → संदेश नाही (team call करू शकते).')); };
+  const tcall = (lead, now, out, why) => { lead.crm = 'call'; lead.callAt = now.toISOString(); lead.tdemo.callWhy = why; out.push(log('CALL', '👩‍🏫 ' + why)); };
+  const tpush = (out, now, lead, title, text) => out.push({ to: 'do', action: 'team_push', data: { title, text, one: lead.gid, at: now.getTime() } });
+  const untilText = d => (d.until ? new Date(d.until).toLocaleString('mr-IN-u-nu-latn', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' }) : '');
   function codesText(lead) {
     const d = lead.tdemo;
-    return `🎉 नमस्कार ${lead.name || 'सर / मॅडम'}! तुमचा NKs EduOrbit demo तयार आहे.\n\n👩‍🏫 *शिक्षक* — Code: *${d.tCode}*${d.tPin ? ' · PIN: *' + d.tPin + '*' : ' · PIN: तुम्ही ठेवलेला'}\n🎓 *School demo विद्यार्थी* — Code: *${d.sCode}*${d.sPin ? ' · PIN: *' + d.sPin + '*' : ''}\n\n📲 App 👇\n${CONFIG.play}\n\nआधी हे 3 करा:\n① तुमच्या वर्गाचा पेपर 1 मिनिटात बनवा (Teacher login › Paper)\n② School demo विद्यार्थ्याने एका धड्याचा test द्या\n③ त्याचे गुण आणि कमी पडलेले भाग तुमच्या phone वर पाहा (Teacher › Analytics)\n\nSchool demo विद्यार्थी 48 तास चालू. प्रश्न / मदत: ${TEAM_NO}`;
+    return `🎉 तयार${lead.name ? ', ' + lead.name : ''}!\n\n👩‍🏫 *शिक्षक* — Code: *${d.tCode}* · PIN: ${pinOf(d.tPin)}` +
+      (d.sCode ? `\n🎓 *Demo विद्यार्थी*${d.course ? ' (' + cleanName(d.course) + ')' : ''} — Code: *${d.sCode}* · PIN: ${pinOf(d.sPin)}${d.until ? '\n   3 दिवस चालू — ' + untilText(d) + ' पर्यंत' : ''}` : '') +
+      `\n\n📲 App: ${CONFIG.play}\n\nआता 7 छोट्या steps — प्रत्येक 1–2 मिनिटं. मी एक-एक सांगतो 👇`;
+  }
+  // the current step, skipping what the app already said is done
+  function stepMsg(lead, now, out) {
+    const d = lead.tdemo;
+    while (d.step < TSTEPS.length && TSTEPS[d.step].did && d[TSTEPS[d.step].did]) d.step++;
+    if (d.step >= TSTEPS.length) { tfinish(lead, now, out); return; }
+    const s = TSTEPS[d.step];
+    d.stepAt = now.toISOString(); d.rem = 0;
+    tsay(lead, now, out, `${s.text(d)}\n📷 कसं दिसतं: ${guide(s.id)}`, s.id === 'offer' ? [CALL_BTN] : STEP_BTNS);
+    out.push(log('TSTEP', `Step ${d.step + 1}/7 (${s.title}) पाठवली.`));
+  }
+  const PRAISE = { login: '👏 Login झालं!', paper: '👏 छान! पहिला पेपर तयार.', students: '👍 ठीक आहे.', student: '🎉 Test दिला — आता त्याचे गुण तुमच्या phone वर पाहू.', analytics: '👍 तुमच्या प्रत्येक विद्यार्थ्याचं असंच दिसेल.', tour: '👍' };
+  function stepDone(lead, now, out, how) {
+    const d = lead.tdemo, s = TSTEPS[d.step];
+    if (!s) return;
+    if (s.id === 'offer') { tsay(lead, now, out, `🙏 Students बनवताना मदत हवी असेल तर 📞 ${TEAM_NO}`, [CALL_BTN]); return; }
+    out.push(log('TSTEP', `Step ${d.step + 1} (${s.title}) झाली — ${how}.`));
+    d.step++; d.stuck = null;
+    tsay(lead, now, out, PRAISE[s.id] || '👍');
+    stepMsg(lead, now, out);
+  }
+  function tfinish(lead, now, out) {
+    const d = lead.tdemo;
+    if (d.doneAt) return;
+    d.doneAt = now.toISOString(); d.stuck = null; d.step = TSTEPS.length;
+    tsay(lead, now, out, `🎉 अभिनंदन${lead.name ? ' ' + lead.name : ''}! तुमचे विद्यार्थी app वर आले.\nत्यांचे Code + PIN तुमच्या 👨‍🎓 Students मध्ये आहेत. पेपर, tests आणि गुण — सगळं एका ठिकाणी.\nमदत: 📞 ${TEAM_NO}`);
+    lead.crm = 'hot';
+    tpush(out, now, lead, '🎉 शिक्षकाने विद्यार्थी जोडले', `${lead.name || 'शिक्षक'}${d.added ? ' · ' + d.added + ' विद्यार्थी' : ''}`);
+  }
+  // the teacher's class, then the name + school, then the accounts (Render makes them: 'teacher_account')
+  function teacherStart(lead, now, out, how) {
+    lead.tdemo = Object.assign(lead.tdemo || {}, { via: lead.tdemo?.via || 'bot', stage: 'cls', startedAt: now.toISOString(), step: 0 });
+    lead.cls = 'Teacher (bot)'; lead.awaiting = null;
+    out.push(log('TDEMO', `👩‍🏫 शिक्षक (${how}) → वर्ग विचारला.`));
+    const rows = (lead.courses || []).slice(0, 10).map((c, i) => ({ id: 'tcls:' + i, label: cleanName(c) }));
+    out.push(wa(lead, now, `नमस्कार 🙏 शिक्षकांचं स्वागत!\nतुमच्यासाठी *शिक्षक account* आणि 3 दिवसांसाठी एक *demo विद्यार्थी* बनवतो — app तुम्ही स्वतः वापरून पाहा.\n\nतुम्ही कोणत्या वर्गाला शिकवता?${rows.length ? ' 👇' : ' (उदा. 8वी NMMS)'}`, rows));
+  }
+  function askTeacherName(lead, now, out) {
+    lead.tdemo.stage = 'name';
+    out.push(wa(lead, now, 'तुमचं नाव आणि शाळा / क्लास, गाव एका ओळीत लिहा ✍️\nउदा. संजय पाटील, जि. प. शाळा कागल'));
   }
   function teacherInbound(lead, raw, now) {
     const out = [];
-    const up = String(raw || '').trim().toUpperCase();
+    const t = String(raw || '').trim(), up = t.toUpperCase();
     lead.lastInboundAt = now.toISOString(); lead.unanswered = 0;
     if (up === 'STOP') { lead.closed = 'STOP'; lead.stopped = true; out.push({ to: 'wa', kind: 'service', cost: 0, text: '🙏 ठीक आहे, आता मेसेज बंद. पुन्हा हवं असेल तर START पाठवा.', buttons: [] }); return out; }
     if (up === 'START' && lead.closed === 'STOP') { lead.closed = null; lead.stopped = false; }
+    if (/^\[(reaction|sticker|unsupported|unknown)\]$/i.test(t)) return out;
     const d = lead.tdemo;
-    if (!d.welcomedAt) { d.welcomedAt = now.toISOString(); out.push(wa(lead, now, codesText(lead))); out.push(log('TDEMO', 'शिक्षकाने WhatsApp केलं → codes पाठवले (खिडकी 24 तास उघडी, ₹0).')); return out; }
+    // a teacher who booked on the website (codes known): the steps start with this first message
+    if (!d.stage && d.tCode) { d.stage = 'steps'; d.step = 0; d.welcomedAt = now.toISOString(); out.push(wa(lead, now, codesText(lead))); stepMsg(lead, now, out); return out; }
+    if (d.stage === 'cls') {
+      const m = t.match(/^tcls:(\d+)$/);
+      d.course = m ? (lead.courses || [])[Number(m[1])] || '' : t.slice(0, 80);
+      askTeacherName(lead, now, out); return out;
+    }
+    if (d.stage === 'name') {
+      if (/^[a-z_]+:/i.test(t) || t.length < 3) { askTeacherName(lead, now, out); return out; }
+      const [nm, ...rest] = t.split(/[,،|\n]/);
+      const name = nm.replace(/\s+/g, ' ').trim().slice(0, 60), school = rest.join(', ').replace(/\s+/g, ' ').trim().slice(0, 80);
+      lead.name = name; d.school = school; d.stage = 'making'; d.askedAt = now.toISOString();
+      out.push({ to: 'do', action: 'teacher_account', name, data: { school: school || name, course: d.course || '', ad: lead.ctwaAd || '' } });
+      out.push(wa(lead, now, '⏳ तुमचं account बनवत आहे — 1 मिनिट…'));
+      out.push(log('TDEMO', `नाव "${name}"${school ? ', ' + school : ''} → Render ला account बनवायला सांगितलं.`));
+      return out;
+    }
+    if (d.stage === 'making') { out.push(wa(lead, now, `⏳ account बनत आहे — थोडं थांबा. उशीर झाला तर 📞 ${TEAM_NO}`)); return out; }
+    // the steps
+    if (t === 'ts:done') { stepDone(lead, now, out, '✅ बटण'); return out; }
+    if (t === 'ts:help') { d.help = now.toISOString(); out.push(wa(lead, now, 'काय अडचण आहे? एका ओळीत लिहा 🙂')); return out; }
+    if (t === 'ts:call' || /^(call|कॉल|फोन)/i.test(t)) {
+      const s = TSTEPS[Math.min(d.step || 0, TSTEPS.length - 1)];
+      tcall(lead, now, out, s.id === 'offer' ? 'सूट / Students बनवा बद्दल बोलायचं' : `Step ${d.step + 1} (${s.title}) — call मागितला`);
+      tpush(out, now, lead, '📞 शिक्षक call मागतात', `${lead.name || 'शिक्षक'} · ${d.callWhy}`);
+      out.push(wa(lead, now, `🙏 ठीक आहे — आमची team लवकरच call करेल.\nलगेच बोलायचं असेल तर 📞 ${TEAM_NO}`));
+      return out;
+    }
     if (/^(DEMO|CODE|PIN)\b/.test(up)) { out.push(wa(lead, now, codesText(lead))); return out; }
-    // anything else: the team answers
-    lead.crm = 'call'; lead.callAt = now.toISOString();
-    out.push(wa(lead, now, `🙏 धन्यवाद! आमची team तुम्हाला लवकरच call करेल. तातडीचं असेल तर: ${TEAM_NO}`));
-    out.push(log('CALL', 'शिक्षकाचा प्रश्न → team call करेल (📞 यादी).'));
+    if (/^[a-z_]+:/i.test(t)) return out;
+    // a question: the AI answers (index.js aiTry); else the team
+    const s = TSTEPS[Math.min(d.step || 0, TSTEPS.length - 1)];
+    const q = log('Q', `❓ शिक्षकाचा प्रश्न (Step ${(d.step || 0) + 1} ${s.title}): "${t.slice(0, 300)}"`); q.qa = { text: t.slice(0, 300), teacher: true, prev: lead.question || null };
+    lead.question = { text: t.slice(0, 300), at: now.toISOString() };
+    const w = wa(lead, now, `🙏 तुमचा प्रश्न आमच्या team कडे दिला — team लवकरच call करेल.\nलगेच: 📞 ${TEAM_NO}`, [CALL_BTN]); w.qa = true;
+    out.push(q, w);
     return out;
   }
+  // the app / Render told the bot something (index.js /event 'tdemo')
+  function teacherEvent(lead, data, now) {
+    const out = [];
+    const d = lead.tdemo || (lead.tdemo = {});
+    if (data.account) {
+      const a = data.account;
+      if (a.exists && d.tCode) return out;   // a retried job after the codes already came
+      Object.assign(d, { tCode: a.tCode || d.tCode, tPin: a.tPin || d.tPin || '', sCode: a.sCode || d.sCode || '', sPin: a.sPin || d.sPin || '', course: a.course || d.course || '', until: a.until || d.until || null, bookedAt: d.bookedAt || now.toISOString() });
+      d.stage = 'steps'; d.step = 0;
+      out.push(log('TDEMO', a.exists ? `हा नंबर आधीच शिक्षक (${d.tCode}) → नवीन account नाही.` : `Accounts: शिक्षक ${d.tCode} · demo विद्यार्थी ${d.sCode} (3 दिवस).`));
+      tsay(lead, now, out, a.exists ? `🙏 तुमचं शिक्षक account आधीच आहे — Code: *${d.tCode}*${d.sCode ? '\n🎓 Demo विद्यार्थी: *' + d.sCode + '*' : ''}\nPIN आठवत नसेल तर 📞 ${TEAM_NO}\n\nApp चे steps 👇` : codesText(lead));
+      tpush(out, now, lead, '🆕 नवीन शिक्षक — account दिलं', `${lead.name || 'शिक्षक'}${d.course ? ' · ' + cleanName(d.course) : ''}${d.school ? ' · ' + d.school : ''}`);
+      stepMsg(lead, now, out);
+      return out;
+    }
+    if (data.accountError) {
+      d.stage = 'name';
+      out.push(log('TDEMO', `Account झालं नाही: ${data.accountError}`));
+      tsay(lead, now, out, `🙏 ${data.accountError}\nमदत: 📞 ${TEAM_NO}`);
+      tcall(lead, now, out, 'Account बनलं नाही: ' + String(data.accountError).slice(0, 80));
+      return out;
+    }
+    const seen = k => { if (!d[k]) { d[k] = now.toISOString(); out.push(log('TDEMO', TDEMO_DID[k] || k)); return true; } return false; };
+    if (data.tLogin) seen('tLogin');
+    if (data.sLogin) seen('sLogin');
+    if (data.paper) { d.papers = (d.papers || 0) + 1; seen('paperAt'); }
+    if (data.sTest) { d.sTests = (d.sTests || 0) + 1; seen('sTestAt'); }
+    if (data.order) { d.orders = (d.orders || 0) + 1; d.added = (d.added || 0) + (Number(data.added) || 0); d.paidRs = (d.paidRs || 0) + (Number(data.order) || 0); seen('orderAt'); lead.crm = 'hot'; }
+    if (data.again) out.push(log('TDEMO', 'हाच नंबर पुन्हा demo बुक करायला आला (नवीन code नाही) → call करा.'));
+    // the current step done in the app: on to the next one (the teacher pressed nothing)
+    if (d.stage === 'steps' && !d.doneAt) {
+      const s = TSTEPS[d.step];
+      if (d.orderAt) { if (s && s.id !== 'offer') out.push(log('TSTEP', 'Order झाली → शेवट.')); tfinish(lead, now, out); }
+      else if (s && s.did && d[s.did]) { out.push(log('TSTEP', `App ने सांगितलं: Step ${d.step + 1} (${s.title}) झाली.`)); d.step++; d.stuck = null; tsay(lead, now, out, PRAISE[s.id] || '👍'); stepMsg(lead, now, out); }
+    }
+    return out;
+  }
+  // the team (Team app "✅ Step पूर्ण करून दिली"): the next step now
+  function teacherTeamStep(lead, now) {
+    const out = [];
+    if (lead.tdemo && lead.tdemo.stage === 'steps' && !lead.tdemo.doneAt) stepDone(lead, now, out, 'team ने call वर करून दिली');
+    return out;
+  }
+  // a quiet hour: a reminder before an end moves earlier (that evening), one after moves to 9 am
+  const prevDay = at => (quiet(at) ? (hourOf(at) >= CONFIG.quiet.from ? atIST(at, CONFIG.quiet.from - 1, 0, 0) : atIST(at, CONFIG.quiet.from - 1, 0, -1)) : at);
+  const nextDay = at => (quiet(at) ? (hourOf(at) >= CONFIG.quiet.from ? atIST(at, 9, 0, 1) : atIST(at, 9, 0, 0)) : at);
   function teacherItems(lead, items) {
-    const d = lead.tdemo, booked = new Date(d.bookedAt);
-    if (!d.bookedAt || lead.closed) return;
+    const d = lead.tdemo;
+    if (!d || lead.closed) return;
     const msg = (key, at, fn) => items.push({ key: 't:' + key, at, run: fn });
-    const say = (out, now, text) => { if (isOpen(lead, now)) out.push(wa(lead, now, text, [], { own: true })); else out.push(log('₹ नाही', 'खिडकी बंद → संदेश नाही (team call करू शकते).')); };
-    const call = (out, now, why) => { lead.crm = 'call'; lead.callAt = now.toISOString(); out.push(log('CALL', why)); };
-    msg('2h', new Date(booked.getTime() + 2 * H), (out, now) => {
-      if (d.tLogin) return;
-      say(out, now, `Login मध्ये काही अडचण? App उघडा › 👩‍🏫 Teacher › Code *${d.tCode}* आणि PIN.\n📲 ${CONFIG.play}\nमदत: ${TEAM_NO}`);
-      call(out, now, '2 तास: शिक्षकाने login केलं नाही → call करा.');
+    // stuck on a step: one reminder after 3 h (inside the window, not at night), then the team
+    if (d.stage === 'steps' && !d.doneAt && d.stepAt && d.step < TSTEPS.length) {
+      const s = TSTEPS[d.step], at = new Date(d.stepAt), k = d.step + ':' + d.stepAt;
+      msg('rem:' + k, nextDay(new Date(at.getTime() + 3 * H)), (out, now) => {
+        if (d.step !== TSTEPS.indexOf(s) || (s.did && d[s.did])) return;
+        d.rem = 1;
+        tsay(lead, now, out, `आठवण 🙂 *Step ${d.step + 1}* — ${s.title} राहिलं आहे, 1–2 मिनिटं लागतील.\n📷 ${guide(s.id)}`, s.id === 'offer' ? [CALL_BTN] : STEP_BTNS);
+      });
+      msg('stuck:' + k, nextDay(new Date(at.getTime() + 6 * H)), (out, now) => {
+        if (d.step !== TSTEPS.indexOf(s) || (s.did && d[s.did])) return;
+        d.stuck = { step: d.step, title: s.title, at: now.toISOString() };
+        tcall(lead, now, out, `Step ${d.step + 1} (${s.title}) वर अडकले`);
+        tpush(out, now, lead, '⚠️ शिक्षक अडकले — call करा', `${lead.name || 'शिक्षक'} · Step ${d.step + 1} ${s.title}`);
+      });
+    }
+    // waiting for the account (Render asleep for long): the team
+    if (d.stage === 'making' && d.askedAt) msg('making', new Date(new Date(d.askedAt).getTime() + 30 * 60e3), (out, now) => {
+      if (d.stage === 'making') tcall(lead, now, out, 'Account अजून बनलं नाही (30 मिनिटं)');
     });
-    msg('eve', atIST(booked, 18, 0, hourOf(booked) >= 17 ? 1 : 0), (out, now) => {
-      if (d.sTestAt) return;
-      say(out, now, `School demo विद्यार्थ्याने test दिला का? 📝\nविद्यार्थी code *${d.sCode}* ने login करून एका धड्याचा test द्या — त्याचे गुण आणि कमकुवत धडे तुमच्या Teacher › Analytics मध्ये दिसतील. तुमच्या प्रत्येक विद्यार्थ्याचे असेच दिसतील.`);
-    });
-    msg('morning', atIST(booked, 8, 30, 1), (out, now) => {
-      say(out, now, d.paperAt ? '👏 छान! तुम्ही पेपर बनवला. आता त्याची Answer sheet पण print करा (Paper › Preview › Answer Sheet).' : '🌅 उद्याच्या वर्गाचा पेपर आत्ता 1 मिनिटात बनवा — Teacher › Paper › धडे निवडा › पेपर + Answer sheet.');
-    });
-    msg('24h', new Date(booked.getTime() + 24 * H), (out, now) => {
-      say(out, now, '👩‍🎓 तुमच्या वर्गाची link / QR: Teacher › Share. मुलं थेट तुमच्याशी जोडली जातात.\n🎬 तुमचे YouTube videos फक्त तुमच्या विद्यार्थ्यांना: Teacher › Videos.');
-    });
-    msg('40h', new Date(booked.getTime() + 40 * H), (out, now) => {
-      if (!d.orderAt) say(out, now, `⏰ School demo विद्यार्थी उद्या बंद होईल.\nतुमच्या विद्यार्थ्यांची accounts: Teacher › ➕ Students बनवा.\nसूट साठी आमच्या team ला संपर्क करा: ${TEAM_NO}`);
-      if (!d.orderAt) call(out, now, '40 तास: demo संपत आला, विद्यार्थी जोडले नाहीत → call करा.');
-    });
-    msg('48h', new Date(booked.getTime() + 48 * H), (out, now) => {
-      say(out, now, `🙏 तुमचं शिक्षक account चालूच आहे — पेपर बनवा, Videos टाका, विद्यार्थी जोडा.\n10 विद्यार्थी झाले की पेपर बनवण्याची मर्यादा राहत नाही आणि school demo विद्यार्थी परत चालू होतो.\nमदत: ${TEAM_NO}`);
-    });
-    for (const [k, days] of [['d4', 4], ['d7', 7]]) msg(k, atIST(booked, 11, 0, days), (out, now) => {
+    // the demo student's 3 days
+    if (d.until && !d.orderAt) {
+      const end = new Date(d.until);
+      msg('end-12h', prevDay(new Date(end.getTime() - 12 * H)), (out, now) => {
+        if (d.orderAt) return;
+        tsay(lead, now, out, `⏰ Demo विद्यार्थी *${d.sCode}* ${untilText(d)} ला बंद होईल.\nतुमच्या विद्यार्थ्यांची accounts: ▾ → ➕ *Students बनवा* — शिक्षकांसाठी खास सूट.\nमाहिती: 📞 ${TEAM_NO}`, [CALL_BTN]);
+        tcall(lead, now, out, 'Demo विद्यार्थी उद्या बंद — अजून विद्यार्थी जोडले नाहीत');
+      });
+      msg('end', nextDay(new Date(end.getTime() + 15 * 60e3)), (out, now) => {
+        if (d.orderAt) return;
+        tsay(lead, now, out, `🙏 Demo विद्यार्थी बंद झाला. तुमचं *शिक्षक account चालूच* आहे — पेपर बनवा, Videos टाका, विद्यार्थी जोडा.\nतुमचे 10 विद्यार्थी झाले की demo विद्यार्थी परत चालू होतो.\nखास सूट ची माहिती: 📞 ${TEAM_NO}`);
+      });
+    }
+    const booked = d.bookedAt ? new Date(d.bookedAt) : null;
+    if (booked) for (const [k, days] of [['d4', 4], ['d7', 7]]) msg(k, atIST(booked, 11, 0, days), (out, now) => {
       if (d.orderAt) return;
-      if (isOpen(lead, now)) say(out, now, `नमस्कार ${lead.name || ''} 🙏 तुमच्या वर्गासाठी NKs EduOrbit कसं वाटलं? विद्यार्थी जोडायला मदत हवी असेल तर ${TEAM_NO}`);
-      else call(out, now, `${days} दिवस: विद्यार्थी जोडले नाहीत → call करा.`);
+      if (isOpen(lead, now)) tsay(lead, now, out, `नमस्कार${lead.name ? ' ' + lead.name : ''} 🙏 तुमच्या वर्गासाठी NKs EduOrbit कसं वाटलं? विद्यार्थी जोडायला मदत हवी असेल तर 📞 ${TEAM_NO}`, [CALL_BTN]);
+      else tcall(lead, now, out, `${days} दिवस: विद्यार्थी जोडले नाहीत`);
     });
   }
 
@@ -985,5 +1137,5 @@
     return best;
   }
 
-  return { CONFIG, L, createLead, inbound, welcome, event, tick, nextDue, isOpen, whenText, dayKey, atIST, priceText, offerNow, ruleText, cleanName, paidClaim, TS };
+  return { CONFIG, L, createLead, inbound, welcome, teacherWelcome, teacherTeamStep, TSTEPS, event, tick, nextDue, isOpen, whenText, dayKey, atIST, priceText, offerNow, ruleText, cleanName, paidClaim, TS };
 });

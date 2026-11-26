@@ -11,13 +11,25 @@ import { validSignature, bodiesFor, templateBody, post, inboundText, hmacHex, sa
 import * as S from './store.js';
 import { leadInfo, queue, runJobs, waLogin, newLead, ping, appUsage } from './render.js';
 import { deskRoute, deskAdmin, creditPaid, teamNewPush } from './desk.js';
-import { aiAnswer, classList, geminiModels } from './ai.js';
+import { aiAnswer, aiAnswerTeacher, classList, geminiModels } from './ai.js';
 
 // 🤖 the rules sent a parent's own question to the team (askTeam → .qa outputs): with AI_ON = "1" Gemini may answer it
 // from the course facts instead (inside the free window). Limit (owner 2026-11-14): AI_MAX answers a family in all,
 // AI_DAILY a day — then the team calls (📞 on top of 🎯 आजचं काम). Unsure / failed → the team, as before.
 async function aiTry(env, lead, outs, now) {
   const q = outs.find(o => o.qa && o.to === 'log');
+  if (q && q.qa.teacher) {
+    // 👩‍🏫 a teacher's question: the AI (no limits); unsure / AI off → the team calls (+ a push on the team's phones)
+    const r = env.AI_ON === '1' && env.GEMINI_API_KEY ? await aiAnswerTeacher(env, lead, q.qa.text, now, WA, await classList(env, S)) : { handoff: true, ms: 0, err: 'AI बंद' };
+    if (r.handoff) {
+      lead.crm = 'call'; lead.callAt = now.toISOString(); if (lead.tdemo) lead.tdemo.callWhy = 'प्रश्न: ' + q.qa.text.slice(0, 80);
+      return [...outs, { to: 'log', tag: 'AI', text: `🤖 AI ने team कडे दिलं${r.err ? ' (' + r.err + ')' : ''} · ${r.ms} ms` },
+        { to: 'do', action: 'team_push', data: { title: '❓ शिक्षकाचा प्रश्न — call करा', text: `${lead.name || 'शिक्षक'} · ${q.qa.text.slice(0, 90)}`, one: lead.gid, at: now.getTime() } }];
+    }
+    lead.question = q.qa.prev;
+    return [...outs.filter(o => !o.qa), { to: 'wa', kind: 'service', cost: 0, text: r.answer, buttons: [{ id: 'ts:done', label: '✅ झालं' }, { id: 'ts:call', label: '📞 Team ने call करावा' }] },
+      { to: 'log', tag: 'AI', text: `🤖 AI उत्तर (शिक्षक, ${r.model}, ${r.ms} ms): "${q.qa.text}" → ${r.answer}` }];
+  }
   if (!q || env.AI_ON !== '1' || !env.GEMINI_API_KEY || !WA.isOpen(lead, now)) return outs;
   const day = WA.dayKey(now);
   if (lead.aiDay !== day) { lead.aiDay = day; lead.aiN = 0; }
@@ -211,7 +223,8 @@ async function newFamily(env, m, mobile, text) {
     await S.ensureRow(env, lead);
     await withLead(env, gid, mobile, async (l, t) => {
       await S.addMsg(env, { gid, mobile, dir: 'in', body: (ref ? '📣 Ad: ' : '') + (text || `[${m.type}]`), wa_id: m.id });
-      return WA.welcome(l, text, t);
+      const teacherAd = !!(info && info.teacher) || /(शिक्षक|teacher|tuition|ट्युशन)/i.test(`${body.headline} ${body.ad_body}`);
+      return teacherAd ? WA.teacherWelcome(l, text, t) : WA.welcome(l, text, t);
     });
     return;
   }
@@ -441,10 +454,11 @@ async function teacherList(env) {
     if (!d.tdemo || d.closed) continue;
     const t = d.tdemo, touched = Math.max(ms(d.lastTeam && d.lastTeam.at), ms(d.teamSentAt));
     const callNow = r.crm === 'call' && ms(d.callAt) > touched;
-    const stage = t.orderAt ? '💳 विद्यार्थी जोडले' : t.paperAt ? '📄 पेपर बनवला' : t.tLogin ? '✅ login झाला' : t.welcomedAt ? '💬 WhatsApp केलं' : '🆕 बुक केलं';
+    const T = WA.TSTEPS, step = t.doneAt ? T.length : Math.min(t.step || 0, T.length);
+    const stage = t.doneAt || t.orderAt ? '💳 विद्यार्थी जोडले' : t.stage === 'steps' ? `Step ${step + 1}/${T.length} · ${T[step] ? T[step].title : ''}` : t.stage === 'making' ? '⏳ account बनत आहे' : t.stage === 'cls' || t.stage === 'name' ? '💬 माहिती देत आहे' : t.paperAt ? '📄 पेपर बनवला' : t.tLogin ? '✅ login झाला' : '🆕 बुक केलं';
     rows.push({ gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, created_at: r.created_at, updated_at: r.updated_at,
-      teacher: true, school: t.school || '', booked: t.bookedAt, stage, call_now: callNow, open: WA.isOpen(d, now), sent: d.teamSent || 0,
-      why: callNow ? '📞 आत्ता call करा' : '', when: callNow ? 'लगेच' : '', _k: (callNow ? 0 : 1e15) - ms(t.bookedAt) });
+      teacher: true, school: t.school || '', booked: t.bookedAt, stage, step, steps: T.length, stuck: t.stuck && !t.doneAt ? t.stuck : null, call_why: t.callWhy || '', course: t.course || '', call_now: callNow, open: WA.isOpen(d, now), sent: d.teamSent || 0,
+      why: callNow ? (t.callWhy ? '📞 ' + t.callWhy : '📞 आत्ता call करा') : '', when: callNow ? 'लगेच' : '', _k: (callNow ? 0 : 1e15) - ms(t.bookedAt) });
   }
   return rows.sort((a, b) => a._k - b._k).slice(0, 300).map(({ _k, ...x }) => x);
 }
@@ -879,6 +893,8 @@ export default {
         });
         // 💳 a payment: counted for the team member who last handled the family (call desk)
         if (b.type === 'paid') await creditPaid(env, act, await S.getLead(env, gid), b.data && b.data.amount).catch(() => {});
+        // 👩‍🏫 a teacher's news may ask Render for something (the team's push): now, after answering Render
+        if (b.type === 'tdemo') ctx.waitUntil(runJobs(env, 3).catch(() => {}));
         return json({ success: true, data: r });
       }
       // ⏰ Render tells us whether ads are running (it cannot be asked without waking it): ping only then

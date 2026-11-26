@@ -290,6 +290,7 @@ async function createAd(o) {
 // 💬 the parent's first message on WhatsApp, ready in the box (instead of Meta's "Hello! Can I get more info on
 // this?"): names the class, so the bot knows it at once. Meta's message template (customer_action_type autofill_message).
 function prefillText(o) {
+  if (o.audience === 'school') return 'नमस्कार 🙏 मी शिक्षक आहे — NKs EduOrbit ची माहिती हवी आहे.';   // 👩‍🏫 teacher ad → the bot's Teacher Guide
   let cls = '';
   try { cls = new URL(o.link).searchParams.get('batch') || ''; } catch {}
   cls = String(cls || o.headline || '').replace(/\s+/g, ' ').trim().slice(0, 60);
@@ -298,7 +299,7 @@ function prefillText(o) {
 function _welcome(o) {
   return JSON.stringify({
     type: 'VISUAL_EDITOR', version: 2, landing_screen_type: 'welcome_message', media_type: 'text',
-    text_format: { customer_action_type: 'autofill_message', message: { autofill_message: { content: prefillText(o) }, text: 'नमस्कार 🙏 NKs EduOrbit — पाल्याची free test 👇' } },
+    text_format: { customer_action_type: 'autofill_message', message: { autofill_message: { content: prefillText(o) }, text: o.audience === 'school' ? 'नमस्कार 🙏 NKs EduOrbit — शिक्षकांसाठी app 👇' : 'नमस्कार 🙏 NKs EduOrbit — पाल्याची free test 👇' } },
     user_edit: false, surface: 'visual_editor_new',
   });
 }

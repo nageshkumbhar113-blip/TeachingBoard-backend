@@ -73,7 +73,8 @@ export function facts(lead, now, WA, classes) {
       return [
         mine ? `या पाल्याच्या Test Series चे विषय आणि chapters:\n${classText(mine, true)}` : '',
         // other standards: only when the parent asks about another one (SYSTEM rule)
-        others.length ? `इतर Test Series (फक्त पालकांनी दुसऱ्या इयत्तेबद्दल / Test Series बद्दल विचारलं तरच सांग):\n${others.map(c => '- ' + WA.cleanName(c.name) + ' Test Series: ' + classText(c, false)).join('\n')}` : '',
+        // owner 2026-11-26: every Test Series in full (subjects, chapters, prices) — told only when asked
+        others.length ? `इतर Test Series (फक्त पालकांनी दुसऱ्या इयत्तेबद्दल / Test Series बद्दल विचारलं तरच सांग — विचारली तर पूर्ण माहिती दे):\n${others.map(c => '- ' + WA.cleanName(c.name) + ' Test Series: ' + classText(c, true)).join('\n')}` : '',
         classes.length ? 'यापेक्षा वेगळ्या Test Series / इयत्ता सध्या नाहीत.' : '',
       ];
     })(),
@@ -95,10 +96,47 @@ const SYSTEM = `तू NKs EduOrbit चा WhatsApp सहाय्यक आह
 - "free" / "फ्री" हा शब्द वापरू नको. "मोफत" फक्त: WhatsApp वरची 1 demo test, app मधल्या मोफत tests (फक्त app download केल्यावर) आणि महा-Test. "सगळं मोफत आहे का" विचारलं तर: demo test आणि app मधल्या काही tests मोफत, पूर्ण course (सगळे tests, notes, स्पष्टीकरण) साठी फी.`;
 
 export async function aiAnswer(env, lead, question, now, WA, classes, model) {
+  return ask(env, SYSTEM, facts(lead, now, WA, classes), question, model);
+}
+
+// 👩‍🏫 a teacher's question (Teacher Guide, owner 2026-11-26): the teacher's own accounts and step, the app's teacher
+// parts, every Test Series in full. No limits for teachers. The सूट: never a number — the team tells it on a call.
+const T_SYSTEM = `तू NKs EduOrbit चा WhatsApp सहाय्यक आहेस. शिक्षकांच्या प्रश्नांना उत्तर देतोस (शिक्षक app वापरून पाहत आहेत).
+नियम:
+- उत्तर फक्त खालच्या FACTS मधूनच. FACTS मध्ये नसलेलं काहीही (किंमत, तारीख, नंबर, link, वचन) स्वतः बनवू नको.
+- सूट: "शिक्षकांसाठी खास सूट आहे" एवढंच — टक्का / रक्कम कधीच सांगू नको; माहितीसाठी team चा नंबर दे.
+- "commission", "कमाई", "पैसे मिळतील" असे शब्द आणि कमाईचं वचन कधीच नाही. "free" / "फ्री" / "मोफत" हे शब्द वापरू नको.
+- App मध्ये कुठे काय आहे ते FACTS मधल्या मार्गानेच सांग (उदा. "▾ → 📄 Paper").
+- सोपी मराठी (देवनागरी), 1 ते 4 छोटी वाक्यं, 70 शब्दांपेक्षा कमी, आदराने ("सर / मॅडम"). शिक्षक English / Hinglish मध्ये लिहिले तरी उत्तर मराठीत.
+- evidence मध्ये FACTS मधला तो शब्दशः तुकडा (5 ते 15 शब्द) copy कर ज्यावरून उत्तर दिलं. असा तुकडा नसेल तर handoff.
+- handoff = true आणि answer रिकामं ठेव जर: उत्तर FACTS मध्ये नाही; पैसे / payment / refund / तक्रार; login होत नाही आणि FACTS मधला मार्ग आधीच सांगितला; शिक्षक call मागतात किंवा रागावलेले आहेत; प्रश्न शिक्षण / NKs शी संबंधित नाही; तुला खात्री नाही.
+- "धन्यवाद", "ok" सारख्या मेसेजला छोटं धन्यवाद पुरे.`;
+export function teacherFacts(lead, now, WA, classes) {
+  const d = lead.tdemo || {}, team = '8390484545', C = WA.CONFIG;
+  const steps = (WA.TSTEPS || []).map((s, i) => `Step ${i + 1} (${s.title}): ${s.text(d).replace(/\*/g, '').replace(/\n/g, ' ')}`).join('\n');
+  return [
+    'संस्था: NKs EduOrbit — विद्यार्थ्यांसाठी tests / सराव app (Maharashtra State Board) आणि शिक्षकांसाठी त्याच app मध्ये 👩‍🏫 Teacher login.',
+    `हा शिक्षक: ${lead.name || 'नाव माहीत नाही'}${d.school ? ', ' + d.school : ''}. वर्ग: ${d.course ? WA.cleanName(d.course) : 'माहीत नाही'}.`,
+    d.tCode ? `शिक्षक account: Code ${d.tCode}${d.tPin ? ', PIN ' + d.tPin : ''}. हे account Admin बंद करेपर्यंत चालू राहतं.` : 'शिक्षक account अजून बनत आहे.',
+    d.sCode ? `Demo विद्यार्थी account: Code ${d.sCode}${d.sPin ? ', PIN ' + d.sPin : ''} — 3 दिवस चालू${d.until ? ' (' + new Date(d.until).toLocaleString('mr-IN-u-nu-latn', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' }) + ' पर्यंत)' : ''}, मग बंद. शिक्षकाचे त्या वर्गाचे 10 विद्यार्थी pay झाले की demo विद्यार्थी परत चालू होतो.` : '',
+    `App: ${C.play}. Login screen वर 👩‍🏫 Teacher किंवा 🎓 Student निवडून Code + PIN. एका account मधून दुसऱ्यात: वरती नाव (Profile) → ↔ Switch Account.`,
+    `शिक्षक app (वरचं ▾ menu): 👨‍🎓 Students (जोडलेले विद्यार्थी) · ➕ Students बनवा (शिक्षक स्वतः विद्यार्थ्यांची accounts घेतो, शिक्षकांसाठी खास सूट) · 📊 Analytics (प्रत्येक विद्यार्थ्याचे गुण, कमकुवत धडे) · 🔔 Notify (पालकांना सूचना) · 📚 Vocab · 💰 Fee (फी ची नोंद) · 📄 Paper (वर्ग, विषय, धडे निवडून पेपर + Answer key, PDF) · 🎬 Videos (स्वतःचे YouTube videos फक्त स्वतःच्या विद्यार्थ्यांना) · 📚 Books · 📤 Share (वर्गाची link / QR — मुलं थेट शिक्षकाशी जोडली जातात).`,
+    'Paper Builder: सुरुवातीला ठराविक पेपर; शिक्षकाचे विद्यार्थी app घेतात तशी मर्यादा राहत नाही (तपशील team कडून).',
+    `सूट: शिक्षकांसाठी खास सूट — माहिती आणि मदत team कडून, 📞 ${team}.`,
+    `मार्गदर्शन (चित्रांसह): ${C.site}/teacher-guide`,
+    `App दाखवण्याच्या 7 steps:\n${steps}`,
+    d.stage === 'steps' && !d.doneAt ? `हा शिक्षक आत्ता Step ${(d.step || 0) + 1} वर आहे.` : '',
+    `Team चा नंबर (call / WhatsApp): ${team}.`,
+    classes.length ? `सगळ्या Test Series (विद्यार्थ्यांसाठी, फी विद्यार्थ्यांची):\n${classes.map(c => '- ' + WA.cleanName(c.name) + ' Test Series: ' + classText(c, true)).join('\n')}` : '',
+  ].filter(Boolean).join('\n');
+}
+export async function aiAnswerTeacher(env, lead, question, now, WA, classes, model) {
+  return ask(env, T_SYSTEM, teacherFacts(lead, now, WA, classes), question, model);
+}
+async function ask(env, system, fx, question, model) {
   const t0 = Date.now(), m = model || env.AI_MODEL || AI_MODEL_DEFAULT;
-  const fx = facts(lead, now, WA, classes);
   const body = {
-    systemInstruction: { parts: [{ text: SYSTEM + '\n\nFACTS:\n' + fx }] },
+    systemInstruction: { parts: [{ text: system + '\n\nFACTS:\n' + fx }] },
     contents: [{ role: 'user', parts: [{ text: String(question).slice(0, 500) }] }],
     generationConfig: {
       temperature: 0.2, maxOutputTokens: 1024, responseMimeType: 'application/json',

@@ -159,7 +159,7 @@ lead.mobile = '9822200041'; lead.ctwaUntil = new Date(thuAd.getTime() + 72 * 360
 W.event(lead, 'sync', { cls: '', courses: ['8th NMMS EXAM 26-27 BATCH', '10th'], mtNext: '2026-11-15T04:30:00Z', freeTotal: 18 }, thuAd);
 out = W.welcome(lead, 'Hello! Can I get more info on this?', thuAd);
 let wm = out.find(x => x.to === 'wa');
-ok(wm && /कोणती Test Series/.test(wm.text) && wm.buttons.length === 2 && wm.buttons[0].id === 'cls:0' && wm.buttons[0].label === '8वी NMMS', 'ad, no class known: the Test Series is asked (clean names)', wm && JSON.stringify(wm.buttons));
+ok(wm && /कोणती Test Series/.test(wm.text) && wm.buttons.length === 3 && wm.buttons[0].id === 'cls:0' && wm.buttons[0].label === '8वी NMMS' && wm.buttons[2].id === 'teacher', 'ad, no class known: the Test Series is asked (clean names) + 👩‍🏫 मी शिक्षक', wm && JSON.stringify(wm.buttons));
 out = W.inbound(lead, 'cls:0', new Date(thuAd.getTime() + 60e3));
 t = texts(out);
 ok(lead.cls === '8th NMMS EXAM 26-27 BATCH' && out.some(x => x.to === 'do' && x.action === 'batch' && x.data.batch === lead.cls) && t.some(x => /free=1&g=CTWA111111/.test(x)) && !t.some(x => /नाव लिहा/.test(x)) && !lead.awaiting, 'class chosen → Render told, the test link at once (no name asked)', t.join(' | '));
