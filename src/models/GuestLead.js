@@ -75,5 +75,6 @@ const guestLeadSchema = new mongoose.Schema(
 );
 
 guestLeadSchema.index({ created_at: -1 });
+guestLeadSchema.index({ converted_code: 1 });   // a free account's tests and महा-Test names → the lead (Admin audit 2026-11-27)
 
 module.exports = mongoose.models.GuestLead || mongoose.model('GuestLead', guestLeadSchema);

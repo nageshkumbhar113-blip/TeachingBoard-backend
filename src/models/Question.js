@@ -32,5 +32,9 @@ const questionSchema = new mongoose.Schema(
 // (chapter omitted) case via its (batch,subject) prefix — no separate
 // index needed for that.
 questionSchema.index({ batch: 1, subject: 1, chapter: 1, type: 1 });
+// Admin audit 2026-11-27 (Atlas free tier is slow): the lists are read in this order straight from an index, not
+// read whole and sorted in memory (live: the tests list waited 94 s, the questions 30 s; Atlas sorts in at most 32 MB)
+questionSchema.index({ batch: 1, created_at: -1 });   // a student's questions (GET /questions, sync-state)
+questionSchema.index({ created_at: -1 });             // the Admin's pages
 
 module.exports = mongoose.models.Question || mongoose.model('Question', questionSchema);
