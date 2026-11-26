@@ -39,7 +39,7 @@ async function _done(res) {
     // the common set-up problems, said plainly (Meta's own words stay at the end)
     const hint = /development mode|must be in public/i.test(m) ? 'Meta app अजून Development mode मध्ये आहे — developers.facebook.com › तुमचं app › Publish (Live) करा, मग पुन्हा पाठवा. ' : '';
     const err = new Error(`${hint}Meta: ${m}`);
-    err.status = 400; err.code = body.error?.code;
+    err.status = 400; err.code = body.error?.code; err.data = body.error?.error_data || null; err.full = [body.error?.message, body.error?.error_user_title, body.error?.error_user_msg].filter(Boolean).join(' | ');
     throw err;
   }
   return body;
@@ -184,8 +184,15 @@ async function _teacherSpec() {
   for (const q of ['Teacher', 'Teaching', 'Tutor', 'Education']) interests.push(...await pick({ type: 'adinterest', q, limit: 10 }, /teach|tutor|education/i, 3));
   for (const q of ['Teacher', 'Tutor', 'Lecturer', 'Professor']) work.push(...await pick({ type: 'adworkposition', q, limit: 10 }, /teacher|tutor|lecturer|professor|principal|शिक्षक/i, 4));
   const industries = await pick({ type: 'adTargetingCategory', class: 'industries' }, /education/i, 2);
+  // only interests Meta still offers (old ones are refused when the ad set is made)
+  let okInt = uniq(interests).slice(0, 10);
+  try {
+    const v = await graph('search', { type: 'adinterestvalid', interest_fbid_list: okInt.map(x => x.id) });
+    const good = new Set((v.data || []).filter(x => x.valid !== false).map(x => String(x.id)));
+    if ((v.data || []).length) okInt = okInt.filter(x => good.has(x.id));
+  } catch { /* keep them; the tries below drop what Meta refuses */ }
   const spec = {};
-  if (interests.length) spec.interests = uniq(interests).slice(0, 10);
+  if (okInt.length) spec.interests = okInt;
   if (work.length) spec.work_positions = uniq(work).slice(0, 12);
   if (industries.length) spec.industries = uniq(industries);
   _tSpec = Object.keys(spec).length ? spec : null;
@@ -205,6 +212,43 @@ async function adsetsTargeting() {
       advantage: t.targeting_automation?.advantage_audience === 1,
     };
   });
+}
+// try a teacher spec on Meta (attempt(spec) makes / updates the ad set); what Meta refuses is left out
+const _specCount = sp => (sp ? ['interests', 'work_positions', 'industries'].reduce((n, k) => n + (sp[k] || []).length, 0) : 0);
+const _specKinds = sp => ['interests', 'work_positions', 'industries'].filter(k => sp && (sp[k] || []).length).map(k => ({ interests: 'interests', work_positions: 'पदं', industries: 'education उद्योग' }[k])).join(' + ');
+async function _tryTeacherSpec(tspec, attempt) {
+  if (!tspec) return { res: await attempt(null), used: null, err: null };
+  const strip = (sp, bad) => { const o = {}; for (const k of ['interests', 'work_positions', 'industries']) { const a = (sp[k] || []).filter(x => !bad.has(String(x.id))); if (a.length) o[k] = a; } return _specCount(o) ? o : null; };
+  const one = k => (tspec[k] || []).length ? { [k]: tspec[k] } : null;
+  // Meta retired some kinds (job titles…): without them next, then one kind at a time
+  const noWork = (tspec.interests || tspec.industries) && tspec.work_positions ? { ...(tspec.interests ? { interests: tspec.interests } : {}), ...(tspec.industries ? { industries: tspec.industries } : {}) } : null;
+  const tries = [tspec, noWork, one('interests'), one('industries'), one('work_positions')].filter(Boolean);
+  let lastErr = null;
+  for (const sp of tries) {
+    try { return { res: await attempt(sp), used: sp, err: null }; }
+    catch (err) {
+      lastErr = err;
+      const bad = new Set(String((err.full || err.message || '') + ' ' + JSON.stringify(err.data || '')).match(/\d{9,}/g) || []);
+      const sp2 = bad.size ? strip(sp, bad) : null;
+      if (sp2) { try { return { res: await attempt(sp2), used: sp2, err: null }; } catch (e2) { lastErr = e2; } }
+    }
+  }
+  return { res: await attempt(null), used: null, err: lastErr };
+}
+const _specNote = r => (r.used ? `👩‍🏫 शिक्षक targeting: ${_specCount(r.used)} (${_specKinds(r.used)})` : `⚠️ शिक्षक targeting Meta ने घेतलं नाही (${String(r.err?.message || 'सापडलं नाही').replace(/^Meta: /, '').slice(0, 120)}) — फक्त वय + भाग`);
+// 👩‍🏫 Admin › Ads › 🎯 "शिक्षक targeting लावा": a teacher ad set made without it (Meta refused, or an old one) gets it now
+async function fixTeacherTargeting(adsetId) {
+  if (!/^\d+$/.test(String(adsetId))) throw Object.assign(new Error('Bad ad set id'), { status: 400 });
+  const a = await graph(String(adsetId), { fields: 'id,name,account_id,targeting' });
+  if (`act_${a.account_id}` !== env().account) throw Object.assign(new Error('Not this ad account'), { status: 400 });
+  if (!/^t-/.test(a.name || '')) throw Object.assign(new Error('हा शिक्षकांचा ad set नाही'), { status: 400 });
+  _tSpec = undefined;   // look the lists up again
+  const tspec = await _teacherSpec();
+  const base = { ...(a.targeting || {}) }; delete base.flexible_spec;
+  const r = await _tryTeacherSpec(tspec, sp => (sp ? post(String(adsetId), { targeting: { ...base, flexible_spec: [sp] } }) : Promise.resolve(null)));
+  if (!r.used) throw Object.assign(new Error(_specNote(r)), { status: 400 });
+  _cache = null;
+  return { name: a.name, note: _specNote(r), who: ['interests', 'work_positions', 'industries'].flatMap(k => (r.used[k] || []).map(x => x.name)) };
 }
 const GONE = ['DELETED', 'ARCHIVED'];
 async function _findByName(edge, name, fields = 'id,name,status') {
@@ -291,7 +335,6 @@ async function createAd(o) {
   async function makeAdset() {
     const place = await _geoOf(o.geo);
     const tspec = o.audience === 'school' ? await _teacherSpec() : null;
-    if (o.audience === 'school') note = (note ? note + ' · ' : '') + (tspec ? `👩‍🏫 शिक्षक targeting: ${[...(tspec.interests || []), ...(tspec.work_positions || []), ...(tspec.industries || [])].length} (interests / job titles / education)` : 'Meta मध्ये शिक्षक targeting सापडलं नाही — फक्त वय + भाग');
     if (place.missed.length) note = (note ? note + ' · ' : '') + `Meta मध्ये ही शहरं सापडली नाहीत (बाकीची घेतली): ${place.missed.join(', ')}`;
     const params = spec => ({
       name: adsetName, campaign_id: campaign.id, status: 'PAUSED',
@@ -308,15 +351,9 @@ async function createAd(o) {
         targeting_automation: { advantage_audience: 0 },
       },
     });
-    if (!tspec) return post(`${e.account}/adsets`, params(null));
-    // Meta may refuse an option it has retired (job titles…): interests + education only, then age + area only
-    try { return await post(`${e.account}/adsets`, params(tspec)); }
-    catch (err) {
-      const lite = tspec.interests || tspec.industries ? { ...(tspec.interests ? { interests: tspec.interests } : {}), ...(tspec.industries ? { industries: tspec.industries } : {}) } : null;
-      if (lite) { try { const r = await post(`${e.account}/adsets`, params(lite)); note += ' · (job titles Meta ने घेतले नाहीत)'; return r; } catch { /* below */ } }
-      note += ` · ⚠️ शिक्षक targeting Meta ने घेतलं नाही (${String(err.message).slice(0, 80)}) — फक्त वय + भाग`;
-      return post(`${e.account}/adsets`, params(null));
-    }
+    const r = await _tryTeacherSpec(tspec, sp => post(`${e.account}/adsets`, params(sp)));
+    if (o.audience === 'school') note = (note ? note + ' · ' : '') + _specNote(r);
+    return r.res;
   }
   const ready = await _videoReady(o.video_id);
   if (!ready) return { pending: true, campaign_id: campaign.id, adset_id: adset.id, note };
@@ -527,4 +564,4 @@ async function retarget(adsetId, geo) {
   return { name: s.name, towns: place.geo.cities.length, missed: place.missed };
 }
 
-module.exports = { configured, account, insights, retarget, deleteObject, graph, uploadVideo, uploadImage, listVideos, adsetsTargeting, createAd, adsState, setAdStatus, raiseBudget, setBudget, replaceVideo, sendEvent, fbcOf, isStudentAd, datasetReady, _resetCache: () => { _cache = null; _region = null; } };
+module.exports = { configured, account, insights, retarget, deleteObject, graph, uploadVideo, uploadImage, listVideos, adsetsTargeting, fixTeacherTargeting, createAd, adsState, setAdStatus, raiseBudget, setBudget, replaceVideo, sendEvent, fbcOf, isStudentAd, datasetReady, _resetCache: () => { _cache = null; _region = null; } };
