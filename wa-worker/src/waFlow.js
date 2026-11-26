@@ -654,7 +654,7 @@
     if (type === 'sync') {
       // fresh facts from the server (name, class, free tests, courses, prices, next महा-Test, paid, app…); no message
       const hadAcct = !!(lead.acct && lead.acct.code);
-      for (const k of ['series', 'subjects', 'prevPapers', 'name', 'cls', 'freeTotal', 'totalTests', 'kind', 'freeLessons', 'courses', 'prices', 'mtNext', 'mtReg', 'paid', 'app', 'pushOn', 'mobile', 'testsDone', 'acct', 'teamOffer', 'srvOffer', 'offerCfg']) if (data[k] !== undefined && data[k] !== null && !((k === 'cls' || k === 'name') && !data[k])) lead[k] = data[k];
+      for (const k of ['desk', 'series', 'subjects', 'prevPapers', 'name', 'cls', 'freeTotal', 'totalTests', 'kind', 'freeLessons', 'courses', 'prices', 'mtNext', 'mtReg', 'paid', 'app', 'pushOn', 'mobile', 'testsDone', 'acct', 'teamOffer', 'srvOffer', 'offerCfg']) if (data[k] !== undefined && data[k] !== null && !((k === 'cls' || k === 'name') && !data[k])) lead[k] = data[k];
       // a family that started on WhatsApp: the free account comes after the name — one message with it
       if (!hadAcct && lead.acct && lead.acct.code && lead.acct.pin && lead.welcomed && !lead.awaiting && !lead.app && !lead.paid && isOpen(lead, now))
         out.push(wa(lead, now, `📲 ${lead.name} चं app account पण तयार — app मध्ये ${appLeft(lead)} (फक्त app download केल्यावर), रोजची आठवण app मधून:\n${acctLine(lead)}\nApp 👇 Login → Code आणि PIN टाका\n${CONFIG.play}`));

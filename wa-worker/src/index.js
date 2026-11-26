@@ -10,6 +10,7 @@ import WA from './waFlow.js';
 import { validSignature, bodiesFor, templateBody, post, inboundText, hmacHex, sameHex } from './meta.js';
 import * as S from './store.js';
 import { leadInfo, queue, runJobs, waLogin, newLead, ping, appUsage } from './render.js';
+import { deskRoute, deskAdmin, creditPaid } from './desk.js';
 import { aiAnswer, classList, geminiModels } from './ai.js';
 
 // 🤖 the rules sent a parent's own question to the team (askTeam → .qa outputs): with AI_ON = "1" Gemini may answer it
@@ -269,7 +270,7 @@ async function adminOk(env, req) {
 // 👥 one line per thing a person did (Admin › 👥 Team shows who did what)
 const act = (env, who, gid, action, detail) => env.DB.prepare('INSERT INTO acts (at, by_id, by_name, gid, action, detail) VALUES (?, ?, ?, ?, ?, ?)')
   .bind(Date.now(), who?.id || 'admin', who?.name || 'Admin', gid || null, action, detail == null ? null : String(detail).slice(0, 300)).run().catch(() => {});
-const ACT_NAMES = { wa: '💬 WhatsApp', sms: '✉️ SMS', next: '✅ बोललो → पुढची Step', paying: '💳 Pay करणार', later: '⏰ नंतर', noanswer: '📵 उचलला नाही', close: '❌ नको', reply: '✍️ उत्तर', note: '📝 Note', add: '➕ नवीन', acct: '🔑 Code + PIN', answered: '✅ प्रश्न सुटला', step: '📋 Step', labels: '🏷️ Label', mt: '🏆 महा-Test आठवण', offer: '🎁 Team सूट' };
+const ACT_NAMES = { attempt: '📞 Call', talk: '✅ बोललो', nocall: '🔕 Call नको', wrong: '☎️ नंबर चुकीचा', no: '❌ नको', skip: '⏭ नंतर (आज)', teacher: '👩‍🏫 शिक्षक → Admin', paid: '✅ Pay झालं', wa: '💬 WhatsApp', sms: '✉️ SMS', next: '✅ बोललो → पुढची Step', paying: '💳 Pay करणार', later: '⏰ नंतर', noanswer: '📵 उचलला नाही', close: '❌ नको', reply: '✍️ उत्तर', note: '📝 Note', add: '➕ नवीन', acct: '🔑 Code + PIN', answered: '✅ प्रश्न सुटला', step: '📋 Step', labels: '🏷️ Label', mt: '🏆 महा-Test आठवण', offer: '🎁 Team सूट' };
 // 📲 App · free: the child uses the app (logged in / notifications) and has not paid, not closed — with how much
 // they use it (Render: the last day seen, tests, minutes in 7 days), the most active on top
 async function appFree(env, withUsage = true) {
@@ -459,7 +460,21 @@ async function noApp(env) {
   }
   return rows.slice(0, 100);
 }
+// 👩‍🏫 teachers the team sent to the Admin (a teacher who came in through a parents' ad / call)
+async function teacherFwd(env) {
+  const { results } = await env.DB.prepare("SELECT gid, name, cls, mobile, updated_at, data FROM leads WHERE crm = 'teacher' ORDER BY updated_at DESC LIMIT 200").all();
+  return (results || []).map(r => { const d = JSON.parse(r.data); return { gid: r.gid, name: r.name || d.name || '', cls: r.cls || '', mobile: r.mobile, fwd: d.teacherFwd || null, demo: d.teacherDemoAt || null }; });
+}
 async function crm(env, req, url, who) {
+  // 📞 the call desk (src/desk.js)
+  if (url.pathname.startsWith('/crm/desk/')) {
+    const ctx = { S, WA, json, withLead, act, appUsage, questions, teacherFwd, teacherList };
+    if (url.pathname === '/crm/desk/admin' && req.method === 'GET') {
+      if (who.role !== 'admin') return json({ success: false, message: 'हे फक्त Admin करू शकतो' }, 403);
+      return json({ success: true, data: await deskAdmin(env, url, ctx) });
+    }
+    return deskRoute(env, req, url, who, ctx);
+  }
   const wl = (gid, fn) => withLead(env, gid, null, fn, { sync: false });   // a team action: no Render round trip
   const adminOnly = () => json({ success: false, message: 'हे फक्त Admin करू शकतो' }, 403);
   const parts = url.pathname.split('/').filter(Boolean);   // crm, …
@@ -616,7 +631,9 @@ async function crm(env, req, url, who) {
         if (!WA.isOpen(lead, now)) { closed = true; return []; }
         if (lead.question) lead.question.answered = now.toISOString();
         lead.teamSent = (lead.teamSent || 0) + 1; lead.teamSentAt = now.toISOString();   // 🆕 "संपर्क झाला"
-        return [{ to: 'wa', kind: 'service', cost: 0, text, buttons: [] }];
+        // 📞 call desk: the ready message's own button goes with it (free inside the window)
+        const btn = body.btn === 'pay' ? { url: WA.L.pay(gid), label: '💳 Pay करा' } : body.btn === 'app' ? { url: lead.acct && lead.acct.code ? WA.CONFIG.play : WA.L.app(gid), label: '📲 App Download' } : null;
+        return [{ to: 'wa', kind: 'service', cost: 0, text, buttons: btn ? [btn] : [] }];
       });
       if (!closed) await act(env, who, gid, 'reply', text);
       return closed ? json({ success: false, message: 'खिडकी बंद आहे — टीमच्या WhatsApp वरून पाठवा.' }, 409) : json({ success: true });
@@ -859,6 +876,8 @@ export default {
           if (b.type !== 'sync') out.push(...WA.event(lead, b.type, b.data || {}, now));
           return out;
         });
+        // 💳 a payment: counted for the team member who last handled the family (call desk)
+        if (b.type === 'paid') await creditPaid(env, act, await S.getLead(env, gid), b.data && b.data.amount).catch(() => {});
         return json({ success: true, data: r });
       }
       // ⏰ Render tells us whether ads are running (it cannot be asked without waking it): ping only then

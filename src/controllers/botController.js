@@ -60,6 +60,16 @@ async function syncOf(gid) {
     series: lead.batch ? await require('../utils/seriesInfo').seriesInfo(lead.batch).then(s => (s ? { name: s.name, kind: s.kind, lines: s.lines, short: s.short, price: s.price } : null)).catch(() => null) : null,
     mtNext: next ? next.starts_at : null,
     mtReg,
+    // 📞 the call desk card (NKs Team, 2026-11-26): the plan the family is on, the phone the account is tied to,
+    // when the app was last opened, where the family came from
+    desk: await (async () => {
+      const sub = lead.converted_code ? await StudentSubscription.findOne({ student_code: lead.converted_code, payment_verified: true, is_trial: false }, 'amount period expiry_date created_at').sort({ created_at: -1 }).lean() : null;
+      return {
+        plan: sub ? { period: sub.period || '', amount: sub.amount || 0, till: sub.expiry_date || acc?.expiry_date || null, at: sub.created_at || null } : null,
+        bound: !!acc?.device_id, lastLogin: acc?.last_login_at || null, freeTier: acc ? !!acc.free_tier : null,
+        source: lead.source || '', ref: String(lead.ref || '').slice(0, 40), linkBatch: lead.link_batch || '',
+      };
+    })().catch(() => null),
     paid,
     app: !!(lead.device_token || acc?.device_id || acc?.last_login_at),
     pushOn: !!(lead.device_token || acc?.device_token),
