@@ -88,4 +88,13 @@ WA.inbound(C7, 'teacher', T('2026-11-27T16:00:00'));
 out = WA.inbound(C7, 'tform:' + JSON.stringify({ name: 'अ ब', school: 'शाळा', village: 'गाव', district: 'जिल्हा', cls: 'sch7', students: '1-20' }), T('2026-11-27T16:02:00'));
 const jb = out.find(o => o.action === 'teacher_account');
 ok(jb && jb.data.course === '', '7वी picked, no 7th course here → no course (Render gives the ad course), never 10वी', JSON.stringify(jb && jb.data));
+// 📵 the team got no answer
+const Q = WA.createLead({ gid: 'QQQQ111111', name: 'राम' }, T('2026-11-27T16:00:00')); Q.tdemo = { stage: 'steps', tCode: 'RAM1', bookedAt: T('2026-11-27T16:00:00').toISOString() }; Q.lastInboundAt = T('2026-11-27T16:00:00').toISOString();
+out = WA.teacherNoAnswer(Q, T('2026-11-27T17:00:00'));
+ok(/संपर्क झाला नाही/.test(texts(out)) && /Live Demo/.test(texts(out)) && /8390484545/.test(texts(out)) && btns(out).some(b => b.url && /live-demo/.test(b.url)), 'no answer (not booked): Live Demo + 📅 बुक करा + call 8390484545', texts(out));
+Q.tdemo.meet = { for: '2026-11-29', at: 'x' };
+out = WA.teacherNoAnswer(Q, T('2026-11-27T17:05:00'));
+ok(/बुक आहे/.test(texts(out)) && join(out), 'no answer (booked): "your demo is booked" + Join', texts(out));
+out = WA.teacherNoAnswer(Q, T('2026-11-29T18:00:00'));
+ok(!texts(out) && out.some(o => o.to === 'log'), 'window closed: nothing sent, the team is told to send it themselves');
 console.log(fails ? fails + ' FAILED' : 'ALL PASS');

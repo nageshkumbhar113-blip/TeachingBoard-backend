@@ -762,6 +762,7 @@ async function crm(env, req, url, who) {
           // tomorrow again; the third time in a row: the next step (its message may get an answer the call did not)
           if (lead.noAnswer % 3 === 0 && f.step < steps.length) lead.fu = { step: f.step + 1, due: endOfToday() + 1, setAt: t };
           else lead.fu = { step: f.step, due: endOfToday() + 1, setAt: t };
+          if (lead.tdemo) out.push(...WA.teacherNoAnswer(lead, now));   // 👩‍🏫 a teacher: the Live Demo / call-us message at once
         }
         if (res !== 'noanswer') lead.noAnswer = 0;
         if (res === 'close') { out.push(...WA.event(lead, 'call', { result: 'not_interested', reason }, now)); lead.fu = { step: f.step, done: true, setAt: t }; }

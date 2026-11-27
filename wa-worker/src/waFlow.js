@@ -1309,6 +1309,26 @@
     return best;
   }
 
+  // 📵 the team called a teacher and got no answer (owner 2026-11-27): the Sunday Live Demo first (📅 बुक करा), the
+  // call number as the other way; already booked → "your demo is booked" + the Join button. Free window only.
+  function teacherNoAnswer(lead, now) {
+    const out = [], d = lead.tdemo || (lead.tdemo = {});
+    if (!isOpen(lead, now)) { out.push(log('₹ नाही', '📵 शिक्षकाने call उचलला नाही — bot ची खिडकी बंद, WhatsApp वरून स्वतः पाठवा (Team app मधला message).')); return out; }
+    const nm = lead.name && lead.name !== 'तुमचा पाल्य' ? lead.name + ' ' : '', s = meetStart(now);
+    const booked = !!(d.meet && !d.meet.no && d.meet.for >= dayKey(s));
+    const head = `नमस्कार ${nm}सर/मॅडम 🙏
+NKs EduOrbit मधून आम्ही तुम्हाला call केला होता, पण संपर्क झाला नाही.
+
+`;
+    if (booked) out.push(wa(lead, now, head + `✅ तुमचा रविवारचा *Live Demo बुक आहे* — रविवार, ${meetDay(meetOf(d.meet.for))} · सकाळी 10 वाजता. Join बटण रविवारी 9:55 ला दाबा.
+काही विचारायचं असेल तर वेळ असेल तेव्हा 📞 *${TEAM_NO}* वर call करा.`, [JOIN_BTN()]));
+    else if (formOn()) { if (!d.tCode && ['cls', 'name'].includes(d.stage)) d.stage = 'form'; out.push(wa(lead, now, head + `📅 *रविवारी सकाळी 10 वाजता शिक्षकांसाठी Live Demo* आहे (Google Meet, 30 मिनिटं). App कसं वापरायचं ते live दाखवतो आणि तुमच्या प्रश्नांची उत्तरं देतो. जागा बुक करा 👇
+
+किंवा वेळ असेल तेव्हा 📞 *${TEAM_NO}* वर call करा.`, [meetFormBtn(lead)])); }
+    else out.push(wa(lead, now, head + `वेळ असेल तेव्हा 📞 *${TEAM_NO}* वर call करा 🙏`));
+    out.push(log('MEET', '📵 call उचलला नाही → Live Demo / call चा message पाठवला.'));
+    return out;
+  }
   // the booking page (index.js /meet/info): prefill + the coming Sunday + booked already?
   function meetInfo(lead, now = new Date()) {
     const d = lead.tdemo || {}, s = meetStart(now), key = dayKey(s);
@@ -1317,5 +1337,5 @@
     return { name: lead.name && lead.name !== 'तुमचा पाल्य' ? lead.name : '', school: d.school || '', village: d.village || '', district: d.district || '',
       when: 'रविवार, ' + meetDay(at) + ' · सकाळी 10:00', booked, link: booked ? CONFIG.meet.link : '', hasAccount: !!d.tCode };
   }
-  return { meetInfo, CONFIG, L, createLead, inbound, welcome, teacherWelcome, teacherTeamStep, TSTEPS, event, tick, nextDue, isOpen, whenText, dayKey, atIST, priceText, offerNow, ruleText, cleanName, paidClaim, TS };
+  return { meetInfo, teacherNoAnswer, CONFIG, L, createLead, inbound, welcome, teacherWelcome, teacherTeamStep, TSTEPS, event, tick, nextDue, isOpen, whenText, dayKey, atIST, priceText, offerNow, ruleText, cleanName, paidClaim, TS };
 });

@@ -116,6 +116,10 @@ try {
   ok(home.data.meet && home.data.meet.booked === 1 && /रविवार/.test(home.data.meet.when), 'Team home: 📅 1 teacher booked', JSON.stringify(home.data.meet));
   const tl = await crm('list?list=teacher');
   ok((tl.data || []).some(x => x.gid === g && /📅 Demo बुक/.test(x.stage) && x.district === 'कोल्हापूर'), 'teacher list: 📅 Demo बुक + district', JSON.stringify((tl.data || []).find(x => x.gid === g)));
+  n = sent.length;
+  const oc = await crm('lead/' + g + '/outcome', { result: 'noanswer' });
+  await waitSent(n + 1);
+  ok(oc.success && sent.slice(n).some(b => /संपर्क झाला नाही/.test(textOf(b)) && /hsz-addq-znj/.test(ctaUrl(b))), 'team: 📵 उचलला नाही → the teacher gets "booked" + Join (bot, at once)', allSince(n));
   const adm = await crm('desk/admin');
   ok(adm.data.meet && adm.data.meet.list.some(x => x.name === 'सुनीता जाधव' && x.students === '21-50'), 'Admin desk: the booked list', JSON.stringify(adm.data.meet));
   ok(again.success && again.data.booked && again.data.hasAccount, 'the page opened again: "booked" view', JSON.stringify(again));
