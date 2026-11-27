@@ -248,7 +248,9 @@ async function planImport(body, now = new Date()) {
 }
 
 function congratsText(teacher, count, courses, expiry) {
-  return `🎉 अभिनंदन ${teacher.name}!\nतुमचे ${count} विद्यार्थी NKs EduOrbit वर ${courses.join(', ')} साठी जोडले गेले आहेत (मुदत: ${expiry.split('-').reverse().join('-')}).\nविद्यार्थ्यांना परीक्षेसाठी खूप खूप शुभेच्छा! 📚✨\n📜 पुढे जाण्यासाठी कृपया नियम मान्य करा: ${RULES_URL}?code=${encodeURIComponent(teacher.teacher_code)}`;
+  return `🎉 अभिनंदन ${teacher.name}!\nतुमचे ${count} विद्यार्थी NKs EduOrbit वर ${courses.join(', ')} साठी जोडले गेले आहेत (मुदत: ${expiry.split('-').reverse().join('-')}).\nविद्यार्थ्यांना परीक्षेसाठी खूप खूप शुभेच्छा! 📚✨` +
+    // the rules link only while they are not accepted yet (owner 2026-11-27: a teacher who had accepted was told again on every import)
+    (rulesPending(teacher) ? `\n📜 पुढे जाण्यासाठी कृपया नियम मान्य करा: ${RULES_URL}?code=${encodeURIComponent(teacher.teacher_code)}` : '\n✅ नियम तुम्ही आधीच मान्य केले आहेत — काही करायची गरज नाही.');
 }
 
 // POST /api/students/import/preview — the plan only, nothing saved

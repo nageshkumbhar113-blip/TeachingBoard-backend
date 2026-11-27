@@ -12,6 +12,7 @@ const weeklyEntrySchema = new mongoose.Schema(
     started_at:    { type: Date, default: null },
     order:         { type: [String], default: [] },   // this person's question order
     submitted_at:  { type: Date, default: null },
+    blank_at:      { type: Date, default: null },   // opened, time ran out with no answer → "पेपर दिला नाही" (no rank; owner 2026-11-27)
     answers:       { type: [{ _id: false, q_id: String, given: String }], default: [] },
     score:         { type: Number, default: 0 },
     total:         { type: Number, default: 0 },

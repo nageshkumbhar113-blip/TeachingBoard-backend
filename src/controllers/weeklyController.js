@@ -93,7 +93,7 @@ function _view(ev, entry, registered = 0, now = _now(), bannerUntil = null, app 
       .map(t => ({ rank: t.rank, name: app ? t.name : HIDDEN_NAME, score: t.score, total: t.total })),
     banner_until: results ? (ev.banner_until || bannerUntil || new Date(reveal.getTime() + 7 * 864e5)) : null,
     me: entry ? {
-      registered: true, submitted: !!entry.submitted_at, score: entry.submitted_at ? entry.score : null,
+      registered: true, submitted: !!entry.submitted_at, started: !!entry.started_at, not_given: !!(entry.blank_at && !entry.submitted_at), score: entry.submitted_at ? entry.score : null,
       total: entry.total || null, rank: entry.rank ?? null,
     } : { registered: false, submitted: false },
     // practice: the paper can be started only till join_until; kind / day for the app (9.0.1+)
@@ -249,7 +249,9 @@ exports.key = asyncHandler(async (req, res) => {
   if (await _webBlocked(req, me)) return res.status(403).json({ success: false, code: 'APP_ONLY', message: APP_ONLY_MSG });
   // practice: a paper can be started only in its first minutes (the whole class writes it together);
   // one who already started may open it again (app closed / phone restarted)
-  const entry = await WeeklyEntry.findOne({ event_id: String(ev._id), student_code: me.code }, 'started_at submitted_at').lean();
+  const entry = await WeeklyEntry.findOne({ event_id: String(ev._id), student_code: me.code }, 'started_at submitted_at blank_at').lean();
+  // opened once, time ran out with no answer: "not given" — a paper opens only once (owner 2026-11-27)
+  if (entry?.blank_at) return res.status(400).json({ success: false, code: 'TIME_OVER', message: '⏰ हा पेपर तुम्ही आधी उघडला होता आणि वेळ संपली — एकही उत्तर नव्हतं, म्हणून "पेपर दिला नाही" असं धरलं. पुढचा पेपर वेळेवर द्या 🙂' });
   if (ev.join_until && now > ev.join_until && !entry?.started_at) {
     return res.status(400).json({ success: false, code: 'JOIN_CLOSED', message: `हा paper ${_hm(ev.join_until)} पर्यंतच सुरू करता येतो — पुढच्या paper ला वेळेवर या` });
   }
@@ -279,10 +281,18 @@ exports.submit = asyncHandler(async (req, res) => {
   const cutoff = Math.min(ev.ends_at.getTime() + SUBMIT_GRACE_MS, Math.max(W.revealOf(ev).getTime(), ev.ends_at.getTime()));
   if (now.getTime() > cutoff) throw new AppError('वेळ संपली — हा test जमा करता येणार नाही', 400);
   const existing = await WeeklyEntry.findOne({ event_id: String(ev._id), student_code: me.code }).lean();
+  if (existing?.blank_at && !existing.submitted_at) return res.json({ success: true, already: true, data: { not_given: true, score: 0, total: 0, correct: 0, wrong: 0, skipped: 0, by_subject: [] } });
   if (existing?.submitted_at) {
     return res.json({ success: true, already: true, data: { score: existing.score, total: existing.total, correct: existing.correct, wrong: existing.wrong, skipped: existing.skipped, by_subject: existing.by_subject || [] } });
   }
   const g = W.grade(ev, Array.isArray(req.body?.answers) ? req.body.answers.slice(0, 200) : []);
+  // not a single answer (opened, then the time ran out — owner 2026-11-27): "पेपर दिला नाही", not 0 marks — no
+  // rank, no day total, not in the toppers; the paper does not open again (key: TIME_OVER)
+  if (!(g.answers || []).some(a => String(a.given || '').trim())) {
+    await WeeklyEntry.updateOne({ event_id: String(ev._id), student_code: me.code },
+      { $set: { blank_at: now, name: me.name, is_guest: me.guest, via: _isApp(req) ? 'app' : 'web' }, $setOnInsert: { registered_at: now } }, { upsert: true });
+    return res.json({ success: true, data: { not_given: true, score: 0, total: 0, correct: 0, wrong: 0, skipped: 0, by_subject: [] } });
+  }
   const maxSec = ev.duration_minutes * 60;
   // The time decides the rank when marks are equal, so the server measures it: from the moment the
   // paper was opened (the key was given) to now (security audit 2026-11-22 — a phone could send
