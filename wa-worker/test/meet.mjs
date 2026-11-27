@@ -73,4 +73,19 @@ out = WA.inbound(G, 'राम पवार, नवीन शाळा काग
 ok(btns(out).some(b => b.flow), 'typed instead of the form: the form once more');
 out = WA.inbound(G, 'राम पवार, नवीन शाळा कागल', T('2026-11-27T17:02:00'));
 ok(out.some(o => o.action === 'teacher_account') && G.name === 'राम पवार', 'typed again: that line is the name + school (accounts asked)');
+// N: a teacher stopped at the class question (no account) → the booking page invite (and the page makes the account)
+WA.CONFIG.meetFlow = ''; WA.CONFIG.meetPage = PAGE;
+const N = WA.createLead({ gid: 'NNNN111111' }, T('2026-11-27T11:00:00'));
+N.tdemo = { via: 'bot', stage: 'cls', startedAt: T('2026-11-27T11:00:00').toISOString() }; N.lastInboundAt = T('2026-11-27T11:00:00').toISOString();
+out = WA.tick(N, T('2026-11-27T16:01:00'));
+ok(btns(out).some(b => b.url && /live-demo/.test(b.url)) && N.tdemo.stage === 'form', 'stopped at the class question → the 📅 बुक करा page invite', texts(out));
+WA.inbound(N, 'hi', T('2026-11-28T09:00:00'));
+out = WA.tick(N, T('2026-11-28T18:01:00'));
+ok(/उद्या/.test(texts(out)) && btns(out).some(b => b.url), 'next evening again (उद्या), with the button', texts(out));
+// a class that has no Test Series of that name: no wrong course
+const C7 = WA.createLead({ gid: 'C7C7111111' }, T('2026-11-27T16:00:00')); C7.courses = ['10वी - Semi English', '8th NMMS EXAM 26-27 BATCH'];
+WA.inbound(C7, 'teacher', T('2026-11-27T16:00:00'));
+out = WA.inbound(C7, 'tform:' + JSON.stringify({ name: 'अ ब', school: 'शाळा', village: 'गाव', district: 'जिल्हा', cls: 'sch7', students: '1-20' }), T('2026-11-27T16:02:00'));
+const jb = out.find(o => o.action === 'teacher_account');
+ok(jb && jb.data.course === '', '7वी picked, no 7th course here → no course (Render gives the ad course), never 10वी', JSON.stringify(jb && jb.data));
 console.log(fails ? fails + ' FAILED' : 'ALL PASS');

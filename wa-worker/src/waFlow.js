@@ -795,7 +795,8 @@
   // Saturday 6 pm + Sunday 9:45 reminders with the link (inside the free window; else the team is told); 11 am
   // three yes/no questions → an interested teacher goes to the Call desk 🔥. Messages only in the free window.
   const MEET_BTNS = [{ id: 'tm:yes', label: '✅ हो, येतो' }, { id: 'tm:no', label: '❌ या वेळी नाही' }];
-  const MEET_FROM = Date.parse('2026-11-27T07:30:00Z');   // the feature's start: earlier teachers are asked once from here
+  const MEET_FROM = Date.parse('2026-11-27T07:30:00Z');
+  const MEET_FROM2 = Date.parse('2026-11-27T10:30:00Z');   // teachers stopped before the account: asked once from here (16:00 IST)   // the feature's start: earlier teachers are asked once from here
   function meetStart(now) {   // the Sunday demo still to come (or running now)
     const M = CONFIG.meet, add = (M.dow - ist(now).getUTCDay() + 7) % 7;
     let s = atIST(now, M.h, M.m, add);
@@ -835,7 +836,6 @@
     const rx = COURSE_RX[d.clsPick];
     const course = rx ? (lead.courses || []).find(c => rx.test(c)) : '';
     if (course) d.course = course;
-    else if (!d.course && d.clsPick !== 'other') d.course = (lead.courses || [])[0] || '';
     const s = meetStart(now);
     d.meet = { for: dayKey(s), at: now.toISOString(), via: 'form' };
     out.push(log('MEET', `📋 Form: ${lead.name || ''} · ${d.school}${village ? ', ' + village : ''}${district ? ' (' + district + ')' : ''} · ${d.clsPick}${d.course ? ' → ' + cleanName(d.course) : ''} · ${d.students || '?'} विद्यार्थी → रविवार ${dayKey(s)} बुक.`));
@@ -933,6 +933,7 @@
     if (formOn()) {
       lead.tdemo.stage = 'form';
       const s = meetStart(now);
+      lead.tdemo.meetAsk = { for: dayKey(s), at: now.toISOString(), n: 1 };
       out.push(log('TDEMO', `👩‍🏫 शिक्षक (${how}) → बुकिंग form पाठवला.`));
       out.push(wa(lead, now, `नमस्कार 🙏 शिक्षकांचं स्वागत!\n\n📅 *रविवारच्या Live Demo साठी जागा बुक करा* आणि तुमचं *शिक्षक account* लगेच मिळवा.\nरविवार, ${meetDay(s)} · सकाळी 10 वाजता · Google Meet (30 मिनिटं)\n\n${MEET_POINTS}\n\nखालचं बटण दाबा आणि छोटा form भरा 👇`, [meetFormBtn(lead)]));
       return;
@@ -1096,14 +1097,19 @@
       });
     }
     // 📅 the Sunday live demo: the invitation, the reminders, the questions after it
-    if (d.tCode && d.stage === 'steps' && !d.orderAt) {
+    const noAcct = !d.tCode && ['cls', 'name', 'form'].includes(d.stage) && formOn();   // stopped at the class / name question (owner: keep asking)
+    if (((d.tCode && d.stage === 'steps') || noAcct) && !d.orderAt) {
       const M = CONFIG.meet;
       const reg = d.meet && !d.meet.no ? d.meet.for : '';
       // ask: 20 minutes after the codes the first time (teachers from before this feature: once, from its start);
       // not "हो" for that Sunday → asked again on the Friday 6 pm before the next one, 3 times at most
-      if (!d.meetAsk && !d.meet && d.bookedAt) {
-        const at = nextDay(new Date(Math.max(new Date(d.bookedAt).getTime() + 60e3, MEET_FROM)));   // at once (owner: 20 min was too late)
-        msg('meet-ask:first', at, (out, now) => { if (!d.meetAsk) meetAsk(lead, now, out); });
+      const base = d.bookedAt || (noAcct ? d.startedAt || lead.lastInboundAt : null);
+      if (!d.meetAsk && !d.meet && base) {
+        const b0 = new Date(base).getTime();
+        // the welcome form already went (an older lead): the next one in the evening; else at once (20 min was too late)
+        const t0 = noAcct && d.stage === 'form' ? Math.max(atIST(new Date(b0), 18, 0, 0).getTime(), b0 + 2 * H) : b0 + 60e3;
+        const at = nextDay(new Date(Math.max(t0, d.bookedAt ? MEET_FROM : MEET_FROM2)));
+        msg('meet-ask:first', at, (out, now) => { if (!d.meetAsk) { if (noAcct) d.stage = 'form'; meetAsk(lead, now, out); } });
       } else if (d.meetAsk && d.meetAsk.n < 15 && !(d.meetFb && d.meetFb.at)) {   // answered after a demo = came: no more
         // not booked for the coming Sunday (never booked, or the Sunday they booked has passed): the same invite with
         // its 📅 बुक करा button once a day at 6 pm, with the days left (owner 2026-11-27) — inside the free window only
