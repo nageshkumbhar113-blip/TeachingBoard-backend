@@ -789,7 +789,7 @@
   function codesText(lead) {
     const d = lead.tdemo;
     return `🎉 तयार${lead.name ? ', ' + lead.name : ''}!\n\n👩‍🏫 *शिक्षक* — Code: *${d.tCode}* · PIN: ${pinOf(d.tPin)}` +
-      (d.sCode ? `\n🎓 *Demo विद्यार्थी*${d.course ? ' (' + cleanName(d.course) + ')' : ''} — Code: *${d.sCode}* · PIN: ${pinOf(d.sPin)}${d.until ? '\n   3 दिवस चालू — ' + untilText(d) + ' पर्यंत' : ''}` : '') +
+      (d.sCode ? `\n🎓 *विद्यार्थी account*${d.course ? ' (' + cleanName(d.course) + ')' : ''} — Code: *${d.sCode}* · PIN: ${pinOf(d.sPin)}${d.until ? '\n   पूर्ण account — ' + untilText(d) + ' पर्यंत (रविवार) चालू' : ''}` : '') +
       `\n\n📲 App: ${CONFIG.play}\n\nआता 7 छोट्या steps — प्रत्येक 1–2 मिनिटं. मी एक-एक सांगतो 👇`;
   }
   // the current step, skipping what the app already said is done
@@ -947,12 +947,12 @@
     if (d.stage === 'making' && d.askedAt) msg('making', new Date(new Date(d.askedAt).getTime() + 30 * 60e3), (out, now) => {
       if (d.stage === 'making') tcall(lead, now, out, 'Account अजून बनलं नाही (30 मिनिटं)');
     });
-    // the demo student's 3 days
+    // the student account till Sunday night (owner 2026-11-27; was the demo student's 3 days)
     if (d.until && !d.orderAt) {
       const end = new Date(d.until);
       msg('end-12h', prevDay(new Date(end.getTime() - 12 * H)), (out, now) => {
         if (d.orderAt) return;
-        tsay(lead, now, out, `⏰ Demo विद्यार्थी *${d.sCode}* ${untilText(d)} ला बंद होईल.\nतुमच्या विद्यार्थ्यांची accounts: ▾ → ➕ *Students बनवा* — शिक्षकांसाठी खास सूट.\nमाहिती: 📞 ${TEAM_NO}`, [CALL_BTN]);
+        tsay(lead, now, out, `⏰ विद्यार्थी account *${d.sCode}* ${untilText(d)} ला बंद होईल (तुमच्या वर्गाचे 10 विद्यार्थी pay झाले की परत चालू).\nतुमच्या विद्यार्थ्यांची accounts: ▾ → ➕ *Students बनवा* — शिक्षकांसाठी खास सूट.\nमाहिती: 📞 ${TEAM_NO}`, [CALL_BTN]);
         tcall(lead, now, out, 'Demo विद्यार्थी उद्या बंद — अजून विद्यार्थी जोडले नाहीत');
       });
       msg('end', nextDay(new Date(end.getTime() + 15 * 60e3)), (out, now) => {

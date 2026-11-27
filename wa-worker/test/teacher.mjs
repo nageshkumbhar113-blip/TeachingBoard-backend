@@ -27,7 +27,7 @@ ok(job && job.name === 'संजय पाटील' && job.data.school === '�
 // Render's answer
 o = W.event(L, 'tdemo', { account: { tCode: 'SAN123', tPin: '7284', sCode: 'JIP0001', sPin: '3916', course: COURSES[0], until: at(72).toISOString() } }, at(0.05));
 let t = txt(o);
-ok(/SAN123/.test(t) && /7284/.test(t) && /JIP0001/.test(t) && /3916/.test(t) && /3 दिवस/.test(t), 'codes: teacher + demo student (3 days)', t);
+ok(/SAN123/.test(t) && /7284/.test(t) && /JIP0001/.test(t) && /3916/.test(t) && /रविवार/.test(t) && /विद्यार्थी account/.test(t), 'codes: teacher + student account (till Sunday)', t);
 ok(/Step 1\/7/.test(t) && /teacher-guide#login/.test(t) && btns(o).includes('ts:done') && btns(o).includes('ts:help'), 'Step 1 with its guide link and ✅ / ❓', t);
 ok(o.some(x => x.to === 'do' && x.action === 'team_push' && /नवीन शिक्षक/.test(x.data.title)), 'team push: 🆕 नवीन शिक्षक');
 ok(!FREE_WORD.test(t), 'no free / commission words', t.match(FREE_WORD));

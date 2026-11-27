@@ -24,9 +24,9 @@ function _me(req) {
     name: req.userDoc.name || req.user.name || '',
     guest: !!req.user.guest,
     batches: Array.isArray(req.userDoc.assigned_batches) ? req.userDoc.assigned_batches : [],
-    full: hasFullAccess(req.userDoc) && !req.userDoc.demo_of_teacher,
+    full: hasFullAccess(req.userDoc),   // a teacher's student account is a real one now (owner 2026-11-27)
     hide: req.userDoc.hide_in_toppers === true,
-    demo: !!req.userDoc.demo_of_teacher,   // 🎯 a teacher's school demo student: no daily papers / महा-Test
+    demo: false,   // (was: a teacher's school demo student got no daily papers / महा-Test — owner 2026-11-27: real account)
   };
 }
 

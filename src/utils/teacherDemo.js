@@ -20,6 +20,17 @@ const { invalidateUserCache } = require('../middleware/auth');
 
 const DEMO_HOURS = 72;   // owner 2026-11-26: the demo student 3 days (was 48 h)
 const IST_MS = 5.5 * 3600e3;
+// owner 2026-11-27: the teacher's student account is a REAL one (every paper, महा-Test, rank — no "demo" limits) and
+// stays open till Sunday night (IST 23:59) — the Sunday 10 am live demo — then closes; it opens again by itself when
+// the teacher has 10 paid students of that course (or the Admin's switch). Booked on a Sunday after the demo → the
+// next Sunday. (The Admin's "hours" setting is no longer used.)
+function untilSunday(now = new Date()) {
+  const ist = new Date(now.getTime() + IST_MS);
+  const dow = ist.getUTCDay();
+  const add = dow === 0 ? (ist.getUTCHours() < 10 ? 0 : 7) : 7 - dow;
+  const end = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate() + add, 23, 59, 59));
+  return new Date(end.getTime() - IST_MS);
+}
 
 const cfgSchema = new mongoose.Schema({
   key: { type: String, default: 'main', unique: true },
@@ -122,12 +133,12 @@ async function book(body, ip = '') {
   // the school demo student (one per teacher)
   let student = await User.findOne({ role: 'student', demo_of_teacher: teacher.teacher_code });
   let sPin = '';
-  const until = new Date(now.getTime() + (Number(cfg.hours) || DEMO_HOURS) * 3600e3);
+  const until = untilSunday(now);   // (was: now + cfg.hours)
   if (!student) {
     sPin = randomPin();
     const code = await uniqueStudentCode(school, mobile, async c => !!(await User.exists({ student_code: c })));
     student = new User({
-      user_id: `student-${randomUUID()}`, name: `School Demo – ${school}`.slice(0, 80), role: 'student', student_code: code,
+      user_id: `student-${randomUUID()}`, name: `विद्यार्थी – ${school}`.slice(0, 80), role: 'student', student_code: code,
       mobile, status: 'active', assigned_batches: [course], expiry_date: until, free_tier: false, pin_hash: User.hashPin(sPin),
       approved_at: now, approved_by: 'demo', request_source: 'demo', school_name: school, referred_by_teacher: teacher.teacher_code,
       hide_in_toppers: true, demo_of_teacher: teacher.teacher_code, demo_until: until,
@@ -204,4 +215,4 @@ async function studentDid(student, data) {
   teacherDid(t, data);
 }
 
-module.exports = { teacherDid, studentDid, book, syncAll, syncOne, adminSwitch, notify, config, DemoConfig, yearEnd, courseFor };
+module.exports = { teacherDid, studentDid, book, syncAll, syncOne, adminSwitch, notify, config, DemoConfig, yearEnd, courseFor, untilSunday };
