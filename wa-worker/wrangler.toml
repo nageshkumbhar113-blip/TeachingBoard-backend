@@ -24,6 +24,7 @@ REENGAGE_TEMPLATE = ""     # name of an approved Meta template for "Bot à¤¨à
 TEMPLATE_LANG = "mr"
 TEAM_NUMBER = "918390484545"   # the team's own WhatsApp / phone: shown to parents for questions and calls
 BOT_NUMBER = "919226719313"   # the bot's WhatsApp number (Meta phone number id 1305896689283987, WABA 1931910161115440)
+MEET_FLOW_ID = ""   # the teachers' Live Demo booking form (WhatsApp Flow id, flows/teacher-demo-booking.json); "" = chat questions
 
 [[d1_databases]]
 binding = "DB"

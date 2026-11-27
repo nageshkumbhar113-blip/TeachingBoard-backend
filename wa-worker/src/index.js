@@ -57,6 +57,7 @@ function configure(env) {
   if (env.BOT_NUMBER) WA.CONFIG.botNumber = env.BOT_NUMBER;
   if (env.TEAM_NUMBER) WA.CONFIG.teamNumber = env.TEAM_NUMBER;
   if (env.SITE) WA.CONFIG.site = env.SITE;
+  WA.CONFIG.meetFlow = env.MEET_FLOW_ID || '';   // the Live Demo booking form (WhatsApp Flow); '' = the chat questions as before
 }
 const keyOk = (env, req) => !!env.SHARED_SECRET && sameHex(req.headers.get('X-Bot-Key') || '', env.SHARED_SECRET);
 

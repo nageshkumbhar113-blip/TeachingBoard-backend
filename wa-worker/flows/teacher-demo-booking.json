@@ -1,0 +1,53 @@
+{
+  "version": "6.0",
+  "screens": [
+    {
+      "id": "BOOK",
+      "title": "Live Demo बुकिंग",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "name": { "type": "string", "__example__": "संजय पाटील" },
+        "school": { "type": "string", "__example__": "जि. प. शाळा कागल" }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          { "type": "TextSubheading", "text": "रविवार सकाळी 10 · Google Meet · 30 मिनिटं" },
+          { "type": "TextBody", "text": "बुकिंगसोबत तुमचं शिक्षक account लगेच मिळेल." },
+          { "type": "TextInput", "name": "name", "label": "तुमचं नाव", "input-type": "text", "required": true, "init-value": "${data.name}" },
+          { "type": "TextInput", "name": "school", "label": "शाळा / क्लासचं नाव", "input-type": "text", "required": true, "init-value": "${data.school}" },
+          { "type": "TextInput", "name": "village", "label": "गाव / तालुका", "input-type": "text", "required": true },
+          { "type": "TextInput", "name": "district", "label": "जिल्हा", "input-type": "text", "required": true },
+          {
+            "type": "Dropdown", "name": "cls", "label": "कोणत्या वर्गाला शिकवता", "required": true,
+            "data-source": [
+              { "id": "nmms8", "title": "8वी NMMS" },
+              { "id": "sch4", "title": "4थी शिष्यवृत्ती" },
+              { "id": "sch7", "title": "7वी शिष्यवृत्ती" },
+              { "id": "other", "title": "इतर" }
+            ]
+          },
+          {
+            "type": "Dropdown", "name": "students", "label": "साधारण किती विद्यार्थी", "required": true,
+            "data-source": [
+              { "id": "1-20", "title": "1 ते 20" },
+              { "id": "21-50", "title": "21 ते 50" },
+              { "id": "50+", "title": "50 पेक्षा जास्त" }
+            ]
+          },
+          {
+            "type": "Footer", "label": "✅ बुक करा",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {
+                "name": "${form.name}", "school": "${form.school}", "village": "${form.village}",
+                "district": "${form.district}", "cls": "${form.cls}", "students": "${form.students}"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -32,6 +32,15 @@ const cut = (s, n) => { const a = [...String(s || '')]; return a.length <= n ? a
 export function bodiesFor(to, text, buttons) {
   const base = { messaging_product: 'whatsapp', recipient_type: 'individual', to };
   const out = [];
+  // a WhatsApp Flow (a small form inside WhatsApp): { flow: { id, cta, token, screen, data } } — one per message
+  const fl = (buttons || []).find(b => b && b.flow && b.flow.id);
+  if (fl) {
+    const f = fl.flow;
+    out.push({ ...base, type: 'interactive', interactive: { type: 'flow', body: { text: cut(String(text || ''), 1024) }, action: { name: 'flow', parameters: {
+      flow_message_version: '3', flow_token: String(f.token || 'x'), flow_id: String(f.id), flow_cta: cut(f.cta || 'उघडा', 20), flow_action: 'navigate',
+      flow_action_payload: { screen: f.screen || 'BOOK', ...(f.data ? { data: f.data } : {}) } } } } });
+    return out;
+  }
   // a link button ({ url, label }): WhatsApp "cta_url" — one per message, label ≤ 20; reply buttons with it go
   // in a second short message ("किंवा 👇")
   const link = (buttons || []).find(b => b && b.url && b.label);
@@ -83,6 +92,7 @@ export async function post(env, body) {
 // what the parent sent, as the text / button id the rules understand
 export function inboundText(m) {
   if (m.type === 'text') return m.text?.body || '';
+  if (m.type === 'interactive' && m.interactive?.type === 'nfm_reply') return 'tform:' + String(m.interactive.nfm_reply?.response_json || '{}');   // a WhatsApp Flow form sent back
   if (m.type === 'interactive') return m.interactive?.button_reply?.id || m.interactive?.list_reply?.id || '';
   if (m.type === 'button') return m.button?.payload || m.button?.text || '';
   return '';
