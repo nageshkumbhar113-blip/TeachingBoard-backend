@@ -1,6 +1,7 @@
 // 👩‍🏫 Teacher Guide (waFlow.js, owner 2026-11-26) — the rules alone, with a clock we move: run `node test/teacher.mjs`
 import { createRequire } from 'module';
 const W = createRequire(import.meta.url)('../src/waFlow.js');
+W.CONFIG.meetPage = '';   // the chat path (the booking page has its own tests: meet.mjs, meet-page.mjs)
 let fails = 0;
 const ok = (c, m, extra = '') => { console.log((c ? 'PASS ' : 'FAIL ') + m + (c ? '' : '  ' + extra)); if (!c) fails++; };
 const H = 3600e3;

@@ -18,7 +18,7 @@ function teacher(booked) {
   const out = WA.event(lead, 'tdemo', { account: { tCode: 'SAN123', tPin: '7284', sCode: 'JIP0001', sPin: '3916', course: '8th NMMS', until: T('2026-11-29T23:59:59').toISOString() } }, booked);
   return { lead, out };
 }
-WA.CONFIG.meetFlow = '';
+WA.CONFIG.meetFlow = ''; const PAGE = WA.CONFIG.meetPage; WA.CONFIG.meetPage = '';   // A-C: the chat path
 let { lead: A, out } = teacher(T('2026-11-27T13:00:00'));
 ok(/Live Demo/.test(texts(out)) && /29 नोव्हेंबर/.test(texts(out)) && ids(out).includes('tm:yes'), 'invite at once with the codes: Sunday 29 Nov, 📅 बुक करा', texts(out).slice(-200));
 out = WA.inbound(A, 'tm:yes', T('2026-11-27T13:05:00'));
@@ -43,6 +43,14 @@ const { lead: C } = teacher(T('2026-11-27T09:00:00'));
 WA.inbound(C, 'tm:yes', T('2026-11-27T09:30:00'));
 out = WA.tick(C, T('2026-11-28T18:01:00'));
 ok(!texts(out) && C.crm === 'call' && /आठवण/.test(C.tdemo.callWhy || ''), 'Saturday, window closed: the team calls');
+// P: our booking page — the invite carries a 📅 बुक करा link with this teacher's own token
+WA.CONFIG.meetPage = PAGE;
+const P = WA.createLead({ gid: 'PPPP111111' }, T('2026-11-27T16:00:00'));
+out = WA.inbound(P, 'teacher', T('2026-11-27T16:00:00'));
+const pl = btns(out).find(b => b.url);
+ok(pl && /^https:\/\/nkseduorbit\.in\/live-demo\?g=PPPP111111&t=[a-z0-9]{8,24}$/.test(pl.url) && P.tdemo.mtok && pl.url.endsWith(P.tdemo.mtok) && P.tdemo.stage === 'form', 'page: the invite links our page with the token', pl && pl.url);
+const mi = WA.meetInfo(P, T('2026-11-27T16:01:00'));
+ok(mi.when === 'रविवार, 29 नोव्हेंबर · सकाळी 10:00' && !mi.booked, 'page info: Sunday 29 Nov, not booked', JSON.stringify(mi));
 // F: with the booking form
 WA.CONFIG.meetFlow = '1234567890';
 const F = WA.createLead({ gid: 'FFFF111111' }, T('2026-11-27T16:00:00')); F.courses = ['8th NMMS EXAM 26-27 BATCH', '4th Scholarship'];

@@ -43,7 +43,8 @@
     play: 'https://play.google.com/store/apps/details?id=com.nkseduorbit.student',
     // 👩‍🏫 teachers' live demo every Sunday 10–10:45 (owner 2026-11-27; one Google Calendar Meet, the same link weekly)
     meet: { link: 'https://meet.google.com/hsz-addq-znj', dow: 0, h: 10, m: 0, mins: 45 },
-    meetFlow: '',   // the booking form's WhatsApp Flow id (env MEET_FLOW_ID); '' = chat questions as before
+    meetFlow: '',   // the booking form's WhatsApp Flow id (env MEET_FLOW_ID); '' = our own page below
+    meetPage: 'https://nkseduorbit.in/live-demo',   // our booking page (owner 2026-11-27); '' = chat questions as before
     botNumber: '91XXXXXXXXXX',    // the WhatsApp Cloud API (bot) number — set when it exists
     teamNumber: '91YYYYYYYYYY',   // the team's own WhatsApp (calls + hand-sent messages, free)
     prizes: [[5, 'Compass box'], [8, 'Stationery kit'], [15, 'School bag']],
@@ -806,17 +807,20 @@
   // owner 2026-11-27: no "will you come?" — one 📅 बुक करा button opens a small form in WhatsApp (a WhatsApp Flow:
   // name, school, village, district, class, students); the link comes as a 🎥 Join button
   const JOIN_BTN = () => ({ url: CONFIG.meet.link, label: '🎥 Meet Join करा' });
-  const meetFormBtn = lead => ({ id: 'tflow', label: '📅 बुक करा', flow: { id: CONFIG.meetFlow, cta: '📅 बुक करा', token: lead.gid || 'x', screen: 'BOOK',
+  // the booking button: our page (a link with this teacher's own token) or a WhatsApp Flow when one is set
+  const formOn = () => !!(CONFIG.meetFlow || CONFIG.meetPage);
+  const meetTok = lead => { const d = lead.tdemo; if (!d.mtok) d.mtok = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 8); return d.mtok; };
+  const meetFormBtn = lead => !CONFIG.meetFlow ? { url: `${CONFIG.meetPage}?g=${encodeURIComponent(lead.gid || '')}&t=${meetTok(lead)}`, label: '📅 बुक करा' } : ({ id: 'tflow', label: '📅 बुक करा', flow: { id: CONFIG.meetFlow, cta: '📅 बुक करा', token: lead.gid || 'x', screen: 'BOOK',
     data: { name: String(lead.name && lead.name !== 'तुमचा पाल्य' ? lead.name : ''), school: String((lead.tdemo && lead.tdemo.school) || '') } } });
   const MEET_POINTS = '✅ 1 मिनिटात पेपर कसा बनवायचा\n✅ मुलांचे गुण आणि कमकुवत धडे तुमच्या फोनवर\n✅ तुमच्या प्रश्नांची उत्तरं live';
   function meetAsk(lead, now, out) {
     const d = lead.tdemo, s = meetStart(now);
     d.meetAsk = { for: dayKey(s), at: now.toISOString(), n: ((d.meetAsk && d.meetAsk.n) || 0) + 1 };
-    if (CONFIG.meetFlow) tsay(lead, now, out, `📅 *शिक्षकांसाठी Live Demo*\nरविवार, ${meetDay(s)} · सकाळी 10 वाजता · Google Meet (30 मिनिटं)\n\n${MEET_POINTS}\n\nतुमची जागा बुक करण्यासाठी खालचं बटण दाबा 👇`, [meetFormBtn(lead)]);
+    if (formOn()) tsay(lead, now, out, `📅 *शिक्षकांसाठी Live Demo*\nरविवार, ${meetDay(s)} · सकाळी 10 वाजता · Google Meet (30 मिनिटं)\n\n${MEET_POINTS}\n\nतुमची जागा बुक करण्यासाठी खालचं बटण दाबा 👇`, [meetFormBtn(lead)]);
     else tsay(lead, now, out, `📅 *शिक्षकांसाठी Live Demo* — रविवार, ${meetDay(s)} · सकाळी 10 वाजता · Google Meet (30 मिनिटं)\n\n${MEET_POINTS}\n\nजागा बुक करायची?`, [{ id: 'tm:yes', label: '📅 बुक करा' }]);
     out.push(log('MEET', `रविवार demo (${dayKey(s)}) साठी निमंत्रण.`));
   }
-  const bookedText = (lead, s) => `✅ बुक झालं${lead.name && lead.name !== 'तुमचा पाल्य' ? ', *' + lead.name + '* सर/मॅडम' : ''}!\n📅 रविवार, ${meetDay(s)} · सकाळी 10 वाजता\n(2 मिनिटं आधी या.) शनिवारी संध्याकाळी आणि रविवारी सकाळी आठवण पाठवतो 🙂`;
+  const bookedText = (lead, s) => `✅ बुक झालं${lead.name && lead.name !== 'तुमचा पाल्य' ? ', *' + lead.name + '* सर/मॅडम' : ''}!\n📅 रविवार, ${meetDay(s)} · सकाळी 10 वाजता\n\n⚠️ खालचं *🎥 Meet Join करा* बटण *रविवारी सकाळी 9:55 ला* दाबा — आत्ता नाही.\n⏰ शनिवारी संध्याकाळी आणि रविवारी 9:45 ला आठवण पाठवतो 🙂`;
   // the form came back: book Sunday; a new teacher also gets the accounts (Render: 'teacher_account')
   const COURSE_RX = { nmms8: /NMMS/i, sch4: /(^|\D)4(th|थी|\b)/i, sch7: /(^|\D)7(th|वी|\b)/i };
   function formReply(lead, raw, now, out) {
@@ -924,7 +928,7 @@
     lead.tdemo = Object.assign(lead.tdemo || {}, { via: lead.tdemo?.via || 'bot', stage: 'cls', startedAt: now.toISOString(), step: 0 });
     lead.cls = 'Teacher (bot)'; lead.awaiting = null;
     // the booking form (owner 2026-11-27): one form = the Sunday Live Demo booked + the accounts made at once
-    if (CONFIG.meetFlow) {
+    if (formOn()) {
       lead.tdemo.stage = 'form';
       const s = meetStart(now);
       out.push(log('TDEMO', `👩‍🏫 शिक्षक (${how}) → बुकिंग form पाठवला.`));
@@ -1292,5 +1296,13 @@
     return best;
   }
 
-  return { CONFIG, L, createLead, inbound, welcome, teacherWelcome, teacherTeamStep, TSTEPS, event, tick, nextDue, isOpen, whenText, dayKey, atIST, priceText, offerNow, ruleText, cleanName, paidClaim, TS };
+  // the booking page (index.js /meet/info): prefill + the coming Sunday + booked already?
+  function meetInfo(lead, now = new Date()) {
+    const d = lead.tdemo || {}, s = meetStart(now), key = dayKey(s);
+    const booked = !!(d.meet && !d.meet.no && d.meet.for >= key);
+    const at = booked ? meetOf(d.meet.for) : s;
+    return { name: lead.name && lead.name !== 'तुमचा पाल्य' ? lead.name : '', school: d.school || '', village: d.village || '', district: d.district || '',
+      when: 'रविवार, ' + meetDay(at) + ' · सकाळी 10:00', booked, link: booked ? CONFIG.meet.link : '', hasAccount: !!d.tCode };
+  }
+  return { meetInfo, CONFIG, L, createLead, inbound, welcome, teacherWelcome, teacherTeamStep, TSTEPS, event, tick, nextDue, isOpen, whenText, dayKey, atIST, priceText, offerNow, ruleText, cleanName, paidClaim, TS };
 });

@@ -57,7 +57,34 @@ function configure(env) {
   if (env.BOT_NUMBER) WA.CONFIG.botNumber = env.BOT_NUMBER;
   if (env.TEAM_NUMBER) WA.CONFIG.teamNumber = env.TEAM_NUMBER;
   if (env.SITE) WA.CONFIG.site = env.SITE;
-  WA.CONFIG.meetFlow = env.MEET_FLOW_ID || '';   // the Live Demo booking form (WhatsApp Flow); '' = the chat questions as before
+  WA.CONFIG.meetFlow = env.MEET_FLOW_ID || '';   // the Live Demo booking form (WhatsApp Flow); '' = our own page
+  if (env.MEET_PAGE !== undefined) WA.CONFIG.meetPage = env.MEET_PAGE;   // '' = the chat questions as before
+}
+
+// 📅 the Live Demo booking page: the link carries the teacher's lead id + its own random token (lead.tdemo.mtok)
+async function meetLead(env, gid, tok) {
+  gid = String(gid || '').toUpperCase();
+  if (!GID.test(gid) || !/^[a-z0-9]{8,24}$/.test(String(tok || ''))) return null;
+  const lead = await S.getLead(env, gid);
+  return lead && lead.tdemo && lead.tdemo.mtok && sameHex(lead.tdemo.mtok, String(tok)) ? lead : null;
+}
+async function meetPageInfo(env, url) {
+  const lead = await meetLead(env, url.searchParams.get('g'), url.searchParams.get('t'));
+  if (!lead) return { success: false, message: 'ही link जुनी किंवा चुकीची आहे — WhatsApp वर "teacher" लिहा, नवीन link येईल.' };
+  return { success: true, data: WA.meetInfo(lead, new Date()) };
+}
+async function meetPageBook(env, req) {
+  const b = await req.json().catch(async () => { try { return JSON.parse(await req.text()); } catch { return {}; } });
+  const lead = await meetLead(env, b.g, b.t);
+  if (!lead) return { success: false, message: 'ही link जुनी किंवा चुकीची आहे — WhatsApp वर "teacher" लिहा.' };
+  const f = b.form || {};
+  const need = ['name', 'school', 'village', 'district', 'cls', 'students'];
+  if (need.some(k => !String(f[k] || '').trim())) return { success: false, message: 'सगळ्या जागा भरा.' };
+  const form = Object.fromEntries(need.map(k => [k, String(f[k]).replace(/\s+/g, ' ').trim().slice(0, 80)]));
+  await withLead(env, lead.gid, null, (l, now) => WA.inbound(l, 'tform:' + JSON.stringify(form), now), { sync: false });
+  await runJobs(env, 5).catch(() => {});   // Render makes the accounts now (not at the next 5-minute tick)
+  const after = await S.getLead(env, lead.gid);
+  return { success: true, data: WA.meetInfo(after || lead, new Date()) };
 }
 const keyOk = (env, req) => !!env.SHARED_SECRET && sameHex(req.headers.get('X-Bot-Key') || '', env.SHARED_SECRET);
 
@@ -821,6 +848,9 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
     try {
       if (url.pathname === '/health') return json({ ok: true });
+      // 📅 the teachers' Live Demo booking page (nkseduorbit.in/live-demo?g=<gid>&t=<the teacher's own token>)
+      if (url.pathname === '/meet/info' && req.method === 'GET') return json(await meetPageInfo(env, url));
+      if (url.pathname === '/meet/book' && req.method === 'POST') return json(await meetPageBook(env, req));
       // 🎬 the teachers' demo (nkseduorbit.in/demo, a static page): name + number at its login → a CRM lead to call
       if (url.pathname === '/demo/lead' && req.method === 'POST') return json(await demoLead(env, req));
       // 🤖 checking the AI's answers before AI_ON (AI_TEST_KEY: a secret only for this)
