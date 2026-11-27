@@ -41,6 +41,8 @@
     prices: { service: 0, utility: 0.115, marketing: 0.86 },   // ₹, India (estimates — Meta changes them)
     site: 'https://nkseduorbit.in',
     play: 'https://play.google.com/store/apps/details?id=com.nkseduorbit.student',
+    // 👩‍🏫 teachers' live demo every Sunday 10–10:45 (owner 2026-11-27; one Google Calendar Meet, the same link weekly)
+    meet: { link: 'https://meet.google.com/hsz-addq-znj', dow: 0, h: 10, m: 0, mins: 45 },
     botNumber: '91XXXXXXXXXX',    // the WhatsApp Cloud API (bot) number — set when it exists
     teamNumber: '91YYYYYYYYYY',   // the team's own WhatsApp (calls + hand-sent messages, free)
     prizes: [[5, 'Compass box'], [8, 'Stationery kit'], [15, 'School bag']],
@@ -786,6 +788,70 @@
   const tcall = (lead, now, out, why) => { lead.crm = 'call'; lead.callAt = now.toISOString(); lead.tdemo.callWhy = why; out.push(log('CALL', '👩‍🏫 ' + why)); };
   const tpush = (out, now, lead, title, text) => out.push({ to: 'do', action: 'team_push', data: { title, text, one: lead.gid, at: now.getTime() } });
   const untilText = d => (d.until ? new Date(d.until).toLocaleString('mr-IN-u-nu-latn', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' }) : '');
+  // ── 📅 the teachers' Sunday live demo (Google Meet, owner 2026-11-27) ──
+  // ask → ✅ हो (registered for that Sunday) / ❌ नाही (asked again before the next Sunday, 3 times at most);
+  // Saturday 6 pm + Sunday 9:45 reminders with the link (inside the free window; else the team is told); 11 am
+  // three yes/no questions → an interested teacher goes to the Call desk 🔥. Messages only in the free window.
+  const MEET_BTNS = [{ id: 'tm:yes', label: '✅ हो, येतो' }, { id: 'tm:no', label: '❌ या वेळी नाही' }];
+  const MEET_FROM = Date.parse('2026-11-27T07:30:00Z');   // the feature's start: earlier teachers are asked once from here
+  function meetStart(now) {   // the Sunday demo still to come (or running now)
+    const M = CONFIG.meet, add = (M.dow - ist(now).getUTCDay() + 7) % 7;
+    let s = atIST(now, M.h, M.m, add);
+    if (s.getTime() + M.mins * 60e3 <= now.getTime()) s = atIST(now, M.h, M.m, add + 7);
+    return s;
+  }
+  const meetOf = key => atIST(new Date(key + 'T12:00:00+05:30'), CONFIG.meet.h, CONFIG.meet.m, 0);
+  const meetDay = s => s.toLocaleDateString('mr-IN-u-nu-latn', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'long' });
+  function meetAsk(lead, now, out) {
+    const d = lead.tdemo, s = meetStart(now);
+    d.meetAsk = { for: dayKey(s), at: now.toISOString(), n: ((d.meetAsk && d.meetAsk.n) || 0) + 1 };
+    tsay(lead, now, out, `📅 *शिक्षकांसाठी Live Demo* — दर रविवारी सकाळी 10 वाजता, Google Meet वर (30 मिनिटं).\nApp कसं वापरायचं ते live दाखवतो आणि तुमच्या प्रश्नांची उत्तरं देतो.\n\nया रविवारी (${meetDay(s)}) यायचं?`, MEET_BTNS);
+    out.push(log('MEET', `रविवार demo (${dayKey(s)}) साठी विचारलं.`));
+  }
+  function meetReply(lead, t, now, out) {
+    const d = lead.tdemo, M = CONFIG.meet;
+    if (t === 'tm:yes') {
+      const s = meetStart(now);
+      d.meet = { for: dayKey(s), at: now.toISOString() };
+      out.push(wa(lead, now, `✅ नोंद झाली! रविवार, ${meetDay(s)} — सकाळी 10 वाजता.\n🔗 ${M.link}\n(Google Meet app किंवा Chrome मध्ये उघडा; 2 मिनिटं आधी या.)\nशनिवारी संध्याकाळी आणि रविवारी सकाळी आठवण पाठवतो 🙂`));
+      out.push(log('MEET', `✅ रविवार demo (${dayKey(s)}) — नोंद.`));
+      return true;
+    }
+    if (t === 'tm:no') {
+      d.meet = { for: dayKey(meetStart(now)), no: true, at: now.toISOString() };
+      out.push(wa(lead, now, '🙏 ठीक आहे — पुढच्या रविवारसाठी विचारतो. App बद्दल काही प्रश्न असेल तर इथे लिहा.'));
+      out.push(log('MEET', '❌ या रविवारी नाही.'));
+      return true;
+    }
+    if (t === 'tm:sat') { out.push(wa(lead, now, `👍 उद्या भेटू! सकाळी 10 वाजता 🔗 ${M.link}`)); out.push(log('MEET', '✅ शनिवारी परत "येतो" म्हणाले.')); return true; }
+    // after the demo: 3 questions, one after the other
+    const fb = d.meetFb || (d.meetFb = {});
+    if (t === 'tf:good' || t === 'tf:more') {
+      fb.liked = t === 'tf:good' ? 'छान' : 'अजून समजून घ्यायचं';
+      out.push(wa(lead, now, 'तुमच्या वर्गाची मुलं app मध्ये जोडायची आहेत का?', [{ id: 'tf:add', label: '✅ हो' }, { id: 'tf:later', label: '⏳ नंतर' }]));
+      out.push(log('MEET', `Demo कसा वाटला: ${fb.liked}`));
+      return true;
+    }
+    if (t === 'tf:add' || t === 'tf:later') {
+      fb.add = t === 'tf:add';
+      out.push(wa(lead, now, 'आमच्या team ने तुम्हाला call करावा का?', [{ id: 'tf:call', label: '📞 हो' }, { id: 'tf:nocall', label: '❌ नको' }]));
+      out.push(log('MEET', `मुलं जोडायची: ${fb.add ? 'हो' : 'नंतर'}`));
+      return true;
+    }
+    if (t === 'tf:call' || t === 'tf:nocall') {
+      fb.call = t === 'tf:call'; fb.at = now.toISOString();
+      const hot = fb.add || fb.call;
+      out.push(wa(lead, now, fb.call ? `🙏 धन्यवाद! आमची team लवकरच call करेल. लगेच: 📞 ${TEAM_NO}` : `🙏 धन्यवाद! काही मदत लागली तर 📞 ${TEAM_NO}`));
+      out.push(log('MEET', `Call हवा: ${fb.call ? 'हो' : 'नको'}${hot ? ' → 🔥 interested' : ''}`));
+      if (hot) {
+        lead.crm = 'hot';
+        tcall(lead, now, out, `🔥 रविवार demo नंतर interested (${[fb.add ? 'मुलं जोडायची' : '', fb.call ? 'call हवा' : ''].filter(Boolean).join(', ')})`);
+        tpush(out, now, lead, '🔥 शिक्षक interested — call करा', `${lead.name || 'शिक्षक'} · रविवार demo नंतर`);
+      }
+      return true;
+    }
+    return false;
+  }
   function codesText(lead) {
     const d = lead.tdemo;
     return `🎉 तयार${lead.name ? ', ' + lead.name : ''}!\n\n👩‍🏫 *शिक्षक* — Code: *${d.tCode}* · PIN: ${pinOf(d.tPin)}` +
@@ -826,7 +892,7 @@
     lead.cls = 'Teacher (bot)'; lead.awaiting = null;
     out.push(log('TDEMO', `👩‍🏫 शिक्षक (${how}) → वर्ग विचारला.`));
     const rows = (lead.courses || []).slice(0, 10).map((c, i) => ({ id: 'tcls:' + i, label: cleanName(c) }));
-    out.push(wa(lead, now, `नमस्कार 🙏 शिक्षकांचं स्वागत!\nतुमच्यासाठी *शिक्षक account* आणि 3 दिवसांसाठी एक *demo विद्यार्थी* बनवतो — app तुम्ही स्वतः वापरून पाहा.\n\nतुम्ही कोणत्या वर्गाला शिकवता?${rows.length ? ' 👇' : ' (उदा. 8वी NMMS)'}`, rows));
+    out.push(wa(lead, now, `नमस्कार 🙏 शिक्षकांचं स्वागत!\nतुमच्यासाठी *शिक्षक account* आणि रविवारपर्यंत एक *विद्यार्थी account* बनवतो — app तुम्ही स्वतः वापरून पाहा.\n\nतुम्ही कोणत्या वर्गाला शिकवता?${rows.length ? ' 👇' : ' (उदा. 8वी NMMS)'}`, rows));
   }
   function askTeacherName(lead, now, out) {
     lead.tdemo.stage = 'name';
@@ -858,6 +924,9 @@
       return out;
     }
     if (d.stage === 'making') { out.push(wa(lead, now, `⏳ account बनत आहे — थोडं थांबा. उशीर झाला तर 📞 ${TEAM_NO}`)); return out; }
+    // 📅 the Sunday live demo (yes / no, the reminder's "येतो", the questions after it)
+    if (/^(tm|tf):/.test(t) && meetReply(lead, t, now, out)) return out;
+    if (/^(MEET|मीट|LIVE DEMO)\b/.test(up)) { meetAsk(lead, now, out); return out; }
     // the steps
     if (t === 'ts:done') { stepDone(lead, now, out, '✅ बटण'); return out; }
     if (t === 'ts:help') { d.help = now.toISOString(); out.push(wa(lead, now, 'काय अडचण आहे? एका ओळीत लिहा 🙂')); return out; }
@@ -894,8 +963,8 @@
       if (a.exists && d.tCode) return out;   // a retried job after the codes already came
       Object.assign(d, { tCode: a.tCode || d.tCode, tPin: a.tPin || d.tPin || '', sCode: a.sCode || d.sCode || '', sPin: a.sPin || d.sPin || '', course: a.course || d.course || '', until: a.until || d.until || null, bookedAt: d.bookedAt || now.toISOString() });
       d.stage = 'steps'; d.step = 0;
-      out.push(log('TDEMO', a.exists ? `हा नंबर आधीच शिक्षक (${d.tCode}) → नवीन account नाही.` : `Accounts: शिक्षक ${d.tCode} · demo विद्यार्थी ${d.sCode} (3 दिवस).`));
-      tsay(lead, now, out, a.exists ? `🙏 तुमचं शिक्षक account आधीच आहे — Code: *${d.tCode}*${d.sCode ? '\n🎓 Demo विद्यार्थी: *' + d.sCode + '*' : ''}\nPIN आठवत नसेल तर 📞 ${TEAM_NO}\n\nApp चे steps 👇` : codesText(lead));
+      out.push(log('TDEMO', a.exists ? `हा नंबर आधीच शिक्षक (${d.tCode}) → नवीन account नाही.` : `Accounts: शिक्षक ${d.tCode} · विद्यार्थी ${d.sCode} (रविवारपर्यंत).`));
+      tsay(lead, now, out, a.exists ? `🙏 तुमचं शिक्षक account आधीच आहे — Code: *${d.tCode}*${d.sCode ? '\n🎓 विद्यार्थी account: *' + d.sCode + '*' : ''}\nPIN आठवत नसेल तर 📞 ${TEAM_NO}\n\nApp चे steps 👇` : codesText(lead));
       tpush(out, now, lead, '🆕 नवीन शिक्षक — account दिलं', `${lead.name || 'शिक्षक'}${d.course ? ' · ' + cleanName(d.course) : ''}${d.school ? ' · ' + d.school : ''}`);
       stepMsg(lead, now, out);
       return out;
@@ -960,12 +1029,38 @@
       msg('end-12h', prevDay(new Date(end.getTime() - 12 * H)), (out, now) => {
         if (d.orderAt) return;
         tsay(lead, now, out, `⏰ विद्यार्थी account *${d.sCode}* ${untilText(d)} ला बंद होईल (तुमच्या वर्गाचे 10 विद्यार्थी pay झाले की परत चालू).\nतुमच्या विद्यार्थ्यांची accounts: ▾ → ➕ *Students बनवा* — शिक्षकांसाठी खास सूट.\nमाहिती: 📞 ${TEAM_NO}`, [CALL_BTN]);
-        tcall(lead, now, out, 'Demo विद्यार्थी उद्या बंद — अजून विद्यार्थी जोडले नाहीत');
+        tcall(lead, now, out, 'विद्यार्थी account लवकरच बंद — अजून विद्यार्थी जोडले नाहीत');
       });
       msg('end', nextDay(new Date(end.getTime() + 15 * 60e3)), (out, now) => {
         if (d.orderAt) return;
-        tsay(lead, now, out, `🙏 Demo विद्यार्थी बंद झाला. तुमचं *शिक्षक account चालूच* आहे — पेपर बनवा, Videos टाका, विद्यार्थी जोडा.\nतुमचे 10 विद्यार्थी झाले की demo विद्यार्थी परत चालू होतो.\nखास सूट ची माहिती: 📞 ${TEAM_NO}`);
+        tsay(lead, now, out, `🙏 विद्यार्थी account बंद झालं. तुमचं *शिक्षक account चालूच* आहे — पेपर बनवा, Videos टाका, विद्यार्थी जोडा.\nतुमचे 10 विद्यार्थी झाले की विद्यार्थी account परत चालू होतं.\nखास सूट ची माहिती: 📞 ${TEAM_NO}`);
       });
+    }
+    // 📅 the Sunday live demo: the invitation, the reminders, the questions after it
+    if (d.tCode && d.stage === 'steps' && !d.orderAt) {
+      const M = CONFIG.meet;
+      const reg = d.meet && !d.meet.no ? d.meet.for : '';
+      // ask: 20 minutes after the codes the first time (teachers from before this feature: once, from its start);
+      // not "हो" for that Sunday → asked again on the Friday 6 pm before the next one, 3 times at most
+      if (!d.meetAsk && d.bookedAt) {
+        const at = nextDay(new Date(Math.max(new Date(d.bookedAt).getTime() + 20 * 60e3, MEET_FROM)));
+        msg('meet-ask:first', at, (out, now) => { if (!d.meetAsk) meetAsk(lead, now, out); });
+      } else if (d.meetAsk && d.meetAsk.n < 3 && reg !== d.meetAsk.for && !(reg && reg > d.meetAsk.for)) {
+        const next = new Date(meetOf(d.meetAsk.for).getTime() + 7 * 864e5), key = dayKey(next);
+        msg('meet-ask:' + key, atIST(next, 18, 0, -2), (out, now) => { if (!(d.meet && !d.meet.no && d.meet.for >= key)) meetAsk(lead, now, out); });
+      }
+      if (reg) {
+        const s = meetOf(reg);
+        msg('meet-sat:' + reg, atIST(s, 18, 0, -1), (out, now) => {
+          if (isOpen(lead, now)) tsay(lead, now, out, `⏰ उद्या सकाळी 10 वाजता *शिक्षकांसाठी Live Demo*\n🔗 ${M.link}`, [{ id: 'tm:sat', label: '✅ येतो' }]);
+          else { tcall(lead, now, out, `रविवार demo ची आठवण (उद्या 10 वाजता) — WhatsApp वर link पाठवा`); }
+        });
+        msg('meet-sun:' + reg, new Date(s.getTime() - 15 * 60e3), (out, now) => tsay(lead, now, out, `🔔 15 मिनिटांत Live Demo सुरू — 🔗 ${M.link}`));
+        msg('meet-after:' + reg, new Date(s.getTime() + (M.mins + 15) * 60e3), (out, now) => {
+          if (isOpen(lead, now)) tsay(lead, now, out, `🙏 आजचा Live Demo कसा वाटला?`, [{ id: 'tf:good', label: '👍 छान' }, { id: 'tf:more', label: '🤔 अजून समजायचं' }]);
+          else tcall(lead, now, out, 'रविवार demo झाला — कसा वाटला, मुलं जोडायची का, ते विचारा');
+        });
+      }
     }
     const booked = d.bookedAt ? new Date(d.bookedAt) : null;
     if (booked) for (const [k, days] of [['d4', 4], ['d7', 7]]) msg(k, atIST(booked, 11, 0, days), (out, now) => {

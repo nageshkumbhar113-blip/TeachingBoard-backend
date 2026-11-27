@@ -18,7 +18,7 @@ let L = W.createLead({ gid: 'AAAA000001', courses: COURSES }, T0); L.mobile = '9
 let o = W.welcome(L, 'hi', T0);
 ok(btns(o).includes('teacher') && btns(o).includes('cls:0'), 'parent welcome: the classes + "👩‍🏫 मी शिक्षक"', JSON.stringify(btns(o)));
 o = W.inbound(L, 'teacher', at(0.01));
-ok(L.tdemo && L.tdemo.stage === 'cls' && btns(o).includes('tcls:0') && /शिक्षक account/.test(txt(o)) && /3 दिवस/.test(txt(o)), 'मी शिक्षक → teacher account + 3-day demo student offered, the class asked', txt(o));
+ok(L.tdemo && L.tdemo.stage === 'cls' && btns(o).includes('tcls:0') && /शिक्षक account/.test(txt(o)) && /रविवारपर्यंत/.test(txt(o)), 'मी शिक्षक → teacher account + student account till Sunday offered, the class asked', txt(o));
 o = W.inbound(L, 'tcls:0', at(0.02));
 ok(L.tdemo.course === COURSES[0] && L.tdemo.stage === 'name' && /नाव आणि शाळा/.test(txt(o)), 'class tapped → name + school asked');
 o = W.inbound(L, 'संजय पाटील, जि. प. शाळा कागल', at(0.03));
