@@ -882,6 +882,13 @@
   function teacherEvent(lead, data, now) {
     const out = [];
     const d = lead.tdemo || (lead.tdemo = {});
+    // the student account's new end (owner 2026-11-27: old demo students moved to a free account till Sunday) —
+    // the "closes soon" message follows the new date; nothing is sent now
+    if (data.untilNow) {
+      d.until = data.untilNow;
+      out.push(log('TDEMO', `विद्यार्थी account आता free विद्यार्थ्यासारखं — ${untilText(d)} पर्यंत`));
+      return out;
+    }
     if (data.account) {
       const a = data.account;
       if (a.exists && d.tCode) return out;   // a retried job after the codes already came

@@ -38,6 +38,7 @@ const cfgSchema = new mongoose.Schema({
   on: { type: Boolean, default: true },
   hours: { type: Number, default: DEMO_HOURS, min: 1, max: 240 },
   v72: { type: Boolean, default: false },   // the old default 48 h moved to 72 once
+  vFree: { type: Boolean, default: false },   // the old demo students moved to free accounts till Sunday once (2026-11-27)
   course: { type: String, default: '' },   // the ad's course; '' = the first active NMMS course
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }, versionKey: false });
 const DemoConfig = mongoose.models.TeacherDemoConfig || mongoose.model('TeacherDemoConfig', cfgSchema);
@@ -195,9 +196,35 @@ async function syncOne(student, now = new Date()) {
   return { status, until, why };
 }
 let _lastSync = 0;
+// Once (owner 2026-11-27): every teacher's existing demo student becomes a real free student account like a new
+// one — free tests open, the rest locked — open till this Sunday night (the Sunday live demo), named
+// "विद्यार्थी – <school>"; the ones open by 10 paid students or the Admin's switch stay fully open. The bot is told
+// the new end date (its "closes soon" message follows it).
+async function _moveOldDemos(now = new Date()) {
+  const c = await DemoConfig.findOne({ key: 'main' }).lean();
+  if (c && c.vFree) return 0;
+  const sunday = untilSunday(now);
+  let n = 0;
+  for (const s of await User.find({ role: 'student', demo_of_teacher: { $nin: [null, ''] } }).lean()) {
+    if (['10', 'admin'].includes(s.demo_why) && s.expiry_date && new Date(s.expiry_date) > now) continue;   // fully open: stays
+    const set = { free_tier: true };
+    if (!s.demo_until || new Date(s.demo_until) < sunday) set.demo_until = sunday;
+    if (/^School Demo – /.test(s.name || '')) set.name = s.name.replace(/^School Demo – /, 'विद्यार्थी – ');
+    await User.updateOne({ _id: s._id }, { $set: set });
+    s.demo_until = set.demo_until || s.demo_until;
+    invalidateUserCache('student', s.user_id);
+    const t = await User.findOne({ role: 'teacher', teacher_code: s.demo_of_teacher }, 'demo_gid').lean().catch(() => null);
+    if (t && t.demo_gid) notify(t.demo_gid, { untilNow: new Date(s.demo_until).toISOString() });
+    n++;
+  }
+  await DemoConfig.updateOne({ key: 'main' }, { $set: { vFree: true } }, { upsert: true });
+  console.log('[teacherDemo] old demo students → free accounts till ' + sunday.toISOString() + ': ' + n);
+  return n;
+}
 async function syncAll(force = false) {
   if (!force && Date.now() - _lastSync < 30 * 60e3) return;
   _lastSync = Date.now();
+  await _moveOldDemos().catch(err => console.warn('[teacherDemo] move old demos:', err.message));
   for (const s of await User.find({ role: 'student', demo_of_teacher: { $nin: [null, ''] } }).lean()) await syncOne(s).catch(() => {});
 }
 // Admin: switch the school demo student on (till 30 April) / off
