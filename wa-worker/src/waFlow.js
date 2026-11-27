@@ -789,7 +789,7 @@
   function codesText(lead) {
     const d = lead.tdemo;
     return `🎉 तयार${lead.name ? ', ' + lead.name : ''}!\n\n👩‍🏫 *शिक्षक* — Code: *${d.tCode}* · PIN: ${pinOf(d.tPin)}` +
-      (d.sCode ? `\n🎓 *विद्यार्थी account*${d.course ? ' (' + cleanName(d.course) + ')' : ''} — Code: *${d.sCode}* · PIN: ${pinOf(d.sPin)}${d.until ? '\n   पूर्ण account — ' + untilText(d) + ' पर्यंत (रविवार) चालू' : ''}` : '') +
+      (d.sCode ? `\n🎓 *विद्यार्थी account*${d.course ? ' (' + cleanName(d.course) + ')' : ''} — Code: *${d.sCode}* · PIN: ${pinOf(d.sPin)}${d.until ? '\n   विद्यार्थ्यांना मिळतं तसं — free tests उघडे, बाकी lock · ' + untilText(d) + ' पर्यंत (रविवार) चालू' : ''}` : '') +
       `\n\n📲 App: ${CONFIG.play}\n\nआता 7 छोट्या steps — प्रत्येक 1–2 मिनिटं. मी एक-एक सांगतो 👇`;
   }
   // the current step, skipping what the app already said is done

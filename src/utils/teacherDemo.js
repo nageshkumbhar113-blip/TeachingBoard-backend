@@ -20,7 +20,8 @@ const { invalidateUserCache } = require('../middleware/auth');
 
 const DEMO_HOURS = 72;   // owner 2026-11-26: the demo student 3 days (was 48 h)
 const IST_MS = 5.5 * 3600e3;
-// owner 2026-11-27: the teacher's student account is a REAL one (every paper, महा-Test, rank — no "demo" limits) and
+// owner 2026-11-27: the teacher's student account is a REAL one, given like every new student's (free tests open, the
+// rest locked; no extra "demo" limits) and
 // stays open till Sunday night (IST 23:59) — the Sunday 10 am live demo — then closes; it opens again by itself when
 // the teacher has 10 paid students of that course (or the Admin's switch). Booked on a Sunday after the demo → the
 // next Sunday. (The Admin's "hours" setting is no longer used.)
@@ -139,7 +140,7 @@ async function book(body, ip = '') {
     const code = await uniqueStudentCode(school, mobile, async c => !!(await User.exists({ student_code: c })));
     student = new User({
       user_id: `student-${randomUUID()}`, name: `विद्यार्थी – ${school}`.slice(0, 80), role: 'student', student_code: code,
-      mobile, status: 'active', assigned_batches: [course], expiry_date: until, free_tier: false, pin_hash: User.hashPin(sPin),
+      mobile, status: 'active', assigned_batches: [course], expiry_date: until, free_tier: true, pin_hash: User.hashPin(sPin),   // free_tier: like every new student — free tests open, the rest locked (owner 2026-11-27)
       approved_at: now, approved_by: 'demo', request_source: 'demo', school_name: school, referred_by_teacher: teacher.teacher_code,
       hide_in_toppers: true, demo_of_teacher: teacher.teacher_code, demo_until: until,
     });
@@ -183,9 +184,11 @@ async function syncOne(student, now = new Date()) {
   // off = the access date in the past (login then says the access has ended), never 'blocked'
   const status = until ? 'active' : 'off';
   const exp = until || (student.expiry_date && new Date(student.expiry_date) > now ? now : student.expiry_date);
-  const set = { demo_why: why, expiry_date: exp };
+  // till Sunday: a free student like any other (free tests open, the rest locked); 10 paid students / the Admin's
+  // switch: everything open (owner 2026-11-27)
+  const set = { demo_why: why, expiry_date: exp, free_tier: why !== '10' && why !== 'admin' };
   if (student.status !== 'active' && student.status !== 'blocked') set.status = 'active';
-  if (String(student.expiry_date) !== String(exp) || student.demo_why !== why || set.status) {
+  if (String(student.expiry_date) !== String(exp) || student.demo_why !== why || set.status || !!student.free_tier !== set.free_tier) {
     await User.updateOne({ _id: student._id }, { $set: set });
     invalidateUserCache('student', student.user_id);
   }
