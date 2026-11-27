@@ -38,7 +38,10 @@ ok(A.crm === 'call' && /interested/.test(A.tdemo.callWhy || '') && out.some(o =>
 const { lead: B } = teacher(T('2026-11-27T15:00:00'));
 WA.inbound(B, 'hi', T('2026-12-04T10:00:00'));
 out = WA.tick(B, T('2026-12-04T18:01:00'));
-ok(/6 डिसेंबर/.test(texts(out)) && ids(out).includes('tm:yes'), 'not booked → asked again Friday 6 pm for Sunday 6 Dec', texts(out));
+ok(/6 डिसेंबर/.test(texts(out)) && /2 दिवस/.test(texts(out)) && ids(out).includes('tm:yes'), 'not booked → the invite again every evening 6 pm with the days left (Fri 4 Dec: 2 days to Sunday 6 Dec)', texts(out));
+WA.inbound(B, 'hi', T('2026-12-05T09:00:00')); out = WA.tick(B, T('2026-12-05T18:01:00'));
+ok(/उद्या/.test(texts(out)), 'Saturday evening: "उद्या"', texts(out));
+out = WA.tick(B, T('2026-12-05T18:30:00')); ok(!texts(out), 'once a day only');
 const { lead: C } = teacher(T('2026-11-27T09:00:00'));
 WA.inbound(C, 'tm:yes', T('2026-11-27T09:30:00'));
 out = WA.tick(C, T('2026-11-28T18:01:00'));

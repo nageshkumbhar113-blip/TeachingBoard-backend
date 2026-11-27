@@ -258,6 +258,8 @@ export async function deskRoute(env, req, url, who, ctx) {
     const done = list.filter(x => x.status === 'done').length, next = list.find(x => x.status !== 'done' && !x.lock) || null;
     return json({ success: true, data: { me: who, rules: { newMin: R.newMin, staffDisc: R.staffDisc, reasons: R.reasons, hours: R.hours }, alert, callbacks: cbs,
       day: { total: list.length, done, next, items: list }, q: q.length, teachers: teachers.length,
+      // 📅 the coming Sunday's Live Demo: how many teachers booked (Team app home card)
+      meet: { when: (teachers.find(t => t.meet_when) || {}).meet_when || '', booked: teachers.filter(t => t.meet_booked).length, teachers: teachers.length },
       tStuck: teachers.filter(t => t.stuck || t.call_now).slice(0, 10).map(t => ({ gid: t.gid, name: t.name, stage: t.stage, why: t.call_why || '' })),
       today: { calls: c.attempt || 0, talk: c.talk || 0, paying: c.paying || 0, paid: c.paid || 0, wa: (c.wa || 0) + (c.reply || 0) },
       totals: { all: tot.all_n || 0, touched: tot.touched || 0, left: Math.max(0, (tot.all_n || 0) - (tot.touched || 0) - (tot.paid || 0) - (tot.closed || 0)), paid: tot.paid || 0, closed: tot.closed || 0 } } });
@@ -430,6 +432,10 @@ export async function deskAdmin(env, url, ctx) {
     lost: Object.entries(lost).map(([reason, n]) => ({ reason, n })).sort((a, b) => b.n - a.n),
     approvals: disc.filter(x => !x.doneAt),
     teachers: await ctx.teacherFwd(env),
+    // 📅 the coming Sunday's Live Demo: who booked (name, school, village, district, class, students)
+    meet: await (async () => { const tl = ctx.teacherList ? await ctx.teacherList(env) : []; const b = tl.filter(t => t.meet_booked);
+      return { when: (tl.find(t => t.meet_when) || {}).meet_when || '', booked: b.length, teachers: tl.length,
+        list: b.slice(0, 100).map(t => ({ gid: t.gid, name: t.name || '', school: t.school, village: t.village, district: t.district, students: t.students, course: t.course, mobile: t.mobile })) }; })(),
   };
 }
 // when a payment comes in: counted for the member who last handled the family (within 7 days)

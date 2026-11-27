@@ -813,11 +813,13 @@
   const meetFormBtn = lead => !CONFIG.meetFlow ? { url: `${CONFIG.meetPage}?g=${encodeURIComponent(lead.gid || '')}&t=${meetTok(lead)}`, label: '📅 बुक करा' } : ({ id: 'tflow', label: '📅 बुक करा', flow: { id: CONFIG.meetFlow, cta: '📅 बुक करा', token: lead.gid || 'x', screen: 'BOOK',
     data: { name: String(lead.name && lead.name !== 'तुमचा पाल्य' ? lead.name : ''), school: String((lead.tdemo && lead.tdemo.school) || '') } } });
   const MEET_POINTS = '✅ 1 मिनिटात पेपर कसा बनवायचा\n✅ मुलांचे गुण आणि कमकुवत धडे तुमच्या फोनवर\n✅ तुमच्या प्रश्नांची उत्तरं live';
-  function meetAsk(lead, now, out) {
+  function meetAsk(lead, now, out, daily) {
     const d = lead.tdemo, s = meetStart(now);
+    const days = Math.max(0, Math.round((atIST(s, 0, 0, 0).getTime() - atIST(now, 0, 0, 0).getTime()) / 864e5));
+    const left = days === 0 ? '⏳ *आज* सकाळी 10 वाजता!' : days === 1 ? '⏳ *उद्या* सकाळी 10 वाजता!' : `⏳ अजून *${days} दिवस* बाकी`;
     d.meetAsk = { for: dayKey(s), at: now.toISOString(), n: ((d.meetAsk && d.meetAsk.n) || 0) + 1 };
-    if (formOn()) tsay(lead, now, out, `📅 *शिक्षकांसाठी Live Demo*\nरविवार, ${meetDay(s)} · सकाळी 10 वाजता · Google Meet (30 मिनिटं)\n\n${MEET_POINTS}\n\nतुमची जागा बुक करण्यासाठी खालचं बटण दाबा 👇`, [meetFormBtn(lead)]);
-    else tsay(lead, now, out, `📅 *शिक्षकांसाठी Live Demo* — रविवार, ${meetDay(s)} · सकाळी 10 वाजता · Google Meet (30 मिनिटं)\n\n${MEET_POINTS}\n\nजागा बुक करायची?`, [{ id: 'tm:yes', label: '📅 बुक करा' }]);
+    if (formOn()) tsay(lead, now, out, `📅 *शिक्षकांसाठी Live Demo*\nरविवार, ${meetDay(s)} · सकाळी 10 वाजता · Google Meet (30 मिनिटं)\n${daily ? left + '\n' : ''}\n${MEET_POINTS}\n\nतुमची जागा बुक करण्यासाठी खालचं बटण दाबा 👇`, [meetFormBtn(lead)]);
+    else tsay(lead, now, out, `📅 *शिक्षकांसाठी Live Demo* — रविवार, ${meetDay(s)} · सकाळी 10 वाजता · Google Meet (30 मिनिटं)\n${daily ? left + '\n' : ''}\n${MEET_POINTS}\n\nजागा बुक करायची?`, [{ id: 'tm:yes', label: '📅 बुक करा' }]);
     out.push(log('MEET', `रविवार demo (${dayKey(s)}) साठी निमंत्रण.`));
   }
   const bookedText = (lead, s) => `✅ बुक झालं${lead.name && lead.name !== 'तुमचा पाल्य' ? ', *' + lead.name + '* सर/मॅडम' : ''}!\n📅 रविवार, ${meetDay(s)} · सकाळी 10 वाजता\n\n⚠️ खालचं *🎥 Meet Join करा* बटण *रविवारी सकाळी 9:55 ला* दाबा — आत्ता नाही.\n⏰ शनिवारी संध्याकाळी आणि रविवारी 9:45 ला आठवण पाठवतो 🙂`;
@@ -1102,9 +1104,14 @@
       if (!d.meetAsk && !d.meet && d.bookedAt) {
         const at = nextDay(new Date(Math.max(new Date(d.bookedAt).getTime() + 60e3, MEET_FROM)));   // at once (owner: 20 min was too late)
         msg('meet-ask:first', at, (out, now) => { if (!d.meetAsk) meetAsk(lead, now, out); });
-      } else if (d.meetAsk && d.meetAsk.n < 3 && reg !== d.meetAsk.for && !(reg && reg > d.meetAsk.for)) {
-        const next = new Date(meetOf(d.meetAsk.for).getTime() + 7 * 864e5), key = dayKey(next);
-        msg('meet-ask:' + key, atIST(next, 18, 0, -2), (out, now) => { if (!(d.meet && !d.meet.no && d.meet.for >= key)) meetAsk(lead, now, out); });
+      } else if (d.meetAsk && d.meetAsk.n < 15 && !(d.meetFb && d.meetFb.at)) {   // answered after a demo = came: no more
+        // not booked for the coming Sunday (never booked, or the Sunday they booked has passed): the same invite with
+        // its 📅 बुक करा button once a day at 6 pm, with the days left (owner 2026-11-27) — inside the free window only
+        // the next 7 evenings (a day the bot missed — server down — does not stop the ones after it)
+        for (let k = 1; k <= 7; k++) {
+          const next = atIST(new Date(d.meetAsk.at), 18, 0, k), key = dayKey(meetStart(next));
+          if (!(reg && reg >= key)) msg('meet-day:' + dayKey(next), next, (out, now) => { if (!(d.meet && !d.meet.no && d.meet.for >= dayKey(meetStart(now)))) meetAsk(lead, now, out, true); });
+        }
       }
       if (reg) {
         const s = meetOf(reg);

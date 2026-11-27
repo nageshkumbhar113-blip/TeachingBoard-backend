@@ -112,6 +112,12 @@ try {
   await waitSent(n + 2);
   ok(/SUN321/.test(allSince(n)) && /Step 1\/7/.test(allSince(n)) && !/जागा बुक करा/.test(allSince(n)), 'codes + Step 1; no second invite (booked)', allSince(n));
   const again = await (await fetch(W + '/meet/info?g=' + g + '&t=' + t)).json();
+  const home = await crm('desk/home');
+  ok(home.data.meet && home.data.meet.booked === 1 && /रविवार/.test(home.data.meet.when), 'Team home: 📅 1 teacher booked', JSON.stringify(home.data.meet));
+  const tl = await crm('list?list=teacher');
+  ok((tl.data || []).some(x => x.gid === g && /📅 Demo बुक/.test(x.stage) && x.district === 'कोल्हापूर'), 'teacher list: 📅 Demo बुक + district', JSON.stringify((tl.data || []).find(x => x.gid === g)));
+  const adm = await crm('desk/admin');
+  ok(adm.data.meet && adm.data.meet.list.some(x => x.name === 'सुनीता जाधव' && x.students === '21-50'), 'Admin desk: the booked list', JSON.stringify(adm.data.meet));
   ok(again.success && again.data.booked && again.data.hasAccount, 'the page opened again: "booked" view', JSON.stringify(again));
 } catch (e) { console.log('CRASH', e && e.stack); fails++;
 

@@ -484,8 +484,10 @@ async function teacherList(env) {
     const callNow = r.crm === 'call' && ms(d.callAt) > touched;
     const T = WA.TSTEPS, step = t.doneAt ? T.length : Math.min(t.step || 0, T.length);
     const stage = t.doneAt || t.orderAt ? '💳 विद्यार्थी जोडले' : t.stage === 'steps' ? `Step ${step + 1}/${T.length} · ${T[step] ? T[step].title : ''}` : t.stage === 'making' ? '⏳ account बनत आहे' : t.stage === 'cls' || t.stage === 'name' ? '💬 माहिती देत आहे' : t.paperAt ? '📄 पेपर बनवला' : t.tLogin ? '✅ login झाला' : '🆕 बुक केलं';
+    const mi = WA.meetInfo(d, now);   // 📅 booked for the coming Sunday's Live Demo?
     rows.push({ gid: r.gid, name: r.name, cls: r.cls, mobile: r.mobile, crm: r.crm, last_in: r.last_in, created_at: r.created_at, updated_at: r.updated_at,
-      teacher: true, school: t.school || '', booked: t.bookedAt, stage, step, steps: T.length, stuck: t.stuck && !t.doneAt ? t.stuck : null, call_why: t.callWhy || '', course: t.course || '', call_now: callNow, open: WA.isOpen(d, now), sent: d.teamSent || 0,
+      teacher: true, school: t.school || '', village: t.village || '', district: t.district || '', students: t.students || '', meet_booked: mi.booked, meet_when: mi.when,
+      booked: t.bookedAt, stage: (mi.booked ? '📅 Demo बुक · ' : '') + stage, step, steps: T.length, stuck: t.stuck && !t.doneAt ? t.stuck : null, call_why: t.callWhy || '', course: t.course || '', call_now: callNow, open: WA.isOpen(d, now), sent: d.teamSent || 0,
       why: callNow ? (t.callWhy ? '📞 ' + t.callWhy : '📞 आत्ता call करा') : '', when: callNow ? 'लगेच' : '', _k: (callNow ? 0 : 1e15) - ms(t.bookedAt) });
   }
   return rows.sort((a, b) => a._k - b._k).slice(0, 300).map(({ _k, ...x }) => x);
